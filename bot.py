@@ -39,6 +39,7 @@ AFTER_NO_CHANNEL = (
 
 
 def api(method, **params):
+    params = {k: v for k, v in params.items() if v is not None}
     try:
         r = requests.post(API + "/" + method, json=params, timeout=25)
         j = r.json()
@@ -78,7 +79,10 @@ def give_magnet(chat_id):
     if not MAGNET_URL:
         send(chat_id, "Файл тимчасово недоступний, напишіть Ірі в дірект ❤️")
         return
-    api("sendDocument", chat_id=chat_id, document=MAGNET_URL)
+    r = api("sendDocument", chat_id=chat_id, document=MAGNET_URL)
+    if not r:
+        send(chat_id, "Файл тимчасово недоступний, напишіть Ірі в дірект ❤️")
+        return
     send(chat_id, AFTER if CHANNEL_URL else AFTER_NO_CHANNEL, channel_kb())
 
 
