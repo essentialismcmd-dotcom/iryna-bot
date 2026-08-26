@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Бот лійки Iryna Rul. Webhook, без бази.
-Новий користувач падає адміну окремим повідомленням.
+Новий користувач і заявка на повний гайд падають адміну окремим повідомленням.
 Адмін може надіслати боту PDF, і бот поверне file_id для змінної MAGNET_URL.
 """
 
@@ -14,6 +14,19 @@ ADMIN_ID    = int(os.getenv("ADMIN_ID", "0"))
 CHANNEL_URL = os.getenv("CHANNEL_URL", "").strip()
 MAGNET_URL  = os.getenv("MAGNET_URL", "").strip()
 SECRET      = os.getenv("WEBHOOK_SECRET", "hook")
+
+
+def _ids(raw):
+    out = []
+    for part in raw.replace(" ", "").split(","):
+        try:
+            out.append(int(part))
+        except ValueError:
+            pass
+    return out
+
+
+NOTIFY_IDS = _ids(os.getenv("NOTIFY_IDS", "")) or ([ADMIN_ID] if ADMIN_ID else [])
 
 API = "https://api.telegram.org/bot" + TOKEN
 app = Flask(__name__)
@@ -29,12 +42,15 @@ HELLO = (
 AFTER = (
     "Готово, файл вище ❤️\n\n"
     "Копіюйте розстановку, віддайте схемам 5 хвилин на студії і подивіться, що вийде.\n\n"
-    "У каналі «Iryna Rul | для своїх» я розбираю світло, ретуш і бекстейджі без води."
+    "У каналі «Iryna Rul | для своїх» я розбираю світло, ретуш і бекстейджі без води. "
+    "А якщо хочете всі мої схеми, а не три, тисніть другу кнопку."
 )
-AFTER_NO_CHANNEL = (
-    "Готово, файл вище ❤️\n\n"
-    "Копіюйте розстановку, віддайте схемам 5 хвилин на студії і подивіться, що вийде.\n\n"
-    "Напишіть, як спробуєте, мені цікаво, що вийшло."
+GUIDE = (
+    "Класно ❤️\n\n"
+    "У повному гайді «Світло» зібрані всі мої робочі схеми: від чистої комерції "
+    "до кольорової градації світла. Кожна з 3D-розстановкою з двох ракурсів, "
+    "налаштуваннями і кадрами з реальних зйомок.\n\n"
+    "Зараз напишу вам особисто і розкажу деталі."
 )
 
 
@@ -60,19 +76,24 @@ def magnet_kb():
     return {"inline_keyboard": [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]}
 
 
-def channel_kb():
-    if not CHANNEL_URL:
-        return None
-    return {"inline_keyboard": [[{"text": "Канал «для своїх»", "url": CHANNEL_URL}]]}
+def after_kb():
+    rows = []
+    if CHANNEL_URL:
+        rows.append([{"text": "Канал «для своїх»", "url": CHANNEL_URL}])
+    rows.append([{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}])
+    return {"inline_keyboard": rows}
 
 
-def notify_admin(u, source):
-    if not ADMIN_ID:
-        return
+def who(u):
     uname = u.get("username")
-    who = "@" + uname if uname else "id " + str(u.get("id"))
+    tag = "@" + uname if uname else "без юзернейма"
     name = " ".join([x for x in [u.get("first_name"), u.get("last_name")] if x]) or "без імені"
-    send(ADMIN_ID, "Новий у боті: " + name + ", " + who + "\nМітка: " + (source or "без мітки"))
+    return name + ", " + tag + ", id " + str(u.get("id"))
+
+
+def notify(text):
+    for cid in NOTIFY_IDS:
+        send(cid, text)
 
 
 def give_magnet(chat_id):
@@ -83,7 +104,7 @@ def give_magnet(chat_id):
     if not r:
         send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ❤️")
         return
-    send(chat_id, AFTER if CHANNEL_URL else AFTER_NO_CHANNEL, channel_kb())
+    send(chat_id, AFTER, after_kb())
 
 
 @app.post("/" + SECRET)
@@ -101,15 +122,21 @@ def hook():
             text = (m.get("text") or "").strip()
             if text.startswith("/start"):
                 parts = text.split(None, 1)
-                notify_admin(u, parts[1].strip() if len(parts) > 1 else "")
+                src = parts[1].strip() if len(parts) > 1 else ""
+                notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"))
                 send(chat_id, HELLO, magnet_kb())
             else:
                 send(chat_id, "Щоб забрати добірку, тисніть кнопку нижче ❤️", magnet_kb())
         elif "callback_query" in upd:
             cq = upd["callback_query"]
             api("answerCallbackQuery", callback_query_id=cq["id"])
-            if cq.get("data") == "magnet":
-                give_magnet(cq["message"]["chat"]["id"])
+            data = cq.get("data")
+            chat_id = cq["message"]["chat"]["id"]
+            if data == "magnet":
+                give_magnet(chat_id)
+            elif data == "guide":
+                notify("ЗАЯВКА НА ПОВНИЙ ГАЙД\n" + who(cq.get("from", {})))
+                send(chat_id, GUIDE)
     except Exception as e:
         log.exception("update failed: %s", e)
     return "ok"
