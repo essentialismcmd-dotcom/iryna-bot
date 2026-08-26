@@ -236,7 +236,8 @@ def render_tasks(name, items):
     body = []
     for i in items:
         body.append(("✅ #" if i["done"] else "▫️ #") + str(i["n"]) + " " + i["t"])
-    foot = "\n\nЩоб додати задачу, напишіть плюс і текст.\nПлюс плюс і текст додає задачу Ірі."
+    foot = ("\n\nВсе, що стосується задач, просто надсилайте сюди: фото, схеми, відео, правки. "
+            "Я передам далі.\n\nЩоб додати задачу, напишіть плюс і текст.")
     return head + "\n".join(body) + foot
 
 
@@ -315,7 +316,7 @@ def hook():
             uid = u.get("id")
             text = (m.get("text") or "").strip()
             doc = m.get("document")
-            if doc and uid in NOTIFY_IDS:
+            if doc and uid == ADMIN_ID:
                 send(chat_id, "file_id цього файлу:\n" + doc.get("file_id", "?"))
                 return "ok"
             if uid in TEAM:
@@ -342,6 +343,14 @@ def hook():
                 if text.startswith("/start"):
                     send(chat_id, "Задачник тут. Напишіть /todo, і я покажу відкриті задачі.")
                     return "ok"
+                for cid in NOTIFY_IDS:
+                    if cid == uid:
+                        continue
+                    api("forwardMessage", chat_id=cid, from_chat_id=chat_id,
+                        message_id=m.get("message_id"))
+                    send(cid, "Від " + name + ", вище")
+                if uid != ADMIN_ID:
+                    send(chat_id, "Отримала, передаю далі ❤️")
                 return "ok"
             if text.startswith("/start"):
                 parts = text.split(None, 1)
