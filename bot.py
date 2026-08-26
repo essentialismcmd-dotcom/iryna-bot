@@ -326,6 +326,8 @@ def hook():
             chat_id = m["chat"]["id"]
             u = m.get("from", {})
             uid = u.get("id")
+            if u.get("is_bot"):
+                return "ok"
             text = (m.get("text") or "").strip()
             doc = m.get("document")
             if doc and uid == ADMIN_ID:
