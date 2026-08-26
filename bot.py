@@ -77,11 +77,11 @@ def notify_admin(u, source):
 
 def give_magnet(chat_id):
     if not MAGNET_URL:
-        send(chat_id, "Файл тимчасово недоступний, напишіть Ірі в дірект ❤️")
+        send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ❤️")
         return
     r = api("sendDocument", chat_id=chat_id, document=MAGNET_URL)
     if not r:
-        send(chat_id, "Файл тимчасово недоступний, напишіть Ірі в дірект ❤️")
+        send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ❤️")
         return
     send(chat_id, AFTER if CHANNEL_URL else AFTER_NO_CHANNEL, channel_kb())
 
