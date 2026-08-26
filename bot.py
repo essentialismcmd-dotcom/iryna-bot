@@ -20,6 +20,7 @@ MONO_TOKEN    = os.getenv("MONO_TOKEN", "").strip()
 MONO_JAR      = os.getenv("MONO_JAR", "").strip()
 TEST_MODE     = os.getenv("TEST_MODE", "").strip().lower() in ("1", "true", "yes", "on")
 TASKS_ON      = os.getenv("TASKS_ON", "").strip().lower() in ("1", "true", "yes", "on")
+IRA_ON        = os.getenv("IRA_ON", "").strip().lower() in ("1", "true", "yes", "on")
 SECRET        = os.getenv("WEBHOOK_SECRET", "hook")
 BASE_URL      = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
 
@@ -40,6 +41,10 @@ if ADMIN_ID:
     TEAM[ADMIN_ID] = "Яро"
 if IRA_ID:
     TEAM[IRA_ID] = "Іра"
+
+def team_on(uid):
+    return TASKS_ON if uid == ADMIN_ID else IRA_ON
+
 
 API = "https://api.telegram.org/bot" + TOKEN
 MONO = "https://api.monobank.ua"
@@ -132,7 +137,7 @@ def order_code(uid, tier):
 
 
 CODE_RE = re.compile(r"IR([0-9A-Z]+)-([123])", re.I)
-TASK_RE = re.compile(r"^([✅▫️⬜\s]*)#(\d+)\s+(.*)$")
+TASK_RE = re.compile(r"^([✅▫️⬜▶️\s]*)#(\d+)\s+(.*?)(?:\s+←.*)?$")
 
 
 def api(method, **params):
@@ -234,8 +239,15 @@ def render_tasks(name, items):
     left = [i for i in items if not i["done"]]
     head = "Задачі, " + name + "\n" + "Відкрито: " + str(len(left)) + " з " + str(len(items)) + "\n\n"
     body = []
+    first = True
     for i in items:
-        body.append(("✅ #" if i["done"] else "▫️ #") + str(i["n"]) + " " + i["t"])
+        if i["done"]:
+            body.append("✅ #" + str(i["n"]) + " " + i["t"])
+        elif first:
+            body.append("▶️ #" + str(i["n"]) + " " + i["t"] + "   ← наступна")
+            first = False
+        else:
+            body.append("▫️ #" + str(i["n"]) + " " + i["t"])
     foot = ("\n\nВсе, що стосується задач, просто надсилайте сюди: фото, схеми, відео, правки. "
             "Я передам далі.\n\nЩоб додати задачу, напишіть плюс і текст.")
     return head + "\n".join(body) + foot
@@ -320,7 +332,7 @@ def hook():
                 send(chat_id, "file_id цього файлу:\n" + doc.get("file_id", "?"))
                 return "ok"
             if uid in TEAM:
-                if not TASKS_ON:
+                if not team_on(uid):
                     if text.startswith("/start"):
                         send(chat_id, "Задачник поки вимкнений.")
                     return "ok"
@@ -367,7 +379,7 @@ def hook():
             chat_id = cq["message"]["chat"]["id"]
             u = cq.get("from", {})
             uid = u.get("id")
-            if data.startswith("td:") and uid in TEAM and TASKS_ON:
+            if data.startswith("td:") and uid in TEAM and team_on(uid):
                 n = int(data.split(":")[1])
                 title = close_task(uid, TEAM[uid], n)
                 for cid in NOTIFY_IDS:
