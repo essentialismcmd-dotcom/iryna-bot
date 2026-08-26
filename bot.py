@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Bot для лійки Iryna Rul. Webhook, без бази.
-Кожен новий користувач падає адміну окремим повідомленням.
+Бот лійки Iryna Rul. Webhook, без бази.
+Новий користувач падає адміну окремим повідомленням.
+Адмін може надіслати боту PDF, і бот поверне file_id для змінної MAGNET_URL.
 """
 
 import os, logging
@@ -20,8 +21,8 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("bot")
 
 HELLO = (
-    "Привіт ❤️ Це бот Іри Рул.\n\n"
-    "Тут можна забрати добірку «3 схеми світла з одного сетапу»: "
+    "Привіт, це Ірина Руль ❤️\n\n"
+    "Тут можна забрати мою добірку «Три схеми світла з одного сетапу»: "
     "три різні картинки за одну зйомку, без додаткового обладнання.\n\n"
     "Тисніть кнопку нижче, і я одразу надішлю файл."
 )
@@ -55,7 +56,7 @@ def send(chat_id, text, markup=None):
 
 
 def magnet_kb():
-    return {"inline_keyboard": [[{"text": "Забрати 3 схеми світла", "callback_data": "magnet"}]]}
+    return {"inline_keyboard": [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]}
 
 
 def channel_kb():
@@ -70,8 +71,7 @@ def notify_admin(u, source):
     uname = u.get("username")
     who = "@" + uname if uname else "id " + str(u.get("id"))
     name = " ".join([x for x in [u.get("first_name"), u.get("last_name")] if x]) or "без імені"
-    src = source or "без мітки"
-    send(ADMIN_ID, "Новий у боті: " + name + ", " + who + "\nМітка: " + src)
+    send(ADMIN_ID, "Новий у боті: " + name + ", " + who + "\nМітка: " + (source or "без мітки"))
 
 
 def give_magnet(chat_id):
@@ -90,6 +90,10 @@ def hook():
             m = upd["message"]
             chat_id = m["chat"]["id"]
             u = m.get("from", {})
+            doc = m.get("document")
+            if doc and u.get("id") == ADMIN_ID:
+                send(chat_id, "file_id цього файлу:\n" + doc.get("file_id", "?"))
+                return "ok"
             text = (m.get("text") or "").strip()
             if text.startswith("/start"):
                 parts = text.split(None, 1)
@@ -122,4 +126,3 @@ def setup():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
-
