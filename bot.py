@@ -281,6 +281,22 @@ def dump_db(chat_id):
 COMMIT = (os.getenv("RENDER_GIT_COMMIT", "") or "")[:7]
 
 
+def keepalive_state():
+    """
+    Render присипляє безкоштовний сервіс після 15 хвилин тиші, і тоді перше
+    повідомлення чекає близько хвилини. Єдине, що цьому заважає, це самопінг,
+    і досі не було способу дізнатись, чи він живий.
+    """
+    if not BASE_URL:
+        return "НЕ СТЕРЕЖЕТЬСЯ, RENDER_EXTERNAL_URL не заданий, сервіс засинає"
+    last = KEEPALIVE.get("last_ok")
+    if not last:
+        return "самопінг ще не відпрацював, перший буде за 10 хвилин після старту"
+    mins = int((time.time() - last) / 60)
+    tail = ", збоїв підряд: " + str(KEEPALIVE["fails"]) if KEEPALIVE["fails"] else ""
+    return "самопінг живий, останній " + str(mins) + " хв тому" + tail
+
+
 def status_text():
     """
     Рядок стану для Yaro. Спершу те, що ламається, потім те, що заробляє.
@@ -301,6 +317,7 @@ def status_text():
         "Банка: " + ("підключена" if PAY_URL else "не підключена"),
         "Бот Іри: " + ("увімкнений" if IRA_ON else "вимкнений"),
         "Гайд: " + ("на місці" if GUIDE_FILE_ID else "GUIDE_FILE_ID не заданий"),
+        "Сон сервісу: " + keepalive_state(),
     ]
     if d and d.get("now"):
         paid = d.get("paid") or {}
@@ -748,6 +765,7 @@ def show_inbox(chat_id):
 @app.post("/" + SECRET)
 def hook():
     upd = request.get_json(silent=True) or {}
+    store.session_begin()
     try:
         if "message" in upd:
             m = upd["message"]
@@ -1002,6 +1020,8 @@ def hook():
                 send(chat_id, "Видано" if ok else "Не вдалося, перевір GUIDE_FILE_ID")
     except Exception as e:
         log.exception("update failed: %s", e)
+    finally:
+        store.session_end()
     return "ok"
 
 
@@ -1131,13 +1151,21 @@ def mono_poll():
             log.warning("mono: %s", e)
 
 
+KEEPALIVE = {"last_ok": None, "fails": 0}
+
+
 def keepalive():
     while True:
         time.sleep(600)
         try:
-            requests.get(BASE_URL + "/", timeout=15)
+            r = requests.get(BASE_URL + "/", timeout=15)
+            if r.status_code == 200:
+                KEEPALIVE["last_ok"] = time.time()
+                KEEPALIVE["fails"] = 0
+            else:
+                KEEPALIVE["fails"] += 1
         except Exception:
-            pass
+            KEEPALIVE["fails"] += 1
 
 
 if BASE_URL:

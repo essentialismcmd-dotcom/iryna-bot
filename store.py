@@ -119,20 +119,50 @@ create table if not exists kv (
 """
 
 
-@contextmanager
-def _conn():
+_local = threading.local()
+
+
+def _open():
     err = None
-    c = None
     for attempt in range(3):
         try:
-            c = psycopg.connect(DSN, connect_timeout=10, autocommit=True, row_factory=dict_row)
-            err = None
-            break
+            return psycopg.connect(DSN, connect_timeout=10, autocommit=True, row_factory=dict_row)
         except Exception as e:
             err = e
             time.sleep(1.5 * (attempt + 1))
-    if c is None:
-        raise err
+    raise err
+
+
+def session_begin():
+    """
+    Одне зʼєднання на весь запит замість одного на операцію.
+    Обробка повідомлення робить пʼять-шість звернень до бази, і на сплячому
+    Neon кожне з них чекало пробудження окремо. Між запитами зʼєднання не
+    лишається відкритим, тому база й далі засинає, як і задумано.
+    """
+    _local.conn = None
+    _local.depth = getattr(_local, "depth", 0) + 1
+
+
+def session_end():
+    c = getattr(_local, "conn", None)
+    _local.conn = None
+    _local.depth = 0
+    if c is not None:
+        try:
+            c.close()
+        except Exception:
+            pass
+
+
+@contextmanager
+def _conn():
+    if getattr(_local, "depth", 0):
+        if getattr(_local, "conn", None) is None:
+            _local.conn = _open()
+        yield _local.conn
+        return
+    c = _open()
     try:
         yield c
     finally:
@@ -173,6 +203,14 @@ def q(sql, args=(), fetch=None):
             return None
     except Exception as e:
         log.warning("запит впав: %s | %s", e, sql.strip().split("\n")[0])
+        # Побите зʼєднання не тягнемо в наступні операції того самого запиту.
+        c = getattr(_local, "conn", None)
+        if c is not None:
+            _local.conn = None
+            try:
+                c.close()
+            except Exception:
+                pass
         return None if fetch != "all" else []
 
 
