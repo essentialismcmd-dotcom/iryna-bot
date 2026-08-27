@@ -450,6 +450,19 @@ def export_all():
     return json.dumps(out, ensure_ascii=False, indent=1, default=str).encode("utf-8")
 
 
+def stats_day():
+    """Цифри за добу, для рядка стану."""
+    return {
+        "starts": q("""select count(*) as n from users
+                       where created_at > now() - interval '24 hours'""", fetch="one"),
+        "magnet": q("""select count(*) as n from users
+                       where got_magnet_at > now() - interval '24 hours'""", fetch="one"),
+        "paid": q("""select count(*) as n, coalesce(sum(amount_uah), 0) as uah
+                     from purchases where paid_at > now() - interval '24 hours'""", fetch="one"),
+        "now": q("select now() as t", fetch="one"),
+    }
+
+
 def stats():
     return {
         "users": q("select count(*) as n from users", fetch="one"),

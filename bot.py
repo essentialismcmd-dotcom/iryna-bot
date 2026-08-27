@@ -248,6 +248,43 @@ def dump_db(chat_id):
         send(chat_id, "Не вдалося надіслати файл.")
 
 
+COMMIT = (os.getenv("RENDER_GIT_COMMIT", "") or "")[:7]
+
+
+def status_text():
+    """
+    Рядок стану для Yaro. Сьогодні ми двічі не знали, чи деплой доїхав,
+    тому комміт тут не прикраса.
+    """
+    lines = []
+    d = store.stats_day() if store.ON else None
+    if not store.ON:
+        lines.append("База: ВИМКНЕНА, DATABASE_URL не заданий")
+    elif not d or not d.get("now"):
+        lines.append("База: НЕ ВІДПОВІДАЄ, дивись логи")
+    else:
+        lines.append("База: жива")
+    lines.append("Комміт: " + (COMMIT or "невідомий, RENDER_GIT_COMMIT не заданий"))
+    lines.append("")
+    if d and d.get("now"):
+        paid = d.get("paid") or {}
+        lines.append("За добу")
+        lines.append("  стартів: " + str((d.get("starts") or {}).get("n", 0)))
+        lines.append("  забрали магніт: " + str((d.get("magnet") or {}).get("n", 0)))
+        lines.append("  оплат: " + str(paid.get("n", 0)) + " на " + str(paid.get("uah", 0)) + " грн")
+        lines.append("")
+        lines.append("Нерозкладеного від Іри: " + str(store.inbox_count()))
+        lines.append("Відкритих задач: " + str(len(store.tasks_of("Яро", only_open=True) or [])))
+    lines.append("")
+    flags = []
+    flags.append("тестовий режим УВІМКНЕНИЙ" if TEST_MODE else "тестовий режим вимкнений")
+    flags.append("банка підключена" if PAY_URL else "банка НЕ підключена")
+    flags.append("бот Іри увімкнений" if IRA_ON else "бот Іри вимкнений")
+    flags.append("файл гайду на місці" if GUIDE_FILE_ID else "GUIDE_FILE_ID НЕ заданий")
+    lines.append("\n".join("· " + f for f in flags))
+    return "\n".join(lines)
+
+
 def stats_text():
     if not store.ON:
         return "Сховище вимкнене, DATABASE_URL не заданий."
@@ -676,6 +713,9 @@ def hook():
                 if uid == ADMIN_ID and text.startswith("/inbox"):
                     show_inbox(chat_id)
                     return "ok"
+                if uid == ADMIN_ID and (text.split(" ")[0] == "/status" or text.lower() == "стан"):
+                    send(chat_id, status_text())
+                    return "ok"
                 if uid != ADMIN_ID:
                     low = text.lower()
                     if low in ("мої задачі", "мои задачи"):
@@ -709,7 +749,10 @@ def hook():
                 store.touch_user(u)
                 store.log_event(uid, "message", {"text": text[:300]})
                 notify("Повідомлення в боті від " + who(u) + ":\n" + (text or "[не текст]"))
-                send(chat_id, "Прийняла, зараз подивлюсь і відповім ❤️")
+                # Без обіцянки часу: це повідомлення йде в сповіщення Yaro, а не до Іри,
+                # тому «зараз відповім» тут було обіцянкою, якої ніхто не виконує.
+                send(chat_id, "Прийняла ❤️ Якщо це про зйомку, напишіть в інстаграм, "
+                              "там відповідаю швидше: @iryna_rul_photographer")
         elif "callback_query" in upd:
             cq = upd["callback_query"]
             api("answerCallbackQuery", callback_query_id=cq["id"])
