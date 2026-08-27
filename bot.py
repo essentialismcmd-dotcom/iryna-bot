@@ -253,36 +253,70 @@ COMMIT = (os.getenv("RENDER_GIT_COMMIT", "") or "")[:7]
 
 def status_text():
     """
-    Рядок стану для Yaro. Сьогодні ми двічі не знали, чи деплой доїхав,
-    тому комміт тут не прикраса.
+    Рядок стану для Yaro. Спершу те, що ламається, потім те, що заробляє.
+    Прапорці словами: галочка не каже, добре це чи погано.
+    Комміт тут не прикраса, сьогодні ми двічі не знали, чи деплой доїхав.
     """
-    lines = []
     d = store.stats_day() if store.ON else None
     if not store.ON:
-        lines.append("База: ВИМКНЕНА, DATABASE_URL не заданий")
+        db = "вимкнена, DATABASE_URL не заданий"
     elif not d or not d.get("now"):
-        lines.append("База: НЕ ВІДПОВІДАЄ, дивись логи")
+        db = "НЕ ВІДПОВІДАЄ, дивись логи"
     else:
-        lines.append("База: жива")
-    lines.append("Комміт: " + (COMMIT or "невідомий, RENDER_GIT_COMMIT не заданий"))
-    lines.append("")
+        db = "жива"
+    lines = [
+        "База: " + db,
+        "Комміт: " + (COMMIT or "невідомий, RENDER_GIT_COMMIT не задана"),
+        "Тестовий режим: " + ("увімкнений" if TEST_MODE else "вимкнений"),
+        "Банка: " + ("підключена" if PAY_URL else "не підключена"),
+        "Бот Іри: " + ("увімкнений" if IRA_ON else "вимкнений"),
+        "Гайд: " + ("на місці" if GUIDE_FILE_ID else "GUIDE_FILE_ID не заданий"),
+    ]
     if d and d.get("now"):
         paid = d.get("paid") or {}
-        lines.append("За добу")
-        lines.append("  стартів: " + str((d.get("starts") or {}).get("n", 0)))
-        lines.append("  забрали магніт: " + str((d.get("magnet") or {}).get("n", 0)))
-        lines.append("  оплат: " + str(paid.get("n", 0)) + " на " + str(paid.get("uah", 0)) + " грн")
         lines.append("")
-        lines.append("Нерозкладеного від Іри: " + str(store.inbox_count()))
-        lines.append("Відкритих задач: " + str(len(store.tasks_of("Яро", only_open=True) or [])))
-    lines.append("")
-    flags = []
-    flags.append("тестовий режим УВІМКНЕНИЙ" if TEST_MODE else "тестовий режим вимкнений")
-    flags.append("банка підключена" if PAY_URL else "банка НЕ підключена")
-    flags.append("бот Іри увімкнений" if IRA_ON else "бот Іри вимкнений")
-    flags.append("файл гайду на місці" if GUIDE_FILE_ID else "GUIDE_FILE_ID НЕ заданий")
-    lines.append("\n".join("· " + f for f in flags))
+        lines.append("За добу: стартів " + str((d.get("starts") or {}).get("n", 0))
+                     + " · магніт " + str((d.get("magnet") or {}).get("n", 0))
+                     + " · оплат " + str(paid.get("n", 0)) + " на " + str(paid.get("uah", 0)) + " грн")
+        lines.append("Нерозкладеного: " + str(store.inbox_count())
+                     + " · відкритих задач: " + str(len(store.tasks_of("Яро", only_open=True) or [])))
     return "\n".join(lines)
+
+
+BTN_INBOX, BTN_STATUS = "Нерозкладене", "Стан"
+BTN_MINE, BTN_IRA = "Мої задачі", "Задачі Іри"
+
+
+def admin_kb():
+    """Лічильник має право бути гучним тільки на нерозкладеному."""
+    n = store.inbox_count() if store.ON else 0
+    inbox = BTN_INBOX + (" · " + str(n) if n else "")
+    return {"keyboard": [[{"text": inbox}, {"text": BTN_STATUS}],
+                         [{"text": BTN_MINE}, {"text": BTN_IRA}]],
+            "resize_keyboard": True, "is_persistent": True}
+
+
+def sync_commands():
+    """
+    Команди задаються з областю дії, тому клієнтка не побачить у меню
+    ні /inbox, ні /status. Це чистіше за фільтрацію по id всередині хендлерів.
+    """
+    try:
+        api("setMyCommands", commands=[], scope={"type": "default"})
+        if ADMIN_ID:
+            api("setMyCommands", scope={"type": "chat", "chat_id": ADMIN_ID}, commands=[
+                {"command": "now", "description": "що зараз, одна задача"},
+                {"command": "todo", "description": "мої задачі"},
+                {"command": "inbox", "description": "нерозкладене від Іри"},
+                {"command": "status", "description": "стан бота і цифри за добу"},
+                {"command": "export", "description": "вивантажити базу"},
+            ])
+        if IRA_ID:
+            api("setMyCommands", scope={"type": "chat", "chat_id": IRA_ID}, commands=[
+                {"command": "todo", "description": "мої задачі"},
+            ])
+    except Exception as e:
+        log.warning("setMyCommands: %s", e)
 
 
 def stats_text():
@@ -539,12 +573,27 @@ def mat_kb(target, kind, caption):
     return {"inline_keyboard": [btns[:2], btns[2:]]}
 
 
+try:
+    from zoneinfo import ZoneInfo
+    PARIS = ZoneInfo("Europe/Paris")
+except Exception as _e:            # немає бази часових поясів у образі
+    PARIS = None
+    log.warning("Europe/Paris недоступна (%s), час буде в UTC", _e)
+
+
+def hhmm():
+    """
+    Час Yaro, а не сервера. Підміну змінної TZ навмисно не використовуємо:
+    вона мовчки дає неправильний час там, де немає бази поясів.
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    return (now.astimezone(PARIS) if PARIS else now).strftime("%H:%M")
+
+
 def mat_card(target, kind, caption, n=1):
-    head = "Від Іри"
-    if n > 1:
-        head += ", " + str(n) + " файлів"
-    elif kind:
-        head += ", " + kind
+    kind_word = ("альбом " + str(n)) if n > 1 else (kind or "текст")
+    head = "Від Іри · " + hhmm() + " · " + kind_word
     body = ("\n" + caption[:400]) if caption else ""
     for cid in NOTIFY_IDS:
         api("sendMessage", chat_id=cid, text=head + body,
@@ -704,17 +753,31 @@ def hook():
                     return "ok"
                 if text.startswith("/start"):
                     if uid == ADMIN_ID:
-                        send(chat_id, "Задачник тут. /todo покаже список, /now покаже одну задачу, "
-                                      "/inbox покаже нерозкладене від Іри. "
-                                      "Будь-який інший текст я запишу в інбокс.")
+                        send(chat_id, "Задачник тут. Кнопки внизу, або командами: /now одна задача, "
+                                      "/todo список, /inbox нерозкладене, /status стан. "
+                                      "Будь-який інший текст я запишу в інбокс.", admin_kb())
                     else:
                         send(chat_id, IRA_HELLO, IRA_KB)
                     return "ok"
-                if uid == ADMIN_ID and text.startswith("/inbox"):
+                if uid == ADMIN_ID and (text.startswith("/inbox") or text.startswith(BTN_INBOX)):
                     show_inbox(chat_id)
                     return "ok"
-                if uid == ADMIN_ID and (text.split(" ")[0] == "/status" or text.lower() == "стан"):
-                    send(chat_id, status_text())
+                if uid == ADMIN_ID and (text.split(" ")[0] == "/status"
+                                        or text.lower() in ("стан", BTN_STATUS.lower())):
+                    send(chat_id, status_text(), admin_kb())
+                    return "ok"
+                if uid == ADMIN_ID and text == BTN_MINE:
+                    show_tasks(uid, name)
+                    return "ok"
+                if uid == ADMIN_ID and text == BTN_IRA:
+                    rows = store.tasks_of("Іра") or []
+                    if not rows:
+                        send(chat_id, "У Іри задач немає.")
+                    else:
+                        # Тільки перегляд: закривати її задачі за неї означає показати їй
+                        # закритим те, чого вона не робила.
+                        send(chat_id, render_tasks("Іра", rows) + "\n\nЦе перегляд. "
+                             "Щоб додати їй задачу, напишіть два плюси і текст.")
                     return "ok"
                 if uid != ADMIN_ID:
                     low = text.lower()
@@ -767,8 +830,9 @@ def hook():
                 mid = cq["message"].get("message_id")
                 label = BUCKET_LABEL.get(bucket, bucket)
                 left = store.inbox_count()
-                txt = ("→ " + label + (", карток: " + str(cnt) if cnt > 1 else "")
-                       + "\nНерозкладених лишилось: " + str(left))
+                # Картка не зникає, а перепідписується: видно, куди пішло.
+                head = (cq["message"].get("text") or "Від Іри").split("\n")[0]
+                txt = head + " · → " + label + "\nНерозкладених лишилось: " + str(left)
                 api("editMessageText", chat_id=chat_id, message_id=mid, text=txt,
                     reply_markup={"inline_keyboard": [[
                         {"text": "Наступне нерозкладене", "callback_data": "mnx"}]]} if left else None)
@@ -1012,6 +1076,7 @@ def keepalive():
 if BASE_URL:
     threading.Thread(target=keepalive, daemon=True).start()
 threading.Thread(target=mono_poll, daemon=True).start()
+threading.Thread(target=sync_commands, daemon=True).start()
 
 
 if __name__ == "__main__":
