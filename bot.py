@@ -273,32 +273,98 @@ def parse_tasks(text):
     return items
 
 
-def render_tasks(name, items):
-    left = [i for i in items if not i["done"]]
-    head = "Задачі, " + name + "\n" + "Відкрито: " + str(len(left)) + " з " + str(len(items)) + "\n\n"
+PROJECTS = [("ira", "Іра"), ("eng", "Англійська"), ("mstr", "Майстри"), ("byt", "Побут")]
+PROJ_LABEL = dict(PROJECTS)
+PROJ_KEY = {}
+for _k, _v in PROJECTS:
+    PROJ_KEY[_k] = _k
+    PROJ_KEY[_v.lower()] = _k
+TAG_RE = re.compile(r"(?:^|\s)#([^\s#]+)")
+
+
+def pick_project(text):
+    """Витягує #мітку з тексту. Повертає текст без мітки і ключ проєкту."""
+    key = None
+    def take(m):
+        nonlocal key
+        cand = PROJ_KEY.get(m.group(1).strip().lower())
+        if cand and not key:
+            key = cand
+            return " "
+        return m.group(0)
+    clean = re.sub(r"\s{2,}", " ", TAG_RE.sub(take, text or "")).strip()
+    return (clean or text or "").strip(), key
+
+
+def proj_name(key):
+    return PROJ_LABEL.get(key or "", "інбокс")
+
+
+def render_tasks(owner, rows):
+    rows = rows or []
+    open_rows = [r for r in rows if not r["done"]]
+    head = ("Задачі, " + owner + "\nВідкрито: " + str(len(open_rows)) + " з " + str(len(rows)))
+    if not open_rows:
+        return head + "\n\nПорожньо. Просто надішліть текст, і він стане задачею."
+    groups = {}
+    for r in open_rows:
+        groups.setdefault(r.get("project") or "", []).append(r)
+    order = [k for k, _ in PROJECTS if k in groups]
+    if "" in groups:
+        order.insert(0, "")
     body = []
-    first = True
-    for i in items:
-        if i["done"]:
-            body.append("✅ #" + str(i["n"]) + " " + i["t"])
-        elif first:
-            body.append("▶️ #" + str(i["n"]) + " " + i["t"] + "   ← наступна")
-            first = False
-        else:
-            body.append("▫️ #" + str(i["n"]) + " " + i["t"])
-    foot = ("\n\nВсе, що стосується задач, просто надсилайте сюди: фото, схеми, відео, правки. "
-            "Я передам далі.\n\nЩоб додати задачу, напишіть плюс і текст.")
-    return head + "\n".join(body) + foot
+    for k in order:
+        body.append("\n" + proj_name(k).upper())
+        for r in groups[k]:
+            mark = "💤" if r.get("deferred_at") else "▫️"
+            body.append(mark + " #" + str(r["n"]) + " " + r["text"])
+    foot = ("\n\nНадішліть будь-який текст, і він стане задачею в інбоксі. "
+            "Мітка проєкту через решітку: #іра, #англійська, #майстри, #побут.")
+    return head + "\n" + "\n".join(body) + foot
 
 
-def tasks_kb(items):
-    rows = []
-    for i in items:
-        if not i["done"]:
-            rows.append([{"text": "Готово: " + i["t"][:40], "callback_data": "td:" + str(i["n"])}])
-        if len(rows) >= 8:
-            break
-    return {"inline_keyboard": rows} if rows else None
+def tasks_kb(rows):
+    kb = [[{"text": "Що зараз", "callback_data": "tnow"}]]
+    for r in [x for x in (rows or []) if not x["done"]][:6]:
+        kb.append([{"text": "Готово: " + r["text"][:38], "callback_data": "td:" + str(r["n"])}])
+    return {"inline_keyboard": kb}
+
+
+def proj_kb(n, with_delete=True):
+    row = [{"text": PROJ_LABEL[k], "callback_data": "tp:" + str(n) + ":" + k} for k, _ in PROJECTS]
+    kb = [row[:2], row[2:]]
+    if with_delete:
+        kb.append([{"text": "Це не задача, прибрати", "callback_data": "tdl:" + str(n)}])
+    return {"inline_keyboard": kb}
+
+
+def now_kb(r):
+    n = str(r["n"])
+    return {"inline_keyboard": [
+        [{"text": "Готово", "callback_data": "td:" + n},
+         {"text": "Пізніше", "callback_data": "tdf:" + n}],
+        [{"text": "Наступна", "callback_data": "tnow"},
+         {"text": "Проєкт", "callback_data": "tpk:" + n}],
+    ]}
+
+
+def render_now(owner, r):
+    if not r:
+        return "Відкритих задач немає. Порожньо і добре."
+    left = len(store.tasks_of(owner, only_open=True) or [])
+    head = "Зараз · " + proj_name(r.get("project"))
+    tail = "\n\nВідкрито всього: " + str(left)
+    return head + "\n\n#" + str(r["n"]) + " " + r["text"] + tail
+
+
+def show_now(uid, owner, message_id=None):
+    r = store.next_task(owner)
+    text = render_now(owner, r)
+    kb = now_kb(r) if r else None
+    if message_id and api("editMessageText", chat_id=uid, message_id=message_id,
+                          text=text, reply_markup=kb):
+        return
+    send(uid, text, kb)
 
 
 def pinned_of(uid):
@@ -308,8 +374,7 @@ def pinned_of(uid):
 
 
 def items_of(owner):
-    """Список власника з бази у форматі, який розуміє render_tasks."""
-    return [{"done": r["done"], "n": r["n"], "t": r["text"]} for r in (store.tasks_of(owner) or [])]
+    return store.tasks_of(owner) or []
 
 
 def seed_once(uid, owner):
@@ -354,17 +419,33 @@ def show_tasks(uid, owner):
     paint_tasks(uid, owner)
 
 
-def add_task(uid, owner, text, by=None):
+def add_task(uid, owner, text, by=None, project=None):
     seed_once(uid, owner)
-    r = store.add_task(owner, text, created_by=by)
+    body, tag = pick_project(text)
+    r = store.add_task(owner, body, created_by=by, project=project or tag)
     paint_tasks(uid, owner)
-    return r["n"] if r else 0
+    return r if r else None
 
 
 def close_task(uid, owner, n):
     r = store.close_task(owner, n)
     paint_tasks(uid, owner)
     return r["text"] if r else ""
+
+
+def catch_task(uid, owner, text, by=None):
+    """
+    Ловля без церемоній: будь-який текст стає задачею в інбоксі, а розкладання
+    по проєктах відбувається потім, одним тапом. Якщо вимагати проєкт наперед,
+    ловити перестануть.
+    """
+    r = add_task(uid, owner, text, by=by)
+    if not r:
+        send(uid, "Не зміг записати, база не відповіла.")
+        return
+    where = proj_name(r.get("project"))
+    send(uid, "Записав #" + str(r["n"]) + " у «" + where + "»\n" + r["text"],
+         proj_kb(r["n"]))
 
 
 @app.post("/" + SECRET)
@@ -378,7 +459,7 @@ def hook():
             uid = u.get("id")
             if u.get("is_bot"):
                 return "ok"
-            text = (m.get("text") or "").strip()
+            text = (m.get("text") or m.get("caption") or "").strip()
             doc = m.get("document")
             if doc and uid == ADMIN_ID:
                 send(chat_id, "file_id цього файлу:\n" + doc.get("file_id", "?"))
@@ -399,20 +480,34 @@ def hook():
                 if text.startswith("/todo") or text.lower() in ("задачі", "задачи"):
                     show_tasks(uid, name)
                     return "ok"
+                if text.startswith("/now") or text.lower() in ("що зараз", "шо зараз"):
+                    seed_once(uid, name)
+                    show_now(uid, name)
+                    return "ok"
                 if text.startswith("++") and uid == ADMIN_ID and IRA_ID:
                     body = text[2:].strip()
                     if body:
-                        n = add_task(IRA_ID, "Іра", body, by=uid)
-                        send(chat_id, "Додав Ірі задачу #" + str(n))
+                        r = add_task(IRA_ID, "Іра", body, by=uid)
+                        send(chat_id, "Додав Ірі задачу #" + str(r["n"] if r else "?"))
                     return "ok"
                 if text.startswith("+"):
                     body = text[1:].strip()
                     if body:
-                        n = add_task(uid, name, body, by=uid)
-                        send(chat_id, "Додав задачу #" + str(n))
+                        r = add_task(uid, name, body, by=uid)
+                        send(chat_id, "Додав задачу #" + str(r["n"] if r else "?"))
                     return "ok"
                 if text.startswith("/start"):
-                    send(chat_id, "Задачник тут. Напишіть /todo, і я покажу відкриті задачі.")
+                    send(chat_id, "Задачник тут. /todo покаже список, /now покаже одну задачу. "
+                                  "Будь-який інший текст я запишу в інбокс.")
+                    return "ok"
+                if uid == ADMIN_ID:
+                    # Ловля без церемоній: усе, що не команда, стає задачею.
+                    # Переслане теж, бо задачі приходять з чужих повідомлень, а не з голови.
+                    if text and not text.startswith("/"):
+                        seed_once(uid, name)
+                        catch_task(uid, name, text, by=uid)
+                    elif not text:
+                        send(chat_id, "Тут я ловлю тільки текст. Файли поки складаю окремо.")
                     return "ok"
                 for cid in NOTIFY_IDS:
                     if cid == uid:
@@ -420,8 +515,7 @@ def hook():
                     api("forwardMessage", chat_id=cid, from_chat_id=chat_id,
                         message_id=m.get("message_id"))
                     send(cid, "Від " + name + ", вище")
-                if uid != ADMIN_ID:
-                    send(chat_id, "Отримала, передаю далі ❤️")
+                send(chat_id, "Отримала, передаю далі ❤️")
                 return "ok"
             if text.startswith("/start"):
                 parts = text.split(None, 1)
@@ -443,13 +537,56 @@ def hook():
             chat_id = cq["message"]["chat"]["id"]
             u = cq.get("from", {})
             uid = u.get("id")
-            if data.startswith("td:") and uid in TEAM and team_on(uid):
+            if data[:3] in ("td:", "tdf", "tpk", "tp:", "tdl", "tno") and uid in TEAM and team_on(uid):
+                owner = TEAM[uid]
+                mid = cq["message"].get("message_id")
+                pinned = (store.get_user(uid) or {}).get("tasks_msg")
+                on_now = mid and mid != pinned
+
+                if data == "tnow":
+                    show_now(uid, owner, mid if on_now else None)
+                    return "ok"
+
                 n = int(data.split(":")[1])
-                title = close_task(uid, TEAM[uid], n)
-                for cid in NOTIFY_IDS:
-                    if cid != uid:
-                        send(cid, TEAM[uid] + " закрила задачу: " + title if uid == IRA_ID
-                             else TEAM[uid] + " закрив задачу: " + title)
+
+                if data.startswith("td:"):
+                    title = close_task(uid, owner, n)
+                    for cid in NOTIFY_IDS:
+                        if cid != uid:
+                            send(cid, owner + (" закрила задачу: " if uid == IRA_ID else " закрив задачу: ") + title)
+                    if on_now:
+                        show_now(uid, owner, mid)
+                    return "ok"
+
+                if data.startswith("tdf:"):
+                    store.defer_task(owner, n)
+                    paint_tasks(uid, owner)
+                    if on_now:
+                        show_now(uid, owner, mid)
+                    return "ok"
+
+                if data.startswith("tpk:"):
+                    api("editMessageReplyMarkup", chat_id=uid, message_id=mid,
+                        reply_markup=proj_kb(n, with_delete=False))
+                    return "ok"
+
+                if data.startswith("tp:"):
+                    key = data.split(":")[2]
+                    r = store.set_task_project(owner, n, key)
+                    paint_tasks(uid, owner)
+                    api("editMessageText", chat_id=uid, message_id=mid,
+                        text="#" + str(n) + " " + (r["text"] if r else "") + "\n→ " + proj_name(key),
+                        reply_markup={"inline_keyboard": [[
+                            {"text": "Готово", "callback_data": "td:" + str(n)},
+                            {"text": "Що зараз", "callback_data": "tnow"}]]})
+                    return "ok"
+
+                if data.startswith("tdl:"):
+                    r = store.delete_task(owner, n)
+                    paint_tasks(uid, owner)
+                    api("editMessageText", chat_id=uid, message_id=mid,
+                        text="Прибрав: " + (r["text"][:80] if r else "#" + str(n)))
+                    return "ok"
                 return "ok"
             if data == "magnet":
                 give_magnet(chat_id)

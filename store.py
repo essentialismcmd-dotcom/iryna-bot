@@ -77,16 +77,20 @@ create table if not exists assets (
 create index if not exists assets_bucket on assets (bucket, created_at desc);
 
 create table if not exists tasks (
-    id         bigserial primary key,
-    owner      text not null,
-    n          integer not null,
-    text       text not null,
-    done       boolean not null default false,
-    created_by bigint,
-    created_at timestamptz not null default now(),
-    closed_at  timestamptz,
+    id          bigserial primary key,
+    owner       text not null,
+    n           integer not null,
+    text        text not null,
+    done        boolean not null default false,
+    project     text,
+    deferred_at timestamptz,
+    created_by  bigint,
+    created_at  timestamptz not null default now(),
+    closed_at   timestamptz,
     unique (owner, n)
 );
+alter table tasks add column if not exists project text;
+alter table tasks add column if not exists deferred_at timestamptz;
 
 create table if not exists events (
     id         bigserial primary key,
@@ -307,21 +311,64 @@ def bucket_counts():
 
 # ---------- задачник ----------
 
-def tasks_of(owner):
-    return q("select * from tasks where owner = %s order by n", (owner,), fetch="all")
+def tasks_of(owner, only_open=False, project=None):
+    sql = "select * from tasks where owner = %s"
+    args = [owner]
+    if only_open:
+        sql += " and not done"
+    if project:
+        sql += " and coalesce(project, '') = %s"
+        args.append(project)
+    sql += " order by n"
+    return q(sql, tuple(args), fetch="all")
 
 
-def add_task(owner, text, created_by=None):
+def add_task(owner, text, created_by=None, project=None):
     return q("""
-        insert into tasks (owner, n, text, created_by)
-        values (%s, coalesce((select max(n) from tasks where owner = %s), 0) + 1, %s, %s)
+        insert into tasks (owner, n, text, created_by, project)
+        values (%s, coalesce((select max(n) from tasks where owner = %s), 0) + 1, %s, %s, %s)
         returning *
-    """, (owner, owner, text, created_by), fetch="one")
+    """, (owner, owner, text, created_by, project), fetch="one")
 
 
 def close_task(owner, n):
     return q("""update tasks set done = true, closed_at = now()
                 where owner = %s and n = %s and not done returning *""", (owner, n), fetch="one")
+
+
+def delete_task(owner, n):
+    return q("delete from tasks where owner = %s and n = %s returning *", (owner, n), fetch="one")
+
+
+def set_task_project(owner, n, project):
+    return q("""update tasks set project = %s where owner = %s and n = %s returning *""",
+             (project or None, owner, n), fetch="one")
+
+
+def defer_task(owner, n):
+    """Відкладає задачу в кінець черги «що зараз», не закриваючи її."""
+    return q("""update tasks set deferred_at = now()
+                where owner = %s and n = %s and not done returning *""", (owner, n), fetch="one")
+
+
+def next_task(owner, project=None):
+    """
+    Рівно одна задача на питання «що зараз»: найстарша відкрита,
+    відкладені йдуть після невідкладених.
+    """
+    sql = "select * from tasks where owner = %s and not done"
+    args = [owner]
+    if project:
+        sql += " and coalesce(project, '') = %s"
+        args.append(project)
+    sql += " order by deferred_at nulls first, n limit 1"
+    return q(sql, tuple(args), fetch="one")
+
+
+def projects_of(owner):
+    return q("""select coalesce(project, '') as project, count(*) as n
+                from tasks where owner = %s and not done
+                group by 1 order by n desc""", (owner,), fetch="all")
 
 
 def seed_tasks(owner, items):
