@@ -64,17 +64,20 @@ create table if not exists purchases (
 create index if not exists purchases_user on purchases (user_id);
 
 create table if not exists assets (
-    id          bigserial primary key,
-    from_user   bigint,
-    file_id     text not null,
-    file_kind   text,
-    bucket      text not null default 'inbox',
-    caption     text,
-    media_group text,
-    created_at  timestamptz not null default now(),
-    used_at     timestamptz
+    id             bigserial primary key,
+    from_user      bigint,
+    file_id        text not null,
+    file_unique_id text,
+    file_kind      text,
+    bucket         text not null default 'inbox',
+    caption        text,
+    media_group    text,
+    created_at     timestamptz not null default now(),
+    used_at        timestamptz
 );
+alter table assets add column if not exists file_unique_id text;
 create index if not exists assets_bucket on assets (bucket, created_at desc);
+create index if not exists assets_group on assets (media_group);
 
 create table if not exists tasks (
     id          bigserial primary key,
@@ -280,16 +283,44 @@ def use_slot(purchase_id):
 
 # ---------- склад матеріалів ----------
 
-def add_asset(from_user, file_id, file_kind, bucket="inbox", caption=None, media_group=None):
+def add_asset(from_user, file_id, file_kind, bucket="inbox", caption=None,
+              media_group=None, file_unique_id=None):
     return q("""
-        insert into assets (from_user, file_id, file_kind, bucket, caption, media_group)
-        values (%s, %s, %s, %s, %s, %s) returning *
-    """, (from_user, file_id, file_kind, bucket, caption, media_group), fetch="one")
+        insert into assets (from_user, file_id, file_unique_id, file_kind, bucket, caption, media_group)
+        values (%s, %s, %s, %s, %s, %s, %s) returning *
+    """, (from_user, file_id, file_unique_id, file_kind, bucket, caption, media_group), fetch="one")
+
+
+def get_asset(asset_id):
+    return q("select * from assets where id = %s", (asset_id,), fetch="one")
 
 
 def set_bucket(asset_id, bucket):
     return q("update assets set bucket = %s where id = %s returning *",
              (bucket, asset_id), fetch="one")
+
+
+def set_bucket_group(media_group, bucket):
+    """Розкладає весь альбом одним рухом. Повертає скільки карток перекладено."""
+    r = q("""update assets set bucket = %s where media_group = %s and bucket = 'inbox'
+             returning id""", (bucket, media_group), fetch="all")
+    return len(r or [])
+
+
+def assets_of_group(media_group, limit=50):
+    return q("""select * from assets where media_group = %s order by id limit %s""",
+             (media_group, limit), fetch="all")
+
+
+def inbox_count():
+    r = q("select count(*) as n from assets where bucket = 'inbox'", fetch="one")
+    return (r or {}).get("n", 0)
+
+
+def inbox_next():
+    """Найстарша нерозкладена картка. Альбом представлений своєю першою карткою."""
+    return q("""select * from assets where bucket = 'inbox'
+                order by created_at, id limit 1""", fetch="one")
 
 
 def bucket_assets(bucket, limit=20, unused_only=False):

@@ -448,6 +448,175 @@ def catch_task(uid, owner, text, by=None):
          proj_kb(r["n"]))
 
 
+# ---------- прийом матеріалів від Іри ----------
+
+BUCKETS = [("guide", "правка в гайд"), ("kanal", "в канал"),
+           ("task", "в задачі"), ("keep", "просто зберегти")]
+BUCKET_LABEL = dict(BUCKETS)
+GUIDE_WORDS = ("сторінк", "заміни", "заміна", "прибери", "прибрати", "додай",
+               "додати", "виправ", "правк", "абзац", "схем")
+
+IRA_HELLO = (
+    "Привіт ❤️\n"
+    "Сюди можна кидати все: правки до гайду, фото зі зйомок, беки, голосові. "
+    "Я передам Yaro, розбирати нічого не треба.\n"
+    "Внизу дві кнопки: задачі і додати задачу."
+)
+IRA_KB = {"keyboard": [[{"text": "Мої задачі"}, {"text": "Додати"}]],
+          "resize_keyboard": True, "is_persistent": True}
+
+FILE_KINDS = (
+    ("photo", "фото"), ("video", "відео"), ("document", "документ"),
+    ("voice", "голосове"), ("audio", "аудіо"), ("video_note", "кружечок"),
+    ("animation", "гіфка"), ("sticker", "стікер"),
+)
+SEND_BY_KIND = {
+    "фото": ("sendPhoto", "photo"), "відео": ("sendVideo", "video"),
+    "документ": ("sendDocument", "document"), "голосове": ("sendVoice", "voice"),
+    "аудіо": ("sendAudio", "audio"), "кружечок": ("sendVideoNote", "video_note"),
+    "гіфка": ("sendAnimation", "animation"), "стікер": ("sendSticker", "sticker"),
+}
+
+
+def extract_file(m):
+    """Повертає (тип, file_id, file_unique_id) або (None, None, None)."""
+    for key, label in FILE_KINDS:
+        v = m.get(key)
+        if not v:
+            continue
+        if key == "photo":
+            v = v[-1]
+        return label, v.get("file_id"), v.get("file_unique_id")
+    return None, None, None
+
+
+def mat_kb(target, kind, caption):
+    """Порядок кнопок підказує ймовірне, але не вирішує за Yaro."""
+    order = [k for k, _ in BUCKETS]
+    low = (caption or "").lower()
+    if any(w in low for w in GUIDE_WORDS):
+        order.remove("guide"); order.insert(0, "guide")
+    elif kind in ("фото", "відео") and not low:
+        order.remove("kanal"); order.insert(0, "kanal")
+    btns = [{"text": BUCKET_LABEL[k], "callback_data": "mb:" + target + ":" + k} for k in order]
+    return {"inline_keyboard": [btns[:2], btns[2:]]}
+
+
+def mat_card(target, kind, caption, n=1):
+    head = "Від Іри"
+    if n > 1:
+        head += ", " + str(n) + " файлів"
+    elif kind:
+        head += ", " + kind
+    body = ("\n" + caption[:400]) if caption else ""
+    for cid in NOTIFY_IDS:
+        api("sendMessage", chat_id=cid, text=head + body,
+            reply_markup=mat_kb(target, kind, caption), disable_web_page_preview=True)
+
+
+_albums = {}
+_albums_lock = threading.Lock()
+
+
+def album_touch(gid, chat_id, kind, caption):
+    """
+    Телеграм шле кожне фото альбому окремим апдейтом. Без цього збирання
+    бот відповідав би Ірі двадцять разів підряд на один альбом.
+    """
+    with _albums_lock:
+        a = _albums.get(gid)
+        if a is None:
+            a = {"n": 0, "chat_id": chat_id, "kind": kind, "caption": caption, "timer": None}
+            _albums[gid] = a
+        a["n"] += 1
+        if caption and not a["caption"]:
+            a["caption"] = caption
+        if a["timer"]:
+            a["timer"].cancel()
+        t = threading.Timer(3.0, album_flush, args=(gid,))
+        t.daemon = True
+        a["timer"] = t
+        t.start()
+
+
+def album_flush(gid):
+    with _albums_lock:
+        a = _albums.pop(gid, None)
+    if not a:
+        return
+    try:
+        send(a["chat_id"], "Прийняла всі " + str(a["n"]) + " ❤️ Передаю Yaro.")
+        mat_card("g:" + str(gid), a["kind"], a["caption"], n=a["n"])
+    except Exception as e:
+        log.warning("album_flush: %s", e)
+
+
+def take_material(m, chat_id, uid):
+    """Від неї не вимагається нічого, крім кинути файл. Розкладає Yaro."""
+    kind, fid, fuid = extract_file(m)
+    caption = (m.get("caption") or m.get("text") or "").strip()
+    gid = m.get("media_group_id")
+    if not fid:
+        # Текстова правка це теж матеріал, і вона не має губитись через те,
+        # що до неї не прикріплений файл.
+        kind, fid, fuid = "текст", "", None
+    row = store.add_asset(uid, fid, kind, caption=caption or None,
+                          media_group=str(gid) if gid else None, file_unique_id=fuid)
+    for cid in NOTIFY_IDS:
+        if cid != uid:
+            api("forwardMessage", chat_id=cid, from_chat_id=chat_id, message_id=m.get("message_id"))
+    if gid:
+        album_touch(str(gid), chat_id, kind, caption)
+        return
+    if kind == "голосове":
+        send(chat_id, "Прийняла голосове ❤️ Передаю Yaro.")
+    else:
+        send(chat_id, "Прийняла ❤️ Передаю Yaro.")
+    target = ("a:" + str(row["id"])) if row else "t:0"
+    mat_card(target, kind or "", caption)
+
+
+def sort_material(target, bucket, by):
+    """Повертає (скільки карток, підпис) після розкладання."""
+    kind, key = (target.split(":", 1) + [""])[:2]
+    caption = ""
+    cnt = 0
+    if kind == "g":
+        rows = store.assets_of_group(key) or []
+        caption = next((r["caption"] for r in rows if r.get("caption")), "")
+        cnt = store.set_bucket_group(key, bucket)
+    elif kind == "a":
+        r = store.set_bucket(int(key), bucket)
+        if r:
+            cnt, caption = 1, r.get("caption") or ""
+    if bucket == "task":
+        body = (caption or "матеріал від Іри")[:200]
+        store.add_task("Яро", body, created_by=by, project="ira")
+    return cnt, caption
+
+
+def show_inbox(chat_id):
+    n = store.inbox_count()
+    if not n:
+        send(chat_id, "Нерозкладеного немає.")
+        return
+    r = store.inbox_next()
+    if not r:
+        send(chat_id, "Нерозкладених " + str(n) + ", але картку дістати не вдалось.")
+        return
+    if r.get("media_group"):
+        target = "g:" + r["media_group"]
+        cnt = len(store.assets_of_group(r["media_group"]) or [])
+    else:
+        target = "a:" + str(r["id"])
+        cnt = 1
+    method, field = SEND_BY_KIND.get(r.get("file_kind") or "", (None, None))
+    if r.get("file_id") and method:
+        api(method, chat_id=chat_id, **{field: r["file_id"]})
+    send(chat_id, "Нерозкладених: " + str(n) + "\n" + (r.get("caption") or ""),
+         mat_kb(target, r.get("file_kind") or "", r.get("caption") or ""))
+
+
 @app.post("/" + SECRET)
 def hook():
     upd = request.get_json(silent=True) or {}
@@ -497,8 +666,25 @@ def hook():
                         send(chat_id, "Додав задачу #" + str(r["n"] if r else "?"))
                     return "ok"
                 if text.startswith("/start"):
-                    send(chat_id, "Задачник тут. /todo покаже список, /now покаже одну задачу. "
-                                  "Будь-який інший текст я запишу в інбокс.")
+                    if uid == ADMIN_ID:
+                        send(chat_id, "Задачник тут. /todo покаже список, /now покаже одну задачу, "
+                                      "/inbox покаже нерозкладене від Іри. "
+                                      "Будь-який інший текст я запишу в інбокс.")
+                    else:
+                        send(chat_id, IRA_HELLO, IRA_KB)
+                    return "ok"
+                if uid == ADMIN_ID and text.startswith("/inbox"):
+                    show_inbox(chat_id)
+                    return "ok"
+                if uid != ADMIN_ID:
+                    low = text.lower()
+                    if low in ("мої задачі", "мои задачи"):
+                        show_tasks(uid, name)
+                        return "ok"
+                    if low in ("додати", "добавить"):
+                        send(chat_id, "Напишіть задачу з плюсом попереду, наприклад: +купити фон")
+                        return "ok"
+                    take_material(m, chat_id, uid)
                     return "ok"
                 if uid == ADMIN_ID:
                     # Ловля без церемоній: усе, що не команда, стає задачею.
@@ -509,13 +695,7 @@ def hook():
                     elif not text:
                         send(chat_id, "Тут я ловлю тільки текст. Файли поки складаю окремо.")
                     return "ok"
-                for cid in NOTIFY_IDS:
-                    if cid == uid:
-                        continue
-                    api("forwardMessage", chat_id=cid, from_chat_id=chat_id,
-                        message_id=m.get("message_id"))
-                    send(cid, "Від " + name + ", вище")
-                send(chat_id, "Отримала, передаю далі ❤️")
+                take_material(m, chat_id, uid)
                 return "ok"
             if text.startswith("/start"):
                 parts = text.split(None, 1)
@@ -537,6 +717,22 @@ def hook():
             chat_id = cq["message"]["chat"]["id"]
             u = cq.get("from", {})
             uid = u.get("id")
+            if data.startswith("mb:") and uid in NOTIFY_IDS:
+                parts = data.split(":")
+                target, bucket = parts[1] + ":" + parts[2], parts[3]
+                cnt, caption = sort_material(target, bucket, uid)
+                mid = cq["message"].get("message_id")
+                label = BUCKET_LABEL.get(bucket, bucket)
+                left = store.inbox_count()
+                txt = ("→ " + label + (", карток: " + str(cnt) if cnt > 1 else "")
+                       + "\nНерозкладених лишилось: " + str(left))
+                api("editMessageText", chat_id=chat_id, message_id=mid, text=txt,
+                    reply_markup={"inline_keyboard": [[
+                        {"text": "Наступне нерозкладене", "callback_data": "mnx"}]]} if left else None)
+                return "ok"
+            if data == "mnx" and uid in NOTIFY_IDS:
+                show_inbox(chat_id)
+                return "ok"
             if data[:3] in ("td:", "tdf", "tpk", "tp:", "tdl", "tno") and uid in TEAM and team_on(uid):
                 owner = TEAM[uid]
                 mid = cq["message"].get("message_id")
