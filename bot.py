@@ -183,6 +183,9 @@ def pay_kb(tier):
         rows.append([{"text": "Перейти до оплати", "url": PAY_URL}])
     if TEST_MODE:
         rows.append([{"text": "Я оплатив (тест)", "callback_data": "paid:" + tier}])
+    # Найдорожчий глухий кут лійки: людина заплатила, а файл не прийшов.
+    # Кнопка веде до живої людини, і обіцянку виконує Yaro, а не Іра.
+    rows.append([{"text": "Оплатив, а файлу немає", "callback_data": "noget:" + tier}])
     return {"inline_keyboard": rows} if rows else None
 
 
@@ -211,6 +214,33 @@ def give_magnet(chat_id):
         send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ❤️")
         return
     send(chat_id, AFTER, after_kb())
+
+
+NOGET_TEXT = ("Перевірю вручну, зазвичай це кілька хвилин ❤️ "
+              "Файл прийде сюди, нічого робити не треба.")
+BROKEN_FILE_TEXT = ("Щось пішло не так з файлом ❤️ "
+                    "Уже розбираюсь, надішлю сюди за кілька хвилин.")
+NUDGE_TEXT = ("Якщо оплата пройшла, а файл не дійшов, натисніть кнопку нижче, "
+              "я перевірю вручну ❤️")
+
+
+def nudge_later(uid, tier, code, delay=900):
+    """
+    Через пʼятнадцять хвилин нагадуємо про кнопку тому, хто заплатив і мовчить.
+    Таймер, а не опитування бази: цикл, який ходив би в базу щохвилини,
+    тримав би Neon прокинутим цілодобово і зʼїв би безкоштовний ліміт.
+    """
+    def fire():
+        try:
+            p = store.get_purchase(code)
+            if p and p.get("status") == "new":
+                send(uid, NUDGE_TEXT, {"inline_keyboard": [[
+                    {"text": "Оплатив, а файлу немає", "callback_data": "noget:" + tier}]]})
+        except Exception as e:
+            log.warning("nudge: %s", e)
+    t = threading.Timer(delay, fire)
+    t.daemon = True
+    t.start()
 
 
 def give_guide(uid, tier):
@@ -933,16 +963,28 @@ def hook():
                              "Код у коментарі до платежу: " + code +
                              "\n\nНатисніть «Я оплатив (тест)», щоб пройти крок оплати.")
                 else:
-                    body += "\n\nНапишу вам зараз особисто і скину реквізити."
+                    body += "\n\nРеквізити надішлю сюди найближчим часом ❤️ Заявку вже бачу, нікуди не зникайте."
                 send(chat_id, body, pay_kb(data))
+                nudge_later(uid, data, code)
                 notify("ЗАЯВКА: " + t["name"] + ", " + str(t["uah"]) + " грн\n"
                        + who(u) + "\nКод: " + code, give_kb(uid, data))
+            elif data.startswith("noget:"):
+                tier = data.split(":")[1]
+                code = order_code(uid, tier)
+                send(chat_id, NOGET_TEXT)
+                store.log_event(uid, "noget", {"tier": tier, "code": code})
+                notify("КАЖЕ, ЩО ОПЛАТИВ, А ФАЙЛУ НЕМАЄ\n"
+                       + TIERS.get(tier, {}).get("name", tier) + "\n"
+                       + who(u) + "\nКод: " + code, give_kb(uid, tier))
             elif data.startswith("paid:") and TEST_MODE:
                 tier = data.split(":")[1]
                 code = order_code(uid, tier)
                 ok = give_guide(uid, tier)
                 if not ok:
-                    send(chat_id, "Тест: файл ще не підключений, впиши GUIDE_FILE_ID.")
+                    # Службовий рядок в обличчя людині це теж глухий кут.
+                    send(chat_id, BROKEN_FILE_TEXT)
+                    notify("ФАЙЛ НЕ ВИДАВСЯ, GUIDE_FILE_ID не заданий або битий\n"
+                           + who(u) + "\nКод: " + code, give_kb(uid, tier))
                 store.mark_paid(code)
                 if ok:
                     store.mark_delivered(code)
@@ -1010,9 +1052,15 @@ def handle_tx(tx):
     comment = (tx.get("comment") or "") + " " + (tx.get("description") or "")
     m = CODE_RE.search(comment.replace(" ", ""))
     if not m:
-        notify("Оплата " + str(amount // 100) + " грн у банці, але без коду.\n"
-               "Коментар: " + (tx.get("comment") or "порожній") + "\n"
-               "Видай гайд вручну з відповідної заявки.")
+        # Людину тут не впізнати, тому Yaro потрібні всі зачіпки одразу:
+        # хто відправник, скільки і коли. По імені він упізнає заявку.
+        when = tx.get("time")
+        when = (time.strftime("%d.%m %H:%M", time.localtime(when)) if when else "час невідомий")
+        notify("Оплата " + str(amount // 100) + " грн у банці, але БЕЗ КОДУ.\n"
+               "Коли: " + when + "\n"
+               "Від кого: " + (tx.get("description") or "не вказано") + "\n"
+               "Коментар: " + (tx.get("comment") or "порожній") + "\n\n"
+               "Впізнай по імені і видай гайд вручну з відповідної заявки.")
         return
     try:
         uid = unb36(m.group(1).upper())
