@@ -591,9 +591,9 @@ def hhmm():
     return (now.astimezone(PARIS) if PARIS else now).strftime("%H:%M")
 
 
-def mat_card(target, kind, caption, n=1):
+def mat_card(target, kind, caption, n=1, src="Від Іри"):
     kind_word = ("альбом " + str(n)) if n > 1 else (kind or "текст")
-    head = "Від Іри · " + hhmm() + " · " + kind_word
+    head = src + " · " + hhmm() + " · " + kind_word
     body = ("\n" + caption[:400]) if caption else ""
     for cid in NOTIFY_IDS:
         api("sendMessage", chat_id=cid, text=head + body,
@@ -604,7 +604,7 @@ _albums = {}
 _albums_lock = threading.Lock()
 
 
-def album_touch(gid, chat_id, kind, caption):
+def album_touch(gid, chat_id, kind, caption, src="Від Іри", reply=True):
     """
     Телеграм шле кожне фото альбому окремим апдейтом. Без цього збирання
     бот відповідав би Ірі двадцять разів підряд на один альбом.
@@ -612,7 +612,8 @@ def album_touch(gid, chat_id, kind, caption):
     with _albums_lock:
         a = _albums.get(gid)
         if a is None:
-            a = {"n": 0, "chat_id": chat_id, "kind": kind, "caption": caption, "timer": None}
+            a = {"n": 0, "chat_id": chat_id, "kind": kind, "caption": caption,
+                 "src": src, "reply": reply, "timer": None}
             _albums[gid] = a
         a["n"] += 1
         if caption and not a["caption"]:
@@ -631,14 +632,24 @@ def album_flush(gid):
     if not a:
         return
     try:
-        send(a["chat_id"], "Прийняла всі " + str(a["n"]) + " ❤️ Передаю Yaro.")
-        mat_card("g:" + str(gid), a["kind"], a["caption"], n=a["n"])
+        if a.get("reply", True):
+            send(a["chat_id"], "Прийняла всі " + str(a["n"]) + " ❤️ Передаю Yaro.")
+        mat_card("g:" + str(gid), a["kind"], a["caption"], n=a["n"], src=a.get("src", "Від Іри"))
     except Exception as e:
         log.warning("album_flush: %s", e)
 
 
-def take_material(m, chat_id, uid):
-    """Від неї не вимагається нічого, крім кинути файл. Розкладає Yaro."""
+def is_forwarded(m):
+    return bool(m.get("forward_origin") or m.get("forward_from")
+                or m.get("forward_from_chat") or m.get("forward_date"))
+
+
+def take_material(m, chat_id, uid, src="Від Іри", reply=True):
+    """
+    Від Іри не вимагається нічого, крім кинути файл, розкладає Yaro.
+    Пересланим самим Yaro користуємось так само: те, що він набрав руками,
+    це його задача, а те, що переслав, це чужий матеріал.
+    """
     kind, fid, fuid = extract_file(m)
     caption = (m.get("caption") or m.get("text") or "").strip()
     gid = m.get("media_group_id")
@@ -652,14 +663,15 @@ def take_material(m, chat_id, uid):
         if cid != uid:
             api("forwardMessage", chat_id=cid, from_chat_id=chat_id, message_id=m.get("message_id"))
     if gid:
-        album_touch(str(gid), chat_id, kind, caption)
+        album_touch(str(gid), chat_id, kind, caption, src=src, reply=reply)
         return
-    if kind == "голосове":
-        send(chat_id, "Прийняла голосове ❤️ Передаю Yaro.")
-    else:
-        send(chat_id, "Прийняла ❤️ Передаю Yaro.")
+    if reply:
+        if kind == "голосове":
+            send(chat_id, "Прийняла голосове ❤️ Передаю Yaro.")
+        else:
+            send(chat_id, "Прийняла ❤️ Передаю Yaro.")
     target = ("a:" + str(row["id"])) if row else "t:0"
-    mat_card(target, kind or "", caption)
+    mat_card(target, kind or "", caption, src=src)
 
 
 def sort_material(target, bucket, by):
@@ -716,7 +728,10 @@ def hook():
                 return "ok"
             text = (m.get("text") or m.get("caption") or "").strip()
             doc = m.get("document")
-            if doc and uid == ADMIN_ID:
+            if doc and uid == ADMIN_ID and not is_forwarded(m):
+                # Свій файл віддаємо як file_id, це службове. Переслане йде
+                # звичайним шляхом матеріалу, інакше правка Іри в PDF
+                # перетворилась би на рядок службового тексту.
                 send(chat_id, "file_id цього файлу:\n" + doc.get("file_id", "?"))
                 return "ok"
             if uid == ADMIN_ID and text.startswith("/export"):
@@ -790,13 +805,17 @@ def hook():
                     take_material(m, chat_id, uid)
                     return "ok"
                 if uid == ADMIN_ID:
-                    # Ловля без церемоній: усе, що не команда, стає задачею.
-                    # Переслане теж, бо задачі приходять з чужих повідомлень, а не з голови.
-                    if text and not text.startswith("/"):
+                    # Набрав руками це своя думка, тобто задача.
+                    # Переслав це чужий матеріал: правки Іри по гайду приходять
+                    # пачками, і двадцять задач з них зробили б список непридатним.
+                    # Рішення не вгадуємо: у картці матеріалу є кнопка «в задачі».
+                    if is_forwarded(m) or extract_file(m)[1]:
+                        take_material(m, chat_id, uid, src="Переслане", reply=False)
+                    elif text and not text.startswith("/"):
                         seed_once(uid, name)
                         catch_task(uid, name, text, by=uid)
                     elif not text:
-                        send(chat_id, "Тут я ловлю тільки текст. Файли поки складаю окремо.")
+                        send(chat_id, "Не зрозумів, що з цим робити.")
                     return "ok"
                 take_material(m, chat_id, uid)
                 return "ok"
