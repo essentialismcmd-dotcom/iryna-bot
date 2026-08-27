@@ -9,6 +9,8 @@ import os, re, time, logging, threading
 import requests
 from flask import Flask, request
 
+import store
+
 TOKEN         = os.environ["BOT_TOKEN"]
 ADMIN_ID      = int(os.getenv("ADMIN_ID", "0"))
 IRA_ID        = int(os.getenv("IRA_ID", "0"))
@@ -225,6 +227,41 @@ def give_guide(uid, tier):
     return True
 
 
+def send_file(chat_id, name, blob, caption=None):
+    try:
+        r = requests.post(API + "/sendDocument",
+                          data={"chat_id": chat_id, "caption": caption or ""},
+                          files={"document": (name, blob)}, timeout=60)
+        return bool(r.json().get("ok"))
+    except Exception as e:
+        log.warning("sendDocument: %s", e)
+        return False
+
+
+def dump_db(chat_id):
+    if not store.ON:
+        send(chat_id, "Сховище вимкнене, DATABASE_URL не заданий.")
+        return
+    blob = store.export_all()
+    name = "iryna-bot-" + time.strftime("%Y-%m-%d-%H%M") + ".json"
+    if not send_file(chat_id, name, blob, "Вивантаження бази. Тримай як бекап."):
+        send(chat_id, "Не вдалося надіслати файл.")
+
+
+def stats_text():
+    if not store.ON:
+        return "Сховище вимкнене, DATABASE_URL не заданий."
+    s = store.stats()
+    users = (s["users"] or {}).get("n", 0)
+    magnet = (s["magnet"] or {}).get("n", 0)
+    paid = s["paid"] or {}
+    lines = ["Стартів: " + str(users), "Забрали магніт: " + str(magnet),
+             "Оплат: " + str(paid.get("n", 0)) + " на " + str(paid.get("uah", 0)) + " грн", "", "Мітки:"]
+    for r in s["by_tag"] or []:
+        lines.append("  " + r["tag"] + ": " + str(r["n"]))
+    return "\n".join(lines)
+
+
 # ---------- задачник ----------
 
 def parse_tasks(text):
@@ -264,58 +301,70 @@ def tasks_kb(items):
     return {"inline_keyboard": rows} if rows else None
 
 
-def load_tasks(uid):
+def pinned_of(uid):
     chat = api("getChat", chat_id=uid) or {}
     pin = chat.get("pinned_message") or {}
-    items = parse_tasks(pin.get("text"))
-    return items, pin.get("message_id")
+    return pin.get("message_id"), pin.get("text")
 
 
-def show_tasks(uid, name, seed_if_empty=True):
-    items, mid = load_tasks(uid)
-    if not items and seed_if_empty:
-        items = [{"done": False, "n": k + 1, "t": t} for k, t in enumerate(SEED.get(name, []))]
-        mid = None
-    text = render_tasks(name, items)
-    kb = tasks_kb(items)
+def items_of(owner):
+    """Список власника з бази у форматі, який розуміє render_tasks."""
+    return [{"done": r["done"], "n": r["n"], "t": r["text"]} for r in (store.tasks_of(owner) or [])]
+
+
+def seed_once(uid, owner):
+    """
+    Разова заливка списку в базу. Спершу пробуємо забрати те, що вже висить
+    у закріпі, щоб не втратити пункти, додані до переїзду. Якщо там порожньо,
+    беремо SEED.
+    """
+    if store.tasks_of(owner):
+        return
+    mid, text = pinned_of(uid)
+    old = parse_tasks(text)
+    for i in old or []:
+        r = store.add_task(owner, i["t"])
+        if r and i["done"]:
+            store.close_task(owner, r["n"])
+    if not old:
+        store.seed_tasks(owner, SEED.get(owner, []))
     if mid:
-        r = api("editMessageText", chat_id=uid, message_id=mid, text=text, reply_markup=kb)
-        if r:
-            return
+        store.set_user(uid, tasks_msg=mid)
+
+
+def paint_tasks(uid, owner):
+    """Малює список у закріпленому повідомленні. База це джерело правди, закріп це вітрина."""
+    items = items_of(owner)
+    text = render_tasks(owner, items)
+    kb = tasks_kb(items)
+    u = store.get_user(uid) or {}
+    mid = u.get("tasks_msg")
+    if not mid:
+        mid, _ = pinned_of(uid)
+    if mid and api("editMessageText", chat_id=uid, message_id=mid, text=text, reply_markup=kb):
+        return
     m = api("sendMessage", chat_id=uid, text=text, reply_markup=kb, disable_web_page_preview=True)
     if m:
         api("pinChatMessage", chat_id=uid, message_id=m.get("message_id"), disable_notification=True)
+        store.set_user(uid, tasks_msg=m.get("message_id"))
 
 
-def add_task(uid, name, text):
-    items, mid = load_tasks(uid)
-    if not items:
-        items = [{"done": False, "n": k + 1, "t": t} for k, t in enumerate(SEED.get(name, []))]
-        mid = None
-    n = max([i["n"] for i in items], default=0) + 1
-    items.append({"done": False, "n": n, "t": text})
-    body = render_tasks(name, items)
-    kb = tasks_kb(items)
-    if mid and api("editMessageText", chat_id=uid, message_id=mid, text=body, reply_markup=kb):
-        return n
-    m = api("sendMessage", chat_id=uid, text=body, reply_markup=kb, disable_web_page_preview=True)
-    if m:
-        api("pinChatMessage", chat_id=uid, message_id=m.get("message_id"), disable_notification=True)
-    return n
+def show_tasks(uid, owner):
+    seed_once(uid, owner)
+    paint_tasks(uid, owner)
 
 
-def close_task(uid, name, n):
-    items, mid = load_tasks(uid)
-    title = ""
-    for i in items:
-        if i["n"] == n:
-            i["done"] = True
-            title = i["t"]
-    body = render_tasks(name, items)
-    kb = tasks_kb(items)
-    if mid:
-        api("editMessageText", chat_id=uid, message_id=mid, text=body, reply_markup=kb)
-    return title
+def add_task(uid, owner, text, by=None):
+    seed_once(uid, owner)
+    r = store.add_task(owner, text, created_by=by)
+    paint_tasks(uid, owner)
+    return r["n"] if r else 0
+
+
+def close_task(uid, owner, n):
+    r = store.close_task(owner, n)
+    paint_tasks(uid, owner)
+    return r["text"] if r else ""
 
 
 @app.post("/" + SECRET)
@@ -334,7 +383,14 @@ def hook():
             if doc and uid == ADMIN_ID:
                 send(chat_id, "file_id цього файлу:\n" + doc.get("file_id", "?"))
                 return "ok"
+            if uid == ADMIN_ID and text.startswith("/export"):
+                dump_db(chat_id)
+                return "ok"
+            if uid == ADMIN_ID and text.startswith("/stats"):
+                send(chat_id, stats_text())
+                return "ok"
             if uid in TEAM:
+                store.touch_user(u, role="admin" if uid == ADMIN_ID else "ira")
                 if not team_on(uid):
                     if text.startswith("/start"):
                         send(chat_id, "Задачник поки вимкнений.")
@@ -346,13 +402,13 @@ def hook():
                 if text.startswith("++") and uid == ADMIN_ID and IRA_ID:
                     body = text[2:].strip()
                     if body:
-                        n = add_task(IRA_ID, "Іра", body)
+                        n = add_task(IRA_ID, "Іра", body, by=uid)
                         send(chat_id, "Додав Ірі задачу #" + str(n))
                     return "ok"
                 if text.startswith("+"):
                     body = text[1:].strip()
                     if body:
-                        n = add_task(uid, name, body)
+                        n = add_task(uid, name, body, by=uid)
                         send(chat_id, "Додав задачу #" + str(n))
                     return "ok"
                 if text.startswith("/start"):
@@ -369,10 +425,15 @@ def hook():
                 return "ok"
             if text.startswith("/start"):
                 parts = text.split(None, 1)
-                src = parts[1].strip() if len(parts) > 1 else ""
-                notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"))
+                src = parts[1].strip()[:64] if len(parts) > 1 else ""
+                rec = store.touch_user(u, source_tag=src) or {}
+                store.log_event(uid, "start", {"tag": src})
+                if rec.get("is_new", True):
+                    notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"))
                 send(chat_id, HELLO, magnet_kb())
             else:
+                store.touch_user(u)
+                store.log_event(uid, "message", {"text": text[:300]})
                 notify("Повідомлення в боті від " + who(u) + ":\n" + (text or "[не текст]"))
                 send(chat_id, "Прийняла, зараз подивлюсь і відповім ❤️")
         elif "callback_query" in upd:
@@ -392,11 +453,16 @@ def hook():
                 return "ok"
             if data == "magnet":
                 give_magnet(chat_id)
+                store.mark_magnet(uid)
+                store.log_event(uid, "magnet")
             elif data == "guide":
+                store.log_event(uid, "guide_open")
                 send(chat_id, GUIDE_INTRO, tiers_kb())
             elif data in TIERS:
                 t = TIERS[data]
                 code = order_code(uid, data)
+                store.add_purchase(uid, "guide", tier=data, order_code=code, amount_uah=t["uah"])
+                store.log_event(uid, "tier_pick", {"tier": data, "code": code})
                 body = t["text"]
                 if PAY_URL:
                     body += ("\n\nТисніть кнопку і у коментарі до платежу впишіть код:\n" + code +
@@ -414,12 +480,24 @@ def hook():
                        + who(u) + "\nКод: " + code, give_kb(uid, data))
             elif data.startswith("paid:") and TEST_MODE:
                 tier = data.split(":")[1]
-                if not give_guide(uid, tier):
+                code = order_code(uid, tier)
+                ok = give_guide(uid, tier)
+                if not ok:
                     send(chat_id, "Тест: файл ще не підключений, впиши GUIDE_FILE_ID.")
+                store.mark_paid(code)
+                if ok:
+                    store.mark_delivered(code)
+                store.log_event(uid, "pay_test", {"tier": tier, "code": code, "ok": ok})
                 notify("ТЕСТ оплати: " + TIERS.get(tier, {}).get("name", tier) + "\n" + who(u))
             elif data.startswith("give:") and uid in NOTIFY_IDS:
                 parts = (data.split(":") + ["", ""])[:3]
-                ok = give_guide(int(parts[1]), parts[2])
+                target = int(parts[1])
+                ok = give_guide(target, parts[2])
+                code = order_code(target, parts[2]) if parts[2] else None
+                if ok and code:
+                    store.mark_paid(code)
+                    store.mark_delivered(code)
+                store.log_event(target, "give_manual", {"tier": parts[2], "by": uid, "ok": ok})
                 send(chat_id, "Видано" if ok else "Не вдалося, перевір GUIDE_FILE_ID")
     except Exception as e:
         log.exception("update failed: %s", e)
@@ -428,7 +506,21 @@ def hook():
 
 @app.get("/")
 def health():
+    # У базу звідси не ходимо ніколи: keepalive стукає сюди раз на 10 хвилин,
+    # і кожен такий запит будив би Neon.
     return "ok"
+
+
+@app.get("/db/" + SECRET)
+def db_status():
+    if not store.DSN:
+        return "DATABASE_URL не заданий, бот працює без памʼяті"
+    if not store.ON:
+        return "DATABASE_URL заданий, але psycopg не встановлений"
+    r = store.q("select now() as t", fetch="one")
+    if not r:
+        return "база не відповідає, дивись логи"
+    return "<pre>ok " + str(r["t"]) + "\n\n" + stats_text() + "</pre>"
 
 
 @app.get("/setup")
@@ -468,20 +560,33 @@ def handle_tx(tx):
     except Exception:
         return
     tier = "t" + m.group(2)
+    code = "IR" + m.group(1).upper() + "-" + m.group(2)
     need = TIERS.get(tier, {}).get("uah", 0) * 100
     if amount < need * 0.9:
-        notify("Оплата " + str(amount // 100) + " грн за кодом " + m.group(0)
+        store.log_event(uid, "pay_short", {"code": code, "uah": amount // 100, "need": need // 100})
+        notify("Оплата " + str(amount // 100) + " грн за кодом " + code
                + ", а треба " + str(need // 100) + " грн. Гайд не видано.")
         return
+    store.mark_paid(code, amount // 100)
     ok = give_guide(uid, tier)
-    notify(("Оплата " + str(amount // 100) + " грн, код " + m.group(0) + ". Гайд видано автоматично.")
-           if ok else ("Оплата " + str(amount // 100) + " грн, код " + m.group(0)
+    if ok:
+        store.mark_delivered(code)
+    store.log_event(uid, "pay_ok" if ok else "pay_undelivered", {"code": code, "uah": amount // 100})
+    notify(("Оплата " + str(amount // 100) + " грн, код " + code + ". Гайд видано автоматично.")
+           if ok else ("Оплата " + str(amount // 100) + " грн, код " + code
                        + ", але файл не пішов. Перевір GUIDE_FILE_ID."))
 
 
 def mono_poll():
+    """
+    Виписка читається щохвилини з чимось, а в базу ходимо тільки за новою
+    транзакцією. Інакше цикл тримав би Neon прокинутим цілодобово.
+    seen це фільтр першого рівня, mono_tx у базі другого: він переживає
+    рестарт і не дає двом воркерам видати гайд двічі.
+    """
     seen = set()
-    primed = False
+    ever = None    # чи бот колись уже читав цю банку
+    first = True   # перший прохід у цьому процесі
     while True:
         time.sleep(70)
         if not (MONO_TOKEN and MONO_JAR):
@@ -500,10 +605,19 @@ def mono_poll():
                 if not tid or tid in seen:
                     continue
                 seen.add(tid)
-                if tx.get("amount", 0) <= 0 or not primed:
+                if tx.get("amount", 0) <= 0:
                     continue
-                handle_tx(tx)
-            primed = True
+                if ever is None:
+                    ever = store.kv_get("mono_primed") == "1"
+                if not store.claim_tx(tid, tx.get("amount"), tx.get("comment")):
+                    continue
+                if ever or not first:
+                    handle_tx(tx)
+            if first:
+                first = False
+                if ever is False:
+                    store.kv_set("mono_primed", 1)
+                    ever = True
             if len(seen) > 5000:
                 seen = set(list(seen)[-2000:])
         except Exception as e:
