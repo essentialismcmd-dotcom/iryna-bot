@@ -24,7 +24,9 @@ TEST_MODE     = os.getenv("TEST_MODE", "").strip().lower() in ("1", "true", "yes
 TASKS_ON      = os.getenv("TASKS_ON", "").strip().lower() in ("1", "true", "yes", "on")
 IRA_ON        = os.getenv("IRA_ON", "").strip().lower() in ("1", "true", "yes", "on")
 SECRET        = os.getenv("WEBHOOK_SECRET", "hook")
-BASE_URL      = os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+# запасна адреса: без неї самопінг не стартує і сервіс засинає через 15 хвилин
+BASE_URL      = (os.getenv("RENDER_EXTERNAL_URL", "").strip().rstrip("/")
+                 or "https://iryna-bot.onrender.com")
 
 
 def _ids(raw):
@@ -356,6 +358,8 @@ def sync_commands():
                 {"command": "todo", "description": "мої задачі"},
                 {"command": "inbox", "description": "нерозкладене від Іри"},
                 {"command": "status", "description": "стан бота і цифри за добу"},
+                {"command": "blocks", "description": "блоки з матеріалом від Іри"},
+                {"command": "ira", "description": "подивитись на бота її очима"},
                 {"command": "export", "description": "вивантажити базу"},
             ])
         if IRA_ID:
