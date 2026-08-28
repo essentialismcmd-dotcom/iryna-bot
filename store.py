@@ -129,6 +129,7 @@ create table if not exists blocks (
 alter table assets add column if not exists block_id bigint;
 alter table users add column if not exists active_block bigint;
 alter table users add column if not exists block_msg bigint;
+alter table users add column if not exists as_ira boolean not null default false;
 create index if not exists assets_block on assets (block_id);
 """
 
@@ -259,7 +260,7 @@ def list_users(role=None):
 
 def set_user(uid, **kw):
     allowed = ("source_tag", "got_magnet_at", "cabinet_msg", "tasks_msg", "role",
-               "active_block", "block_msg")
+               "active_block", "block_msg", "as_ira")
     fields = {k: v for k, v in kw.items() if k in allowed}
     if not fields:
         return None
@@ -429,22 +430,49 @@ def get_block(bid):
     return q("select * from blocks where id = %s", (bid,), fetch="one")
 
 
+def inbox_block():
+    """
+    Блок за замовчуванням. Якщо вона нічого не обрала, матеріал падає сюди,
+    а не в порожнечу. Нічого питати в неї для цього не треба.
+    """
+    r = q("""select * from blocks where kind = 'other' and code = '_inbox'""", fetch="one")
+    if r:
+        return r
+    return q("""insert into blocks (kind, code, title, position, active)
+                values ('other', '_inbox', 'Без блоку', 999, false)
+                on conflict (kind, code) do update set title = excluded.title
+                returning *""", fetch="one")
+
+
 def find_block(text):
     """
     Пошук блоку за текстом на кшталт «Схема 5», «схема 05», «Обкладинка».
     Спершу точний номер, далі назва. Нічого не знайшли, повертаємо None,
     і повідомлення йде звичайним матеріалом.
     """
-    t = (text or "").strip().strip(".").strip()
-    if not t or len(t) > 30:
+    t = (text or "").strip()
+    if not t or len(t) > 60:
         return None
     import re as _re
-    m = _re.match(r"^\s*(?:схема|схему|схеми)\s*[№#]?\s*0*(\d{1,2})\s*$", t, _re.I)
+    # Вона пише живою мовою: «Це все для схеми 8», «далі схема 8», «ось схема 8».
+    # Тому не шукаємо точний шаблон, а прибираємо оголошення і дивимось,
+    # чи лишився зміст. Лишився, значить це матеріал, а не заголовок.
+    m = _re.search(r"схем\w*\s*[№#]?\s*0*(\d{1,2})", t, _re.I)
     if m:
-        return q("select * from blocks where active and code = %s and kind = 'schema'",
-                 (m.group(1),), fetch="one")
+        rest = (t[:m.start()] + " " + t[m.end():]).lower()
+        rest = _re.sub(r"[^\w\s]", " ", rest, flags=_re.U)
+        stop = {"це", "оце", "все", "всі", "усе", "для", "по", "до", "на", "далі",
+                "тепер", "зараз", "і", "а", "ось", "от", "кидаю", "скидаю", "надсилаю",
+                "буде", "будуть", "наступна", "наступне", "ще", "тут", "щодо", "така",
+                "нова", "оновлена", "переробила", "мій", "моя"}
+        if not [w for w in rest.split() if w not in stop]:
+            return q("select * from blocks where active and code = %s and kind = 'schema'",
+                     (m.group(1),), fetch="one")
+        return None
+    if len(t) > 30:
+        return None
     return q("""select * from blocks where active and lower(title) = lower(%s)
-                order by position limit 1""", (t,), fetch="one")
+                order by position limit 1""", (t.strip(".").strip(),), fetch="one")
 
 
 def set_active_block(uid, bid):

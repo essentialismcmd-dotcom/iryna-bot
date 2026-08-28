@@ -652,6 +652,40 @@ def mat_card(target, kind, caption, n=1, src="Від Іри"):
 
 KIND_LABEL = {"schema": "Схеми світла", "page": "Сторінки гайда",
               "kanal": "Канал", "other": "Інше"}
+
+# Витягнуто з чинного PDF гайда від 28.08. Схеми 4 і 5 у гайді названі
+# однаково, тому розрізняємо їх підзаголовком, інакше вибір за назвою
+# перетворюється на вгадування.
+# Схему 13 не сіємо: вона дубль восьмої, і в меню дала б дві однакові назви.
+SCHEMAS = [
+    (1, "Чистий білий фон"),
+    (2, "Темний фон на циклорамі"),
+    (3, "Білий фон з жорсткими тінями"),
+    (4, "Темний фон з підсвіченою циклорамою, два джерела"),
+    (5, "Темний фон з підсвіченою циклорамою, три джерела"),
+    (6, "Білий фон, модель у тіні"),
+    (7, "Контрове світло, модель у тіні"),
+    (8, "Імітація денного світла"),
+    (9, "Кольорова градація світла"),
+    (10, "Контрове світло"),
+    (11, "Жорстка тінь на фоні"),
+    (12, "Мʼяке заповнення"),
+]
+PAGES = ["Обкладинка", "Сторінка знайомства", "База, налаштування камери",
+         "Потужності джерел", "Шпаргалка", "Фінальна сторінка"]
+
+
+def seed_catalog():
+    rows = [("schema", str(n), t, n) for n, t in SCHEMAS]
+    # Код обовʼязковий навіть сторінкам: NULL не конфліктує сам із собою,
+    # тому без нього рядки дублювались би при кожному старті сервісу.
+    rows += [("page", "p" + str(i + 1), t, i + 1) for i, t in enumerate(PAGES)]
+    try:
+        n = store.seed_blocks(rows)
+        if n:
+            log.info("засіяно блоків: %s", n)
+    except Exception as e:
+        log.warning("seed_catalog: %s", e)
 PAUSE_AFTER = 1800  # тиша, після якої питаємо, чи продовжуємо
 _pause = {}
 _pause_lock = threading.Lock()
@@ -721,6 +755,27 @@ def refresh_block_card(uid, paused=False):
     if mid:
         api("editMessageText", chat_id=uid, message_id=mid,
             text=block_card_text(b, paused), reply_markup=block_card_kb(paused))
+
+
+def ensure_card(uid, b):
+    """
+    Одна картка на екрані, хай там обраний блок чи ні. Без блоку вона просто
+    показує, що прийнято, і нічого не питає: закріп чіпаємо лише тоді, коли
+    вона сама обрала блок.
+    """
+    if b:
+        refresh_block_card(uid)
+        return
+    ib = store.inbox_block()
+    if not ib:
+        return
+    mid = (store.get_user(uid) or {}).get("block_msg")
+    text = "Прийнято ♥️\n" + block_card_text(ib).split("\n", 1)[-1]
+    if mid and api("editMessageText", chat_id=uid, message_id=mid, text=text):
+        return
+    m = api("sendMessage", chat_id=uid, text=text, disable_web_page_preview=True)
+    if m:
+        store.set_user(uid, block_msg=m.get("message_id"))
 
 
 def touch_pause(uid):
@@ -822,21 +877,18 @@ def take_material(m, chat_id, uid, src="Від Іри", reply=True):
         # що до неї не прикріплений файл.
         kind, fid, fuid = "текст", "", None
     b = store.active_block(uid) if reply else None
+    target_block = b or (store.inbox_block() if reply else None)
     row = store.add_asset(uid, fid, kind, caption=caption or None,
                           media_group=str(gid) if gid else None, file_unique_id=fuid,
-                          block_id=b["id"] if b else None)
+                          block_id=target_block["id"] if target_block else None)
     for cid in NOTIFY_IDS:
         if cid != uid:
             api("forwardMessage", chat_id=cid, from_chat_id=chat_id, message_id=m.get("message_id"))
     if reply:
-        # Їй бот не відповідає на кожен файл: мовчки перемальовує картку блоку.
-        # Якщо блоку немає, один раз показуємо меню і більше не питаємо.
-        if b:
-            touch_pause(uid)
-            refresh_block_card(uid)
-        elif not _asked_block.get(uid):
-            _asked_block[uid] = True
-            send(chat_id, "Схоже, це до якогось блоку. До якого?", kinds_kb())
+        # Їй бот не відповідає на кожен файл і нічого в неї не питає:
+        # мовчки перемальовує одну картку. Меню вона відкриє сама, якщо схоче.
+        touch_pause(uid)
+        ensure_card(uid, b)
         src = "Від Іри · " + block_name(b) if b else "Від Іри · без блоку"
     if gid:
         album_touch(str(gid), chat_id, kind, caption, src=src, reply=False)
@@ -913,7 +965,40 @@ def hook():
                 send(chat_id, stats_text())
                 return "ok"
             if uid in TEAM:
-                store.touch_user(u, role="admin" if uid == ADMIN_ID else "ira")
+                me = store.touch_user(u, role="admin" if uid == ADMIN_ID else "ira") or {}
+                # Режим Іри: Yaro бачить бота рівно так, як бачитиме вона.
+                # Потрібен, щоб перевіряти її досвід до того, як вона його отримає.
+                as_ira = uid == ADMIN_ID and bool(me.get("as_ira"))
+                if uid == ADMIN_ID and text.split(" ")[0] in ("/ira", "/яідр"):
+                    store.set_user(uid, as_ira=not as_ira)
+                    if as_ira:
+                        send(chat_id, "Вийшов з режиму Іри.", admin_kb())
+                    else:
+                        send(chat_id, "Режим Іри. Бачиш і поводишся як вона. "
+                                      "Назад: /ira", IRA_KB)
+                    return "ok"
+                if as_ira:
+                    name = "Іра"
+                    low = text.lower()
+                    if low in ("мої задачі", "мои задачи"):
+                        show_tasks(uid, name)
+                        return "ok"
+                    if low in ("матеріали", "материалы"):
+                        show_block_menu(uid)
+                        return "ok"
+                    if low in ("додати", "добавить"):
+                        send(chat_id, "Напишіть задачу з плюсом попереду, наприклад: +купити фон")
+                        return "ok"
+                    if text and not extract_file(m)[1]:
+                        b = store.find_block(text)
+                        if b:
+                            open_block(uid, b)
+                            return "ok"
+                        if re.search(r"схем\w*\s*[№#]?\s*\d{1,2}", text, re.I) and len(text) <= 60:
+                            send(chat_id, "Такої схеми не бачу, напиши назву ♥️")
+                            return "ok"
+                    take_material(m, chat_id, uid)
+                    return "ok"
                 if not team_on(uid):
                     if text.startswith("/start"):
                         send(chat_id, "Задачник поки вимкнений.")
@@ -1348,6 +1433,7 @@ if BASE_URL:
     threading.Thread(target=keepalive, daemon=True).start()
 threading.Thread(target=mono_poll, daemon=True).start()
 threading.Thread(target=sync_commands, daemon=True).start()
+threading.Thread(target=seed_catalog, daemon=True).start()
 
 
 if __name__ == "__main__":
