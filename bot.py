@@ -1502,12 +1502,18 @@ def keepalive():
             KEEPALIVE["fails"] += 1
 
 
-if BASE_URL:
-    threading.Thread(target=keepalive, daemon=True).start()
-threading.Thread(target=mono_poll, daemon=True).start()
-threading.Thread(target=ensure_webhook, daemon=True).start()
-threading.Thread(target=sync_commands, daemon=True).start()
-threading.Thread(target=seed_catalog, daemon=True).start()
+# Розріз навпіл, 28.08: адреси, які роблять зовнішній запит, висять, а
+# головна віддається миттєво. Перемикач дозволяє вимкнути всі фонові
+# потоки однією змінною і перевірити, чи справа в них, без переписування.
+if os.getenv("NO_THREADS", "").strip() != "1":
+    if BASE_URL:
+        threading.Thread(target=keepalive, daemon=True).start()
+    threading.Thread(target=mono_poll, daemon=True).start()
+    threading.Thread(target=ensure_webhook, daemon=True).start()
+    threading.Thread(target=sync_commands, daemon=True).start()
+    threading.Thread(target=seed_catalog, daemon=True).start()
+else:
+    log.warning("NO_THREADS=1: фонові потоки не запущені")
 
 
 if __name__ == "__main__":
