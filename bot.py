@@ -358,13 +358,14 @@ def ensure_webhook():
         have = info.get("url") or ""
         pending = info.get("pending_update_count", 0)
         last_err = info.get("last_error_message")
-        if have != want:
-            r = api("setWebhook", url=want, allowed_updates=["message", "callback_query"],
-                    drop_pending_updates=False)
-            log.info("вебхук переставлений на %s: %s (був %s)", want, r, have or "порожньо")
-        else:
-            log.info("вебхук на місці, у черзі %s, остання помилка: %s",
-                     pending, last_err or "немає")
+        # Ставимо завжди, навіть якщо адреса та сама. Після серії таймаутів
+        # телеграм іде в довгу паузу і сам швидко не повертається, а повторний
+        # setWebhook скидає цей стан. 28.08 через це вісімнадцять повідомлень
+        # Yaro пролежали в черзі кілька годин.
+        r = api("setWebhook", url=want, allowed_updates=["message", "callback_query"],
+                drop_pending_updates=False)
+        log.info("вебхук поставлений на %s: %s | було %s, у черзі %s, остання помилка: %s",
+                 want, r, have or "порожньо", pending, last_err or "немає")
     except Exception as e:
         log.warning("ensure_webhook: %s", e)
 
