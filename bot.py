@@ -345,6 +345,41 @@ def admin_kb():
             "resize_keyboard": True, "is_persistent": True}
 
 
+def ensure_webhook():
+    """
+    Ставимо вебхук самі при кожному старті. Сьогодні бот мовчав годинами саме
+    тому, що телеграм нікуди не доставляв, а дізнались ми про це тільки коли
+    Yaro сказав «нічого не відбувається». Ручний /setup тут ненадійний: він
+    одного разу завис і не дав навіть помилки.
+    """
+    try:
+        info = api("getWebhookInfo") or {}
+        want = BASE_URL + "/" + SECRET
+        have = info.get("url") or ""
+        pending = info.get("pending_update_count", 0)
+        last_err = info.get("last_error_message")
+        if have != want:
+            r = api("setWebhook", url=want, allowed_updates=["message", "callback_query"],
+                    drop_pending_updates=False)
+            log.info("вебхук переставлений на %s: %s (був %s)", want, r, have or "порожньо")
+        else:
+            log.info("вебхук на місці, у черзі %s, остання помилка: %s",
+                     pending, last_err or "немає")
+    except Exception as e:
+        log.warning("ensure_webhook: %s", e)
+
+
+@app.get("/hookinfo/" + SECRET)
+def hookinfo():
+    info = api("getWebhookInfo") or {}
+    rows = ["url: " + (info.get("url") or "ПОРОЖНЬО"),
+            "очікує оновлень: " + str(info.get("pending_update_count", "?")),
+            "остання помилка: " + str(info.get("last_error_message") or "немає"),
+            "коли: " + str(info.get("last_error_date") or "-"),
+            "очікуємо: " + BASE_URL + "/" + SECRET]
+    return "<pre>" + "\n".join(rows) + "</pre>"
+
+
 def sync_commands():
     """
     Команди задаються з областю дії, тому клієнтка не побачить у меню
@@ -1469,6 +1504,7 @@ def keepalive():
 if BASE_URL:
     threading.Thread(target=keepalive, daemon=True).start()
 threading.Thread(target=mono_poll, daemon=True).start()
+threading.Thread(target=ensure_webhook, daemon=True).start()
 threading.Thread(target=sync_commands, daemon=True).start()
 threading.Thread(target=seed_catalog, daemon=True).start()
 
