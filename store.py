@@ -145,15 +145,29 @@ PG_OPTS = ("-c statement_timeout=15000 -c lock_timeout=5000 "
            "-c idle_in_transaction_session_timeout=15000")
 
 
+_down_until = 0.0    # база лежить, не чіпаємо її до цього моменту
+
+
 def _open():
+    """
+    Дві спроби по пʼять секунд, не три по десять. Якщо база лягла, запит має
+    померти швидко: 28.08 кожне звернення висіло 40 секунд, чотири таких
+    зайняли всі потоки, і бот помер цілком через недоступну базу.
+    """
+    global _down_until
     err = None
-    for attempt in range(3):
+    for attempt in range(2):
         try:
-            return psycopg.connect(DSN, connect_timeout=10, autocommit=True,
-                                   row_factory=dict_row, options=PG_OPTS)
+            c = psycopg.connect(DSN, connect_timeout=5, autocommit=True,
+                                row_factory=dict_row, options=PG_OPTS)
+            _down_until = 0.0
+            return c
         except Exception as e:
             err = e
-            time.sleep(1.5 * (attempt + 1))
+            if attempt == 0:
+                time.sleep(0.5)
+    _down_until = time.time() + 60
+    log.warning("база недоступна, не чіпаю її хвилину: %s", err)
     raise err
 
 
@@ -206,8 +220,12 @@ def _ensure():
     сервіс стояв би на місці.
     """
     global _ready, ON, _schema_retry_at
-    if _ready or not ON:
-        return ON
+    if not ON:
+        return False
+    if time.time() < _down_until:
+        return False          # база лежить, не витрачаємо на неї потік
+    if _ready:
+        return True
     if time.time() < _schema_retry_at:
         return False
     with _lock:
