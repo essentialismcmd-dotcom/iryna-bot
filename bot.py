@@ -435,6 +435,33 @@ def jars():
         return "помилка: " + str(e)
 
 
+@app.post("/upload/" + SECRET)
+def upload():
+    """
+    Тимчасовий маршрут: приймає файл і віддає його telegram file_id.
+
+    Навіщо. Щоб покласти гайд у бота, потрібен токен, а він живе тільки тут,
+    у рантаймі. Репозиторій публічний, тому класти платний файл поруч з кодом
+    не можна: він назавжди лишиться в історії. Браузер теж не підходить,
+    бо вибір файлу в Telegram Web це системний діалог Windows.
+    Тому файл заливається прямо сюди і одразу перетворюється на file_id.
+    """
+    f = request.files.get("file")
+    if not f:
+        return "немає файлу в полі file", 400
+    try:
+        r = requests.post(API + "/sendDocument",
+                          data={"chat_id": ADMIN_ID, "caption": "Файл для GUIDE_FILE_ID"},
+                          files={"document": (f.filename, f.stream)}, timeout=180)
+        j = r.json()
+        if not j.get("ok"):
+            return "telegram: " + str(j.get("description")), 502
+        doc = (j.get("result") or {}).get("document") or {}
+        return "file_id: " + str(doc.get("file_id")) + "\nрозмір: " + str(doc.get("file_size"))
+    except Exception as e:
+        return "помилка: " + str(e), 500
+
+
 @app.post("/" + SECRET)
 def hook():
     upd = request.get_json(silent=True) or {}
