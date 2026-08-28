@@ -580,7 +580,8 @@ IRA_HELLO = (
     "Я передам Yaro, розбирати нічого не треба.\n"
     "Внизу дві кнопки: задачі і додати задачу."
 )
-IRA_KB = {"keyboard": [[{"text": "Мої задачі"}, {"text": "Додати"}]],
+IRA_KB = {"keyboard": [[{"text": "Матеріали"}],
+                       [{"text": "Мої задачі"}, {"text": "Додати"}]],
           "resize_keyboard": True, "is_persistent": True}
 
 FILE_KINDS = (
@@ -647,6 +648,122 @@ def mat_card(target, kind, caption, n=1, src="Від Іри"):
             reply_markup=mat_kb(target, kind, caption), disable_web_page_preview=True)
 
 
+# ---------- блоки: куди зараз падає матеріал ----------
+
+KIND_LABEL = {"schema": "Схеми світла", "page": "Сторінки гайда",
+              "kanal": "Канал", "other": "Інше"}
+PAUSE_AFTER = 1800  # тиша, після якої питаємо, чи продовжуємо
+_pause = {}
+_pause_lock = threading.Lock()
+_asked_block = {}   # щоб питати «до якого блоку» один раз, а не на кожен файл
+
+
+def block_name(b):
+    if not b:
+        return "Без блоку"
+    if b.get("kind") == "schema" and b.get("code"):
+        return "Схема " + str(b["code"]) + " · " + b["title"]
+    return b["title"]
+
+
+def block_card_text(b, paused=False):
+    tally = store.block_tally(b["id"]) or []
+    if tally:
+        line = " · ".join(str(r["n"]) + " " + r["kind"] for r in tally)
+    else:
+        line = "поки порожньо"
+    head = block_name(b)
+    if paused:
+        return head + "\nПрийнято: " + line + "\n\nПауза. Продовжуємо?"
+    return head + "\nПрийнято: " + line
+
+
+def block_card_kb(paused=False):
+    if paused:
+        return {"inline_keyboard": [[{"text": "Так, продовжуємо", "callback_data": "bgo"},
+                                     {"text": "Обрати інше", "callback_data": "bmenu"}]]}
+    return {"inline_keyboard": [[{"text": "Готово, наступне", "callback_data": "bdone"},
+                                 {"text": "Змінити блок", "callback_data": "bmenu"}]]}
+
+
+def kinds_kb():
+    rows = []
+    for r in (store.block_kinds() or []):
+        rows.append([{"text": KIND_LABEL.get(r["kind"], r["kind"]) + " · " + str(r["n"]),
+                      "callback_data": "bk:" + r["kind"]}])
+    return {"inline_keyboard": rows} if rows else None
+
+
+def blocks_kb(kind):
+    rows, pair = [], []
+    for b in (store.list_blocks(kind) or []):
+        # Назва першою, номер після неї. Її «1., 2., 3.» це порядок у пачці,
+        # а не номер схеми в гайді, і саме на цьому ми вже втратили роботу.
+        label = (b["title"] + " · №" + str(b["code"])) if b.get("code") else b["title"]
+        pair.append({"text": label[:32], "callback_data": "bs:" + str(b["id"])})
+        if len(pair) == 2:
+            rows.append(pair); pair = []
+    if pair:
+        rows.append(pair)
+    rows.append([{"text": "Назад", "callback_data": "bmenu"}])
+    return {"inline_keyboard": rows}
+
+
+def refresh_block_card(uid, paused=False):
+    """
+    Мовчазне оновлення: редагування не дає сповіщення. Саме тому бот не
+    відповідає на кожен її файл, а просто перемальовує одну картку.
+    """
+    b = store.active_block(uid)
+    if not b:
+        return
+    mid = (store.get_user(uid) or {}).get("block_msg")
+    if mid:
+        api("editMessageText", chat_id=uid, message_id=mid,
+            text=block_card_text(b, paused), reply_markup=block_card_kb(paused))
+
+
+def touch_pause(uid):
+    """Один таймер на людину: тиша довша за півгодини питає, чи продовжуємо."""
+    with _pause_lock:
+        t = _pause.get(uid)
+        if t:
+            t.cancel()
+        t = threading.Timer(PAUSE_AFTER, refresh_block_card, args=(uid, True))
+        t.daemon = True
+        _pause[uid] = t
+        t.start()
+
+
+def open_block(uid, b):
+    """
+    Картка надсилається і закріплюється рівно один раз на блок, далі тільки
+    редагується. Одне сповіщення на блок, нуль на файл.
+    """
+    store.set_active_block(uid, b["id"])
+    _asked_block.pop(uid, None)
+    m = api("sendMessage", chat_id=uid, text=block_card_text(b),
+            reply_markup=block_card_kb(), disable_web_page_preview=True)
+    if m:
+        mid = m.get("message_id")
+        store.set_user(uid, block_msg=mid)
+        api("unpinAllChatMessages", chat_id=uid)
+        api("pinChatMessage", chat_id=uid, message_id=mid, disable_notification=True)
+    touch_pause(uid)
+
+
+def show_block_menu(uid, message_id=None):
+    kb = kinds_kb()
+    if not kb:
+        send(uid, "Список блоків ще порожній, скажи Yaro ♥️")
+        return
+    text = "Над чим зараз працюємо?"
+    if message_id and api("editMessageText", chat_id=uid, message_id=message_id,
+                          text=text, reply_markup=kb):
+        return
+    send(uid, text, kb)
+
+
 _albums = {}
 _albums_lock = threading.Lock()
 
@@ -704,19 +821,26 @@ def take_material(m, chat_id, uid, src="Від Іри", reply=True):
         # Текстова правка це теж матеріал, і вона не має губитись через те,
         # що до неї не прикріплений файл.
         kind, fid, fuid = "текст", "", None
+    b = store.active_block(uid) if reply else None
     row = store.add_asset(uid, fid, kind, caption=caption or None,
-                          media_group=str(gid) if gid else None, file_unique_id=fuid)
+                          media_group=str(gid) if gid else None, file_unique_id=fuid,
+                          block_id=b["id"] if b else None)
     for cid in NOTIFY_IDS:
         if cid != uid:
             api("forwardMessage", chat_id=cid, from_chat_id=chat_id, message_id=m.get("message_id"))
-    if gid:
-        album_touch(str(gid), chat_id, kind, caption, src=src, reply=reply)
-        return
     if reply:
-        if kind == "голосове":
-            send(chat_id, "Прийняла голосове ♥️ Передаю Yaro.")
-        else:
-            send(chat_id, "Прийняла ♥️ Передаю Yaro.")
+        # Їй бот не відповідає на кожен файл: мовчки перемальовує картку блоку.
+        # Якщо блоку немає, один раз показуємо меню і більше не питаємо.
+        if b:
+            touch_pause(uid)
+            refresh_block_card(uid)
+        elif not _asked_block.get(uid):
+            _asked_block[uid] = True
+            send(chat_id, "Схоже, це до якогось блоку. До якого?", kinds_kb())
+        src = "Від Іри · " + block_name(b) if b else "Від Іри · без блоку"
+    if gid:
+        album_touch(str(gid), chat_id, kind, caption, src=src, reply=False)
+        return
     target = ("a:" + str(row["id"])) if row else "t:0"
     mat_card(target, kind or "", caption, src=src)
 
@@ -822,6 +946,20 @@ def hook():
                     else:
                         send(chat_id, IRA_HELLO, IRA_KB)
                     return "ok"
+                if uid == ADMIN_ID and text.startswith("/blocks"):
+                    rows = store.blocks_with_material() or []
+                    if not rows:
+                        send(chat_id, "Матеріалів по блоках ще немає.")
+                    else:
+                        out = ["Блоки з матеріалом:"]
+                        for r in rows:
+                            nm = ("Схема " + str(r["code"]) + " · " + r["title"]) \
+                                 if r["kind"] == "schema" and r["code"] else r["title"]
+                            out.append("· " + nm + " — " + str(r["n"]))
+                        act = store.active_block(IRA_ID) if IRA_ID else None
+                        out.append("\nЗараз у роботі: " + (block_name(act) if act else "нічого"))
+                        send(chat_id, "\n".join(out))
+                    return "ok"
                 if uid == ADMIN_ID and (text.startswith("/inbox") or text.startswith(BTN_INBOX)):
                     show_inbox(chat_id)
                     return "ok"
@@ -847,9 +985,22 @@ def hook():
                     if low in ("мої задачі", "мои задачи"):
                         show_tasks(uid, name)
                         return "ok"
+                    if low in ("матеріали", "материалы"):
+                        show_block_menu(uid)
+                        return "ok"
                     if low in ("додати", "добавить"):
                         send(chat_id, "Напишіть задачу з плюсом попереду, наприклад: +купити фон")
                         return "ok"
+                    # Заголовок текстом швидший за два тапи, коли вона в потоці.
+                    # Помилка тут дешева: картка одразу покаже назву не того блоку.
+                    if text and not extract_file(m)[1]:
+                        b = store.find_block(text)
+                        if b:
+                            open_block(uid, b)
+                            return "ok"
+                        if re.match(r"^\s*схем[аиу]\s*[№#]?\s*\d{1,2}\s*\.?\s*$", text, re.I):
+                            send(chat_id, "Такої схеми не бачу, напиши назву ♥️")
+                            return "ok"
                     take_material(m, chat_id, uid)
                     return "ok"
                 if uid == ADMIN_ID:
@@ -890,6 +1041,31 @@ def hook():
             chat_id = cq["message"]["chat"]["id"]
             u = cq.get("from", {})
             uid = u.get("id")
+            if data[:2] in ("bk", "bs", "bd", "bm", "bg") and uid in TEAM and team_on(uid):
+                mid = cq["message"].get("message_id")
+                if data == "bmenu":
+                    show_block_menu(uid, mid)
+                    return "ok"
+                if data == "bgo":
+                    touch_pause(uid)
+                    refresh_block_card(uid)
+                    return "ok"
+                if data == "bdone":
+                    store.set_active_block(uid, None)
+                    api("editMessageReplyMarkup", chat_id=uid, message_id=mid, reply_markup=None)
+                    show_block_menu(uid)
+                    return "ok"
+                if data.startswith("bk:"):
+                    api("editMessageText", chat_id=uid, message_id=mid,
+                        text="Що саме?", reply_markup=blocks_kb(data.split(":")[1]))
+                    return "ok"
+                if data.startswith("bs:"):
+                    b = store.get_block(int(data.split(":")[1]))
+                    if b:
+                        api("deleteMessage", chat_id=uid, message_id=mid)
+                        open_block(uid, b)
+                    return "ok"
+                return "ok"
             if data.startswith("mb:") and uid in NOTIFY_IDS:
                 parts = data.split(":")
                 target, bucket = parts[1] + ":" + parts[2], parts[3]

@@ -116,6 +116,20 @@ create table if not exists kv (
     v          text,
     updated_at timestamptz not null default now()
 );
+
+create table if not exists blocks (
+    id       bigserial primary key,
+    kind     text not null default 'other',
+    code     text,
+    title    text not null,
+    position integer not null default 0,
+    active   boolean not null default true,
+    unique (kind, code)
+);
+alter table assets add column if not exists block_id bigint;
+alter table users add column if not exists active_block bigint;
+alter table users add column if not exists block_msg bigint;
+create index if not exists assets_block on assets (block_id);
 """
 
 
@@ -244,7 +258,8 @@ def list_users(role=None):
 
 
 def set_user(uid, **kw):
-    allowed = ("source_tag", "got_magnet_at", "cabinet_msg", "tasks_msg", "role")
+    allowed = ("source_tag", "got_magnet_at", "cabinet_msg", "tasks_msg", "role",
+               "active_block", "block_msg")
     fields = {k: v for k, v in kw.items() if k in allowed}
     if not fields:
         return None
@@ -322,11 +337,13 @@ def use_slot(purchase_id):
 # ---------- склад матеріалів ----------
 
 def add_asset(from_user, file_id, file_kind, bucket="inbox", caption=None,
-              media_group=None, file_unique_id=None):
+              media_group=None, file_unique_id=None, block_id=None):
     return q("""
-        insert into assets (from_user, file_id, file_unique_id, file_kind, bucket, caption, media_group)
-        values (%s, %s, %s, %s, %s, %s, %s) returning *
-    """, (from_user, file_id, file_unique_id, file_kind, bucket, caption, media_group), fetch="one")
+        insert into assets (from_user, file_id, file_unique_id, file_kind, bucket,
+                            caption, media_group, block_id)
+        values (%s, %s, %s, %s, %s, %s, %s, %s) returning *
+    """, (from_user, file_id, file_unique_id, file_kind, bucket, caption,
+          media_group, block_id), fetch="one")
 
 
 def get_asset(asset_id):
@@ -376,6 +393,83 @@ def mark_asset_used(asset_id):
 def bucket_counts():
     return q("""select bucket, count(*) as n, count(used_at) as used
                 from assets group by bucket order by n desc""", fetch="all")
+
+
+# ---------- блоки матеріалів ----------
+#
+# Блок це не стан, а вказівник: куди зараз падає матеріал від Іри.
+# Активний блок завжди один, решта просто містять матеріали, і назавжди.
+# Тому закривати нічого не треба, протухає лише вказівник.
+
+def seed_blocks(rows):
+    """rows: список (kind, code, title, position). Наявні не чіпає."""
+    n = 0
+    for kind, code, title, pos in rows:
+        r = q("""insert into blocks (kind, code, title, position) values (%s, %s, %s, %s)
+                 on conflict (kind, code) do nothing returning id""",
+              (kind, code, title, pos), fetch="one")
+        if r:
+            n += 1
+    return n
+
+
+def list_blocks(kind=None):
+    if kind:
+        return q("""select * from blocks where active and kind = %s
+                    order by position, id""", (kind,), fetch="all")
+    return q("select * from blocks where active order by kind, position, id", fetch="all")
+
+
+def block_kinds():
+    return q("""select kind, count(*) as n from blocks where active
+                group by kind order by min(position)""", fetch="all")
+
+
+def get_block(bid):
+    return q("select * from blocks where id = %s", (bid,), fetch="one")
+
+
+def find_block(text):
+    """
+    Пошук блоку за текстом на кшталт «Схема 5», «схема 05», «Обкладинка».
+    Спершу точний номер, далі назва. Нічого не знайшли, повертаємо None,
+    і повідомлення йде звичайним матеріалом.
+    """
+    t = (text or "").strip().strip(".").strip()
+    if not t or len(t) > 30:
+        return None
+    import re as _re
+    m = _re.match(r"^\s*(?:схема|схему|схеми)\s*[№#]?\s*0*(\d{1,2})\s*$", t, _re.I)
+    if m:
+        return q("select * from blocks where active and code = %s and kind = 'schema'",
+                 (m.group(1),), fetch="one")
+    return q("""select * from blocks where active and lower(title) = lower(%s)
+                order by position limit 1""", (t,), fetch="one")
+
+
+def set_active_block(uid, bid):
+    return q("update users set active_block = %s where user_id = %s", (bid, uid))
+
+
+def active_block(uid):
+    r = q("""select b.* from users u join blocks b on b.id = u.active_block
+             where u.user_id = %s""", (uid,), fetch="one")
+    return r
+
+
+def block_tally(bid):
+    """Скільки і чого лежить у блоці, для лічильника в картці."""
+    return q("""select coalesce(file_kind, 'матеріал') as kind, count(*) as n
+                from assets where block_id = %s group by 1 order by n desc""",
+             (bid,), fetch="all")
+
+
+def blocks_with_material():
+    return q("""select b.id, b.kind, b.code, b.title, count(a.id) as n,
+                       max(a.created_at) as last_at
+                from blocks b join assets a on a.block_id = b.id
+                group by b.id, b.kind, b.code, b.title
+                order by max(a.created_at) desc""", fetch="all")
 
 
 # ---------- задачник ----------
