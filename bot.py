@@ -743,14 +743,47 @@ def blocks_kb(kind):
     return {"inline_keyboard": rows}
 
 
-def refresh_block_card(uid, paused=False):
+_last_edit = {}
+_pending = {}
+_edit_lock = threading.Lock()
+EDIT_GAP = 3.0
+
+
+def _flush_card(uid):
+    with _edit_lock:
+        _pending.pop(uid, None)
+        _last_edit[uid] = time.time()
+    refresh_block_card(uid, force=True)
+
+
+def refresh_block_card(uid, paused=False, force=False):
     """
     Мовчазне оновлення: редагування не дає сповіщення. Саме тому бот не
     відповідає на кожен її файл, а просто перемальовує одну картку.
+
+    Пересилання пачки з чату дає десятки повідомлень за секунди. Без стримування
+    ми б довбали телеграм редагуваннями і впіймали обмеження на найважливішому
+    сценарії. Тому не частіше разу на три секунди, плюс відкладений показ
+    фінального стану, щоб остання цифра не загубилась.
     """
     b = store.active_block(uid)
     if not b:
         return
+    if not (paused or force):
+        with _edit_lock:
+            now = time.time()
+            last = _last_edit.get(uid, 0)
+            if now - last < EDIT_GAP:
+                # Відкладений показ ставимо один, а не по одному на кожне
+                # пропущене оновлення, інакше пачка дасть пачку редагувань.
+                if not _pending.get(uid):
+                    _pending[uid] = True
+                    t = threading.Timer(EDIT_GAP, _flush_card, args=(uid,))
+                    t.daemon = True
+                    t.start()
+                return
+            _last_edit[uid] = now
+            _pending.pop(uid, None)
     mid = (store.get_user(uid) or {}).get("block_msg")
     if mid:
         api("editMessageText", chat_id=uid, message_id=mid,
