@@ -141,8 +141,14 @@ _local = threading.local()
 # схеми при старті чекала блокування без обмеження часу, тримала загальний
 # замок, і всі потоки gunicorn стали в чергу назавжди. Сервіс перестав
 # віддавати навіть головну сторінку.
+#
+# Але через пулер їх передавати не можна: PgBouncer відкидає зʼєднання ще на
+# рукостисканні з «unsupported startup parameter in options: statement_timeout».
+# 28.08 я цим повністю поклав бота, вважаючи, що лагоджу зависання.
+# Тому на пулері покладаємось на connect_timeout і запобіжник нижче.
 PG_OPTS = ("-c statement_timeout=15000 -c lock_timeout=5000 "
            "-c idle_in_transaction_session_timeout=15000")
+USE_OPTS = bool(DSN) and "-pooler" not in DSN
 
 
 _down_until = 0.0    # база лежить, не чіпаємо її до цього моменту
@@ -158,8 +164,9 @@ def _open():
     err = None
     for attempt in range(2):
         try:
-            c = psycopg.connect(DSN, connect_timeout=5, autocommit=True,
-                                row_factory=dict_row, options=PG_OPTS)
+            kw = {"options": PG_OPTS} if USE_OPTS else {}
+            c = psycopg.connect(DSN, connect_timeout=8, autocommit=True,
+                                row_factory=dict_row, **kw)
             _down_until = 0.0
             return c
         except Exception as e:
