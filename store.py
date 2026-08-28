@@ -137,11 +137,20 @@ create index if not exists assets_block on assets (block_id);
 _local = threading.local()
 
 
+# Жоден запит не має права висіти вічно. 28.08 бот повністю завис: зміна
+# схеми при старті чекала блокування без обмеження часу, тримала загальний
+# замок, і всі потоки gunicorn стали в чергу назавжди. Сервіс перестав
+# віддавати навіть головну сторінку.
+PG_OPTS = ("-c statement_timeout=15000 -c lock_timeout=5000 "
+           "-c idle_in_transaction_session_timeout=15000")
+
+
 def _open():
     err = None
     for attempt in range(3):
         try:
-            return psycopg.connect(DSN, connect_timeout=10, autocommit=True, row_factory=dict_row)
+            return psycopg.connect(DSN, connect_timeout=10, autocommit=True,
+                                   row_factory=dict_row, options=PG_OPTS)
         except Exception as e:
             err = e
             time.sleep(1.5 * (attempt + 1))
@@ -187,10 +196,20 @@ def _conn():
             pass
 
 
+_schema_retry_at = 0.0
+
+
 def _ensure():
-    global _ready, ON
+    """
+    Схема ставиться один раз на процес. Якщо не вийшло, наступна спроба не
+    раніше ніж через хвилину: інакше кожен запит знову впирався б у неї і
+    сервіс стояв би на місці.
+    """
+    global _ready, ON, _schema_retry_at
     if _ready or not ON:
         return ON
+    if time.time() < _schema_retry_at:
+        return False
     with _lock:
         if _ready:
             return True
@@ -199,7 +218,8 @@ def _ensure():
                 c.execute(SCHEMA)
             _ready = True
         except Exception as e:
-            log.warning("схема не створилась: %s", e)
+            _schema_retry_at = time.time() + 60
+            log.warning("схема не створилась, наступна спроба через хвилину: %s", e)
             return False
     return True
 
