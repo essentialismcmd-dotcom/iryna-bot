@@ -397,6 +397,109 @@ def health():
     return "ok"
 
 
+PRYVATNIST = """<!doctype html>
+<html lang="uk"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Політика конфіденційності</title>
+<style>
+ body{font:16px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;max-width:760px;
+      margin:0 auto;padding:32px 20px;color:#1c1e21;background:#fff}
+ h1{font-size:26px;margin:0 0 4px} h2{font-size:18px;margin:28px 0 8px}
+ .d{color:#65676b;font-size:14px;margin-bottom:24px}
+ ul{padding-left:20px} hr{border:0;border-top:1px solid #dadde1;margin:36px 0}
+ code{background:#f0f2f5;padding:1px 5px;border-radius:4px}
+</style></head><body>
+
+<h1>Політика конфіденційності</h1>
+<div class="d">Застосунок <code>iryna-reklama</code> &middot; оновлено 4 вересня 2026</div>
+
+<h2>Хто оператор</h2>
+<p>Застосунком керує Ярослав Копчик приватно. Зв'язок:
+<a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>.</p>
+
+<h2>Для чого застосунок</h2>
+<p>Застосунок обслуговує рекламний кабінет і професійний акаунт Instagram,
+якими оператор керує за дорученням власниці акаунта. Публічної реєстрації
+користувачів немає, стороннім людям він не доступний.</p>
+
+<h2>Які дані обробляються</h2>
+<ul>
+ <li>Статистика реклами: витрати, покази, кліки, розмови.</li>
+ <li>Повідомлення в Instagram Direct і коментарі акаунта, яким керує оператор,
+     разом з іменем співрозмовника, яке видно в самому листуванні.</li>
+ <li>Службові ідентифікатори сторінки, акаунта Instagram і рекламного кабінету.</li>
+</ul>
+
+<h2>Навіщо</h2>
+<p>Щоб відповідати на звернення клієнток цього акаунта і оцінювати
+результативність реклами. Інших цілей немає.</p>
+
+<h2>Кому передаються</h2>
+<p>Нікому. Дані не продаються, не передаються рекламним мережам і не
+використовуються для профілювання за межами цього акаунта.</p>
+
+<h2>Де зберігаються і як довго</h2>
+<p>На робочому комп'ютері оператора та на сервері цього застосунку, доки
+триває робота з акаунтом. Після припинення роботи дані видаляються.</p>
+
+<h2>Видалення даних</h2>
+<p>Напишіть на <a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>
+з темою <b>Видалення даних</b>. Дані видаляються протягом 30 днів,
+підтвердження надсилається у відповідь. Власниця акаунта може будь-коли
+відкликати доступ застосунку в налаштуваннях Meta, і обробка припиняється
+того ж дня.</p>
+
+<hr>
+
+<h1>Privacy Policy</h1>
+<div class="d">App <code>iryna-reklama</code> &middot; updated 4 September 2026</div>
+
+<h2>Operator</h2>
+<p>This app is operated privately by Yaroslav Kopchyk.
+Contact: <a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>.</p>
+
+<h2>Purpose</h2>
+<p>The app serves one advertising account and one Instagram professional account
+that the operator manages on behalf of the account owner. There is no public
+sign-up and no access for third parties.</p>
+
+<h2>Data processed</h2>
+<ul>
+ <li>Advertising statistics: spend, impressions, clicks, conversations.</li>
+ <li>Instagram Direct messages and comments of the managed account, including
+     the sender name visible in the conversation itself.</li>
+ <li>Technical identifiers of the Page, Instagram account and ad account.</li>
+</ul>
+
+<h2>Why</h2>
+<p>To answer enquiries from this account's clients and to measure advertising
+performance. No other purpose.</p>
+
+<h2>Sharing</h2>
+<p>None. Data is not sold, not shared with ad networks, and not used for
+profiling beyond this account.</p>
+
+<h2>Storage and retention</h2>
+<p>On the operator's working computer and on this app's server, for as long as
+the work on the account continues. Data is deleted when the work ends.</p>
+
+<h2>Data deletion</h2>
+<p>Email <a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>
+with the subject <b>Data deletion</b>. Data is deleted within 30 days and a
+confirmation is sent in reply. The account owner can revoke the app's access in
+Meta settings at any time, which stops processing the same day.</p>
+
+</body></html>"""
+
+
+@app.get("/privacy")
+def privacy():
+    """Політика конфіденційності. Meta вимагає публічну адресу для публікації
+    застосунку, ця сторінка і є нею. Служить водночас інструкцією з видалення
+    даних."""
+    return PRYVATNIST, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
 @app.get("/setup")
 def setup():
     base = request.url_root.rstrip("/")
