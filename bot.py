@@ -650,7 +650,7 @@ def assets_lines(limit=200):
         if not r.get("file_id"):
             continue
         kind = KIND_UA.get(r.get("file_kind") or "", r.get("file_kind") or "document")
-        out.append("#" + str(r.get("id")) + "  " + str(r.get("created_at"))[:16]
+        out.append("#" + str(r.get("id")) + "  " + str(r.get("created_at"))[:19]
                    + "  " + str(r.get("bucket")) + "  " + (r.get("file_name") or "")
                    + ("  " + mb(r["file_size"]) if r.get("file_size") else "")
                    + ("  «" + r["caption"][:60] + "»" if r.get("caption") else "")
@@ -877,7 +877,7 @@ def events_page():
     out = []
     for r in reversed(rows):
         p = r.get("payload") or {}
-        out.append(str(r.get("created_at"))[:16] + "  " + str(r.get("user_id")) + "  " + str(r.get("kind"))
+        out.append("#" + str(r.get("id")) + "  " + str(r.get("created_at"))[:19] + "  " + str(r.get("user_id")) + "  " + str(r.get("kind"))
                    + "  " + (str(p.get("text") or p)[:300]).replace("\n", " / "))
     return "<pre>" + "\n".join(out) + "</pre>"
 
