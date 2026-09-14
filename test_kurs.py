@@ -114,8 +114,13 @@ VYKLYKY.clear()
 bot.MAGNET_URL = "https://x/magnit.pdf"
 cb("magnet")
 perevirka("замок: файл не пішов", not [v for v in VYKLYKY if v[0] == "sendDocument"])
-perevirka("замок: текст і кнопки", "подарунок для своїх" in teksty()[-1]
+perevirka("замок: текст і кнопки", "для своїх" in teksty()[-1]
           and ostannia_klaviatura() == ["Підписатись на канал", "Я в каналі ♥️"], str(ostannia_klaviatura()))
+VYKLYKY.clear()
+cb("magnet")
+perevirka("замок мʼякий: на другий натиск файл іде", [v for v in VYKLYKY if v[0] == "sendDocument"]
+          and "усе одно ваш" in teksty()[0])
+bot.LOCK_SEEN.clear()
 VYKLYKY.clear()
 STATUS["v"] = None
 cb("magnet")
