@@ -215,6 +215,12 @@ perevirka("заливка без файлу відмовляє", app.post("/zaly
 perevirka("/inbox і /perevirka живі", app.get("/inbox/sekret").status_code == 200 and app.get("/perevirka/sekret").status_code == 200)
 perevirka("/perevirka бачить гайд і файли курсу", "гайд t1" in app.get("/perevirka/sekret").data.decode() and "k1 №3" in app.get("/perevirka/sekret").data.decode())
 
+# 15а. Адмінський текст лягає в базу цілком
+ZAPYSY.clear(); VYKLYKY.clear()
+msg("СХЕМА 4\nМодель ставимо далеко від фону", uid=1)
+perevirka("текст адміна в базі цілком", ZAPYSY and ZAPYSY[-1].get("caption", "").startswith("СХЕМА 4") and ZAPYSY[-1].get("bucket") == "kurs", str(ZAPYSY))
+perevirka("/events і /file живі без бази", app.get("/events/sekret").status_code == 200 and app.get("/file/sekret/1").status_code == 404)
+
 # 15. /privacy живий
 perevirka("/privacy віддає сторінку", app.get("/privacy").status_code == 200)
 

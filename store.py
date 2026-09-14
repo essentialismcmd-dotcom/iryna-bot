@@ -452,6 +452,11 @@ def add_asset(from_user, file_id, file_kind, bucket="inbox", caption=None,
           media_group, block_id, file_name, file_size), fetch="one")
 
 
+def events_recent(limit=200):
+    return q("select * from events order by created_at desc, id desc limit %s",
+             (limit,), fetch="all")
+
+
 def assets_recent(limit=200):
     """Усі матеріали, найновіші першими, будь-який кошик."""
     return q("select * from assets order by created_at desc, id desc limit %s",

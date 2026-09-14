@@ -831,6 +831,57 @@ def perevirka_page():
     return "<pre>" + perevirka_lines() + "</pre>"
 
 
+@app.get("/file/" + SECRET + "/<int:aid>")
+def file_page(aid):
+    """
+    Віддає файл з бази сесії на перегляд: getFile і потяг з серверів Telegram.
+    Межа Bot API 20 МБ, більше віддає текст помилки. Для рендерів схем і
+    кадрів у гайд цього досить, PSD і RAW курсу так не забрати.
+    """
+    store.session_begin()
+    try:
+        a = store.get_asset(aid)
+    finally:
+        store.session_end()
+    if not a or not a.get("file_id"):
+        return "немає такого запису або він без файлу", 404
+    j = api_raw("getFile", file_id=a["file_id"])
+    if not j.get("ok"):
+        return "getFile: " + str(j.get("description")), 502
+    path = (j.get("result") or {}).get("file_path")
+    if not path:
+        return "getFile без file_path", 502
+    try:
+        r = requests.get("https://api.telegram.org/file/bot" + TOKEN + "/" + path,
+                         timeout=120, stream=True)
+    except Exception as e:
+        return "потяг: " + str(e), 502
+    if r.status_code != 200:
+        return "потяг: " + str(r.status_code), 502
+    name = a.get("file_name") or os.path.basename(path)
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    ctype = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+             "pdf": "application/pdf", "txt": "text/plain; charset=utf-8"}.get(ext, "application/octet-stream")
+    return r.iter_content(65536), 200, {"Content-Type": ctype,
+                                          "Content-Disposition": "inline; filename*=UTF-8''" + requests.utils.quote(name)}
+
+
+@app.get("/events/" + SECRET)
+def events_page():
+    """Останні події журналу: текст, який до 14.09 07:3x в assets не потрапляв."""
+    store.session_begin()
+    try:
+        rows = store.events_recent(limit=200) or []
+    finally:
+        store.session_end()
+    out = []
+    for r in reversed(rows):
+        p = r.get("payload") or {}
+        out.append(str(r.get("created_at"))[:16] + "  " + str(r.get("user_id")) + "  " + str(r.get("kind"))
+                   + "  " + (str(p.get("text") or p)[:300]).replace("\n", " / "))
+    return "<pre>" + "\n".join(out) + "</pre>"
+
+
 @app.post("/zalyvka/" + SECRET)
 def zalyvka():
     """
@@ -1089,6 +1140,13 @@ def hook():
                 fid_line = admin_file(m)
                 if fid_line:
                     send(chat_id, "У базі, кошик kurs:\n" + fid_line)
+                    return "ok"
+                if text and not text.startswith("/"):
+                    # Тексти схем від Іри він теж пересилає. Зберігаємо цілком:
+                    # до 14.09 07:3x вони летіли в events обрізаними до 300 знаків.
+                    store.add_asset(uid, "", "текст", bucket="kurs", caption=text,
+                                    media_group=str(m["media_group_id"]) if m.get("media_group_id") else None)
+                    send(chat_id, "У базі, текст: " + text[:40].replace("\n", " ") + ("…" if len(text) > 40 else ""))
                     return "ok"
 
             # Іра: кидає що завгодно, бот приймає і мовчить.
