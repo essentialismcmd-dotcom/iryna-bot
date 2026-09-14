@@ -116,6 +116,11 @@ COURSE_DELIVERED = (
     "з чату на компʼютер.\n\n"
     "Питання по уроках пишіть прямо сюди, відповідаю."
 )
+LESSON_DONE = ("Це весь урок ♥️ Відео можна дивитись прямо тут, практику відкривайте "
+               "у Photoshop через Camera Raw і повторюйте за мною. Питання пишіть сюди.")
+MOI_TEXT = "Ваші матеріали ♥️ Тисніть, і надішлю ще раз."
+MOI_EMPTY = ("Поки нічого не куплено ♥️ Безкоштовні три схеми світла по кнопці нижче, "
+             "гайд і курс ретуші там само.")
 NEXT_AFTER_GUIDE = (
     "І ще одне ♥️ Світло поставили, далі кадр треба довести в ретуші.\n"
     "У мене два записані курси, підберу під ваш рівень."
@@ -314,7 +319,7 @@ def course_kb(first):
                                 [{"text": COURSES["k12"]["btn"], "callback_data": "k12"}]]}
 
 
-def next_kb():
+def retush_kb_one():
     return {"inline_keyboard": [[{"text": "Курс ретуші", "callback_data": "retush"}]]}
 
 
@@ -355,7 +360,7 @@ def give_guide(uid, tier):
     if extra:
         send(uid, extra)
     # Покупець у момент оплати найтепліший, другого такого моменту не буде.
-    send(uid, NEXT_AFTER_GUIDE, next_kb())
+    send(uid, NEXT_AFTER_GUIDE, retush_kb_one())
     return True
 
 
@@ -432,51 +437,131 @@ def _send_album(uid, kind, items, caption):
     return n
 
 
-def give_course(uid, key):
+def owned_keys(uid):
+    """Що людина купила: ключі продуктів з оплачених покупок. Адмін бачить усе."""
+    if uid in NOTIFY_IDS:
+        return {"t1", "k1", "k2"}
+    out = set()
+    for p in (store.purchases_of(uid) or []):
+        t = p.get("tier") or ""
+        if t in ("t1", "t2", "t3"):
+            out.add("t1")
+        elif t == "k12":
+            out.update({"k1", "k2"})
+        elif t in ("k1", "k2"):
+            out.add(t)
+    return out
+
+
+def lessons_kb(uid, current=None):
+    """Кнопки всіх куплених уроків. current це (ключ, номер), його не показуємо."""
+    rows = []
+    owned = owned_keys(uid)
+    if "t1" in owned and GUIDE_FILE_ID:
+        rows.append([{"text": "Гайд «Світло»", "callback_data": "my:guide"}])
+    for ckey in ("k1", "k2"):
+        if ckey not in owned:
+            continue
+        for i, (title, _files) in enumerate(COURSE_SECTIONS.get(ckey) or []):
+            if (ckey, i) == current:
+                continue
+            rows.append([{"text": title or ("Урок " + str(i + 1)), "callback_data": "les:" + ckey + ":" + str(i)}])
+    return {"inline_keyboard": rows} if rows else None
+
+
+def next_kb(ckey, idx):
+    """Після уроку: одна кнопка «Далі» і одна «Усі матеріали»."""
+    rows = []
+    sections = COURSE_SECTIONS.get(ckey) or []
+    if idx + 1 < len(sections):
+        nt = sections[idx + 1][0] or ("Урок " + str(idx + 2))
+        rows.append([{"text": "Далі: " + nt, "callback_data": "les:" + ckey + ":" + str(idx + 1)}])
+    elif ckey == "k1" and COURSE_SECTIONS.get("k2"):
+        rows.append([{"text": "Далі: курс 2, колір", "callback_data": "les:k2:0"}])
+    rows.append([{"text": "Усі мої матеріали", "callback_data": "moi"}])
+    return {"inline_keyboard": rows}
+
+
+def send_video_or_file(uid, kind, fid, caption):
     """
-    Видача по уроках, а не купою: заголовок уроку, відео першим, практика
-    альбомом з підписом, що це за файли. 14.09 Yaro після тесту: «купа файлів,
-    не розумію, як цим скористатися».
+    Відео має грати в чаті, а не качатись. Якщо файл залитий як документ,
+    пробуємо sendVideo, Telegram інколи приймає; якщо ні, віддаємо як є.
     """
-    sections = COURSE_SECTIONS.get(key) or []
-    total = sum(len(fs) for _, fs in sections)
-    if not total:
+    if kind == "video":
+        return bool(api("sendVideo", retry=True, chat_id=uid, video=fid, caption=caption, supports_streaming=True))
+    if api_raw("sendVideo", chat_id=uid, video=fid, caption=caption, supports_streaming=True).get("ok"):
+        return True
+    return bool(api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: fid, "caption": caption}))
+
+
+def send_lesson(uid, ckey, idx):
+    """Один урок: заголовок, відео, практика альбомом, кнопка «Далі»."""
+    sections = COURSE_SECTIONS.get(ckey) or []
+    if idx < 0 or idx >= len(sections):
         return False
+    title, files = sections[idx]
+    total = len(files)
     sent = 0
-    first = True
-    for title, files in sections:
-        if not first:
-            time.sleep(1.0)
-        first = False
-        if title:
-            send(uid, title)
-            time.sleep(1.0)
-        videos = [fid for k, fid in files if k in ("video", "animation", "video_note")]
-        for fid in videos:
-            if api("sendVideo", retry=True, chat_id=uid, video=fid, caption=title or None):
+    if title:
+        send(uid, title)
+        time.sleep(1.0)
+    docs = []
+    for kind, fid in files:
+        if kind in ("video", "animation", "video_note") or fid.startswith("BAAC") or kind == "document" and _looks_video(ckey, idx, fid):
+            if send_video_or_file(uid, kind, fid, title or None):
                 sent += 1
             time.sleep(1.0)
-        for kind in ("document", "photo", "audio", "voice"):
-            items = [fid for k, fid in files if k == kind]
-            for i in range(0, len(items), 10):
-                chunk = items[i:i + 10]
-                if i:
-                    time.sleep(1.0)
-                if len(chunk) == 1:
-                    cap = PRACTICE_CAPTION if kind == "document" else None
-                    if api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: chunk[0], "caption": cap}):
-                        sent += 1
-                else:
-                    sent += _send_album(uid, kind, chunk, PRACTICE_CAPTION if kind == "document" else "")
-    if sent == 0:
-        return False
+        else:
+            docs.append((kind, fid))
+    for kind in ("document", "photo", "audio", "voice"):
+        items = [fid for k, fid in docs if k == kind]
+        for i in range(0, len(items), 10):
+            chunk = items[i:i + 10]
+            if i:
+                time.sleep(1.0)
+            if len(chunk) == 1:
+                cap = PRACTICE_CAPTION if kind == "document" else None
+                if api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: chunk[0], "caption": cap}):
+                    sent += 1
+            else:
+                sent += _send_album(uid, kind, chunk, PRACTICE_CAPTION if kind == "document" else "")
     if sent < total:
-        log.warning("курс %s: пішло %s з %s файлів", key, sent, total)
-        notify("Курс " + key + " для id " + str(uid) + ": пішло " + str(sent)
-               + " з " + str(total) + " файлів, глянь журнал.")
+        log.warning("урок %s/%s для %s: пішло %s з %s", ckey, idx, uid, sent, total)
+        notify("Урок " + ckey + " №" + str(idx + 1) + " для id " + str(uid) + ": пішло "
+               + str(sent) + " з " + str(total) + " файлів.")
     time.sleep(1.0)
-    send(uid, COURSE_DELIVERED)
-    return True
+    send(uid, LESSON_DONE, next_kb(ckey, idx))
+    store.log_event(uid, "lesson", {"course": ckey, "n": idx + 1, "sent": sent, "of": total})
+    return sent > 0
+
+
+def _looks_video(ckey, idx, fid):
+    """Перший файл розділу з «Відео» у назві це відео, навіть якщо залите документом."""
+    title = (COURSE_SECTIONS.get(ckey) or [("", [])])[idx][0].lower()
+    return title.startswith("відео")
+
+
+def give_course(uid, key):
+    """
+    Видача не купою, а за руку: інтро зі списком уроків, перший урок одразу,
+    решта по кнопці «Далі». Yaro 14.09: «щоб навіть малій дитині було
+    зрозуміло», «купа повідомлень, усе загубилось».
+    """
+    keys = ["k1", "k2"] if key == "k12" else [key]
+    if not any(COURSE_SECTIONS.get(k) for k in keys):
+        return False
+    lines = ["Готово, курс ваш ♥️", ""]
+    for k in keys:
+        lines.append(COURSES[k]["name"] + ":")
+        for i, (title, files) in enumerate(COURSE_SECTIONS.get(k) or []):
+            lines.append("  " + str(i + 1) + ". " + (title or "Урок " + str(i + 1)))
+        lines.append("")
+    lines.append("Йдемо по одному уроку: дивитесь відео, робите практику, тиснете «Далі». "
+                 "Усе куплене завжди під рукою в меню «Мої матеріали».")
+    send(uid, "\n".join(lines))
+    time.sleep(1.0)
+    first = next(k for k in keys if COURSE_SECTIONS.get(k))
+    return send_lesson(uid, first, 0)
 
 
 def deliver(uid, key):
@@ -1241,6 +1326,12 @@ def hook():
                 take_material(m, chat_id, uid)
                 return "ok"
 
+            if text.startswith("/moi") or text.strip() == "Мої матеріали":
+                store.touch_user(u)
+                kb = lessons_kb(uid)
+                send(chat_id, MOI_TEXT if kb else MOI_EMPTY, kb or magnet_kb())
+                return "ok"
+
             if text.startswith("/start"):
                 parts = text.split(None, 1)
                 src = parts[1].strip()[:64] if len(parts) > 1 else ""
@@ -1317,6 +1408,20 @@ def hook():
                     store.mark_delivered(code)
                 store.log_event(uid, "pay_test", {"tier": key, "ok": ok})
                 notify("ТЕСТ оплати: " + pname(key) + "\n" + who(u))
+            elif data == "moi":
+                kb = lessons_kb(uid)
+                send(chat_id, MOI_TEXT if kb else MOI_EMPTY, kb or magnet_kb())
+            elif data == "my:guide":
+                if "t1" in owned_keys(uid) and GUIDE_FILE_ID:
+                    api("sendDocument", chat_id=chat_id, document=GUIDE_FILE_ID)
+                else:
+                    send(chat_id, MOI_EMPTY, magnet_kb())
+            elif data.startswith("les:"):
+                _, ckey, n = (data.split(":") + ["", ""])[:3]
+                if ckey in owned_keys(uid):
+                    send_lesson(chat_id, ckey, int(n or 0))
+                else:
+                    send(chat_id, MOI_EMPTY, magnet_kb())
             elif data.startswith("give:") and uid in NOTIFY_IDS:
                 parts = (data.split(":") + ["", ""])[:3]
                 target = int(parts[1])
@@ -1343,6 +1448,10 @@ def ensure_webhook():
         r = api("setWebhook", url=BASE_URL + "/" + SECRET,
                 allowed_updates=["message", "callback_query"])
         log.info("вебхук поставлений: %s", r)
+        api("setMyCommands", commands=[
+            {"command": "start", "description": "Три схеми світла безкоштовно"},
+            {"command": "moi", "description": "Мої матеріали: гайд і уроки"},
+        ])
     except Exception as e:
         log.warning("ensure_webhook: %s", e)
 
