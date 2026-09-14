@@ -647,13 +647,19 @@ def assets_lines(limit=200):
     rows = store.assets_recent(limit=limit) or []
     out = []
     for r in reversed(rows):
-        if not r.get("file_id"):
+        if not r.get("file_id") and r.get("file_kind") != "текст":
             continue
         kind = KIND_UA.get(r.get("file_kind") or "", r.get("file_kind") or "document")
+        # Текст від адміна (тексти схем Іри) віддаємо цілком: він і є матеріал.
+        cap = r.get("caption") or ""
+        if r.get("file_kind") == "текст":
+            out.append("#" + str(r.get("id")) + "  " + str(r.get("created_at"))[:19]
+                       + "  " + str(r.get("bucket")) + "  ТЕКСТ\n" + cap + "\n---")
+            continue
         out.append("#" + str(r.get("id")) + "  " + str(r.get("created_at"))[:19]
                    + "  " + str(r.get("bucket")) + "  " + (r.get("file_name") or "")
                    + ("  " + mb(r["file_size"]) if r.get("file_size") else "")
-                   + ("  «" + r["caption"][:60] + "»" if r.get("caption") else "")
+                   + ("  «" + cap[:60] + "»" if cap else "")
                    + "\n" + kind + ":" + r["file_id"])
     if not rows:
         return "У базі матеріалів немає або база вимкнена."
