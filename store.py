@@ -186,6 +186,10 @@ create table if not exists dm_override (
 alter table users add column if not exists block_msg bigint;
 alter table users add column if not exists as_ira boolean not null default false;
 create index if not exists assets_block on assets (block_id);
+-- 14.09.2026: файли курсу від адміна. Імʼя і розмір, щоб зібрати курс без
+-- перегляду кожного відео.
+alter table assets add column if not exists file_name text;
+alter table assets add column if not exists file_size bigint;
 """
 
 
@@ -438,13 +442,20 @@ def use_slot(purchase_id):
 # ---------- склад матеріалів ----------
 
 def add_asset(from_user, file_id, file_kind, bucket="inbox", caption=None,
-              media_group=None, file_unique_id=None, block_id=None):
+              media_group=None, file_unique_id=None, block_id=None,
+              file_name=None, file_size=None):
     return q("""
         insert into assets (from_user, file_id, file_unique_id, file_kind, bucket,
-                            caption, media_group, block_id)
-        values (%s, %s, %s, %s, %s, %s, %s, %s) returning *
+                            caption, media_group, block_id, file_name, file_size)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning *
     """, (from_user, file_id, file_unique_id, file_kind, bucket, caption,
-          media_group, block_id), fetch="one")
+          media_group, block_id, file_name, file_size), fetch="one")
+
+
+def assets_recent(limit=200):
+    """Усі матеріали, найновіші першими, будь-який кошик."""
+    return q("select * from assets order by created_at desc, id desc limit %s",
+             (limit,), fetch="all")
 
 
 def get_asset(asset_id):

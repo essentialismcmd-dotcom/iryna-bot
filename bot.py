@@ -29,15 +29,18 @@ PAY_URL       = os.getenv("PAY_URL", "").strip()
 MONO_TOKEN    = os.getenv("MONO_TOKEN", "").strip()
 MONO_JAR      = os.getenv("MONO_JAR", "").strip()
 # Курс ретуші. Файли великі (відео), тому не URL, а file_id з цього ж бота:
-# Іра або Yaro пересилає файл боту, бот відповідає рядком «kind:file_id»,
-# ці рядки через кому лягають у змінну. Порядок у змінній це порядок видачі.
+# Yaro пересилає файл боту, бот кладе його в базу (таблиця assets, кошик
+# «kurs») і відповідає рядком «kind:file_id». Список для змінної збирається
+# з /inbox/<SECRET>. Порядок у змінній це порядок видачі.
 COURSE1_FILES = os.getenv("COURSE1_FILES", "").strip()
 COURSE2_FILES = os.getenv("COURSE2_FILES", "").strip()
-# Ціни курсів у гривнях: перший, другий, обидва. Без змінної беруться з коду.
+# Ціни в гривнях. Курси: перший, другий, обидва. Без змінних беруться з коду,
+# і код тримає таблицю з projects/iryna/TSINY-2026-09-14.md.
 COURSE_PRICES = os.getenv("COURSE_PRICES", "").strip()
-# Одноразова заливка гайда: бот при старті надсилає GUIDE_UPLOAD_PATH адміну
-# і пише file_id у лог. Далі file_id вписується в GUIDE_FILE_ID, змінна знімається.
-GUIDE_UPLOAD_PATH = os.getenv("GUIDE_UPLOAD_PATH", "").strip()
+GUIDE_PRICE   = os.getenv("GUIDE_PRICE", "").strip()
+# Які тарифи гайда показувати. t2 і t3 продають час Іри на розбір кадрів,
+# а з нею це не домовлено, тому за замовчуванням тільки сам гайд.
+GUIDE_TIERS   = [t for t in os.getenv("GUIDE_TIERS", "t1").replace(" ", "").split(",") if t]
 TEST_MODE     = os.getenv("TEST_MODE", "").strip().lower() in ("1", "true", "yes", "on")
 IRA_ON        = os.getenv("IRA_ON", "").strip().lower() in ("1", "true", "yes", "on")
 SECRET        = os.getenv("WEBHOOK_SECRET", "hook")
@@ -126,11 +129,22 @@ IRA_HELLO = (
     "Коротко підпиши, для чого це, і все. Розбирати нічого не треба."
 )
 
+def _price(raw, default):
+    try:
+        p = int(raw)
+        return p if p > 0 else default
+    except ValueError:
+        return default
+
+
+# Ціна гайда: 20 $ його словом 13.09, за курсом 44.6 це 890, округлено до 900.
+_G = _price(GUIDE_PRICE, 900)
+
 TIERS = {
-    "t1": {"name": "Гайд «Світло»", "uah": 650, "btn": "Гайд, 650 грн",
-           "text": ("Гайд «Світло», 650 грн\n\n"
-                    "Повний файл з усіма схемами, розстановками і налаштуваннями. "
-                    "Доступ залишається назавжди."),
+    "t1": {"name": "Гайд «Світло»", "uah": _G, "btn": "Гайд, " + str(_G) + " грн",
+           "text": ("Гайд «Світло», " + str(_G) + " грн\n\n"
+                    "42 сторінки, десять моїх робочих схем: розстановка з двох ракурсів, "
+                    "налаштування і кадр зі зйомки до кожної. Доступ залишається назавжди."),
            "extra": ""},
     "t2": {"name": "Гайд + розбір одного кадру", "uah": 900, "btn": "Гайд + розбір кадру, 900 грн",
            "text": ("Гайд «Світло» + розбір одного кадру, 900 грн\n\n"
@@ -153,8 +167,11 @@ def _prices(raw, default):
         return default
 
 
-# Ціни за bot/KANAL.md: 1800 / 1300 / обидва 2700. Змінна COURSE_PRICES їх перебиває.
-_K1, _K2, _K12 = _prices(COURSE_PRICES, [1800, 1300, 2700])
+# Сходинка лійки: гайд 900 → обидва курси 4 500 (≈100 $, його орієнтир),
+# перший окремо 3 200, другий 1 900. Історичні 1800/1300/2700 повертаються
+# змінною COURSE_PRICES без деплою. Таблиця з поясненням у коворку,
+# projects/iryna/TSINY-2026-09-14.md.
+_K1, _K2, _K12 = _prices(COURSE_PRICES, [3200, 1900, 4500])
 
 COURSES = {
     "k1": {"name": "Курс ретуші 1: основи і бʼюті-портрет", "uah": _K1,
@@ -216,17 +233,31 @@ def pname(key):
     return PRODUCTS.get(key, {}).get("name", key)
 
 
-def api(method, **params):
+def api_raw(method, **params):
+    """Сира відповідь Telegram: {ok, result | description, error_code}."""
     params = {k: v for k, v in params.items() if v is not None}
     try:
         r = requests.post(API + "/" + method, json=params, timeout=20)
-        j = r.json()
-        if not j.get("ok"):
-            log.warning("%s: %s", method, j.get("description"))
-        return j.get("result")
+        return r.json()
     except Exception as e:
-        log.warning("%s: %s", method, e)
-        return None
+        return {"ok": False, "description": str(e)}
+
+
+def api(method, retry=False, **params):
+    """
+    retry=True тільки для видачі файлів: на 429 бот чекає стільки, скільки
+    просить Telegram, і пробує ще раз. Відповіді в чат так не повторюємо,
+    інакше один флуд від адміна заблокує потік вебхука на пів хвилини.
+    """
+    j = api_raw(method, **params)
+    if not j.get("ok") and retry and j.get("error_code") == 429:
+        wait = (j.get("parameters") or {}).get("retry_after") or 3
+        if wait <= 35:
+            time.sleep(wait + 0.5)
+            j = api_raw(method, **params)
+    if not j.get("ok"):
+        log.warning("%s: %s", method, j.get("description"))
+    return j.get("result")
 
 
 def send(chat_id, text, markup=None):
@@ -262,8 +293,9 @@ def after_kb():
 
 
 def tiers_kb():
+    keys = [k for k in ("t1", "t2", "t3") if k in GUIDE_TIERS] or ["t1"]
     return {"inline_keyboard": [[{"text": TIERS[k]["btn"], "callback_data": k}]
-                                for k in ("t1", "t2", "t3")]}
+                                for k in keys]}
 
 
 def retush_kb():
@@ -283,11 +315,13 @@ def next_kb():
     return {"inline_keyboard": [[{"text": "Курс ретуші", "callback_data": "retush"}]]}
 
 
-def pay_kb(key):
+def pay_kb(key, uid=None):
     rows = []
     if PAY_URL:
         rows.append([{"text": "Перейти до оплати", "url": PAY_URL}])
-    if TEST_MODE:
+    # Тестова кнопка тільки адмінам: до 14.09 вона стояла всім, і будь-хто
+    # міг забрати гайд безкоштовно, поки TEST_MODE увімкнений на проді.
+    if TEST_MODE and uid in NOTIFY_IDS:
         rows.append([{"text": "Я оплатив (тест)", "callback_data": "paid:" + key}])
     # Найдорожчий глухий кут лійки: людина заплатила, а файл не прийшов.
     rows.append([{"text": "Оплатив, а файлу немає", "callback_data": "noget:" + key}])
@@ -359,14 +393,17 @@ def give_course(uid, key):
     if not files:
         return False
     sent = 0
-    for kind, fid in files:
-        if api(SEND_BY_KIND[kind], **{"chat_id": uid, kind: fid}):
+    for i, (kind, fid) in enumerate(files):
+        if i:
+            time.sleep(1.0)   # ліміт Telegram: одне повідомлення на секунду в чат
+        if api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: fid}):
             sent += 1
-        time.sleep(0.3)
     if sent == 0:
         return False
     if sent < len(files):
         log.warning("курс %s: пішло %s з %s файлів", key, sent, len(files))
+        notify("Курс " + key + " для id " + str(uid) + ": пішло " + str(sent)
+               + " з " + str(len(files)) + " файлів, глянь журнал.")
     send(uid, COURSE_DELIVERED)
     return True
 
@@ -538,10 +575,11 @@ def status_text():
     lines = [
         "База: " + db,
         "Комміт: " + (os.getenv("RENDER_GIT_COMMIT", "")[:7] or "невідомий"),
-        "Тестовий режим: " + ("увімкнений" if TEST_MODE else "вимкнений"),
-        "Банка: " + ("підключена" if PAY_URL else "не підключена"),
+        "Тестовий режим: " + ("увімкнений, кнопка тільки адмінам" if TEST_MODE else "вимкнений"),
+        "Банка: " + ("підключена" if PAY_URL else "не підключена")
+        + " · токен Mono: " + ("є" if MONO_TOKEN and MONO_JAR else "немає"),
         "Бот Іри: " + ("увімкнений" if IRA_ON else "вимкнений"),
-        "Гайд: " + ready_text("t1"),
+        "Гайд: " + ready_text("t1") + " · тарифи " + ",".join(GUIDE_TIERS) + " · " + str(_G) + " грн",
         "Курс 1: " + ready_text("k1") + " · курс 2: " + ready_text("k2"),
         "Ціни курсів: " + str(_K1) + " / " + str(_K2) + " / " + str(_K12) + " грн",
     ]
@@ -570,35 +608,19 @@ def send_file(chat_id, name, blob, caption=None):
         return None
 
 
-def upload_guide():
-    """
-    Одноразова заливка гайда без доступу до токена з боку сесії: файл лежить
-    у репозиторії, бот при старті надсилає його адміну і пише file_id у лог
-    і адміну в чат. Далі file_id вписується в GUIDE_FILE_ID, а
-    GUIDE_UPLOAD_PATH знімається, інакше файл летітиме на кожному старті.
-    """
-    if not (GUIDE_UPLOAD_PATH and ADMIN_ID):
-        return
-    if not os.path.exists(GUIDE_UPLOAD_PATH):
-        log.warning("GUIDE_UPLOAD_PATH: файлу немає: %s", GUIDE_UPLOAD_PATH)
-        return
-    time.sleep(3)
-    with open(GUIDE_UPLOAD_PATH, "rb") as f:
-        blob = f.read()
-    name = os.path.basename(GUIDE_UPLOAD_PATH)
-    r = send_file(ADMIN_ID, name, blob, "Заливка гайда, " + str(len(blob)) + " б")
-    fid = ((r or {}).get("document") or {}).get("file_id")
-    if not fid:
-        log.warning("ЗАЛИВКА ГАЙДА НЕ ВДАЛАСЬ: %s", name)
-        return
-    log.info("ЗАЛИВКА ГАЙДА %s, %s б, file_id=%s", name, len(blob), fid)
-    send(ADMIN_ID, "file_id гайда " + name + ":\n" + fid
-         + "\n\nВписати в GUIDE_FILE_ID і зняти GUIDE_UPLOAD_PATH.")
+def mb(size):
+    return str(round((size or 0) / 1024 / 1024, 1)) + " МБ"
 
 
-def admin_file_id(m):
-    """Адмін кидає будь-який файл, бот відповідає рядком для COURSE*_FILES."""
-    for key, _label in FILE_KINDS:
+def admin_file(m):
+    """
+    Адмін кидає або пересилає будь-який файл. Бот кладе його в базу, кошик
+    «kurs», з іменем файлу і підписом, і відповідає рядком для COURSE*_FILES.
+    13.09 Yaro переслав ~60 файлів курсу, а стара версія на них відповідала
+    «Прийняла» і в базу не клала: file_id пропали. Тому спершу база, потім
+    відповідь.
+    """
+    for key, label in FILE_KINDS:
         v = m.get(key)
         if not v:
             continue
@@ -607,24 +629,58 @@ def admin_file_id(m):
         if key == "photo":
             v = v[-1]
         size = v.get("file_size")
+        name = v.get("file_name") or ""
+        caption = (m.get("caption") or "").strip()
+        store.add_asset(m.get("from", {}).get("id"), v.get("file_id"), label, bucket="kurs",
+                        caption=caption or None, file_unique_id=v.get("file_unique_id"),
+                        media_group=str(m["media_group_id"]) if m.get("media_group_id") else None,
+                        file_name=name or None, file_size=size)
         return (key + ":" + v.get("file_id", "?")
-                + ("\n" + str(round(size / 1024 / 1024, 1)) + " МБ" if size else ""))
+                + "\n" + (name or "без імені") + (", " + mb(size) if size else ""))
     return None
 
 
-def inbox_text(limit=30):
-    """Останні матеріали від Іри рядками «kind:file_id», щоб зібрати курс."""
-    rows = store.bucket_assets("inbox", limit=limit) or []
+def assets_lines(limit=200):
+    """Матеріали з бази рядками «kind:file_id», найновіші внизу."""
+    rows = store.assets_recent(limit=limit) or []
     out = []
     for r in reversed(rows):
         if not r.get("file_id"):
             continue
         kind = KIND_UA.get(r.get("file_kind") or "", r.get("file_kind") or "document")
-        out.append(str(r.get("created_at"))[:16] + "  " + (r.get("caption") or "")[:40]
+        out.append("#" + str(r.get("id")) + "  " + str(r.get("created_at"))[:16]
+                   + "  " + str(r.get("bucket")) + "  " + (r.get("file_name") or "")
+                   + ("  " + mb(r["file_size"]) if r.get("file_size") else "")
+                   + ("  «" + r["caption"][:60] + "»" if r.get("caption") else "")
                    + "\n" + kind + ":" + r["file_id"])
     if not rows:
         return "У базі матеріалів немає або база вимкнена."
     return "\n\n".join(out) or "У базі тільки текст, файлів немає."
+
+
+def perevirka_lines():
+    """
+    Чи живі file_id, які бот віддає за гроші. getFile не надсилає нічого
+    нікому: він або віддає розмір, або каже «file is too big» (файл є,
+    просто понад 20 МБ), або «wrong file_id» (файл зламаний).
+    """
+    items = [("гайд t1", "document", GUIDE_FILE_ID)]
+    for key in ("k1", "k2"):
+        for i, (kind, fid) in enumerate(COURSE_FILES.get(key) or []):
+            items.append((key + " №" + str(i + 1), kind, fid))
+    out = []
+    for label, kind, fid in items:
+        if not fid:
+            out.append(label + ": НЕ ЗАДАНИЙ")
+            continue
+        j = api_raw("getFile", file_id=fid)
+        if j.get("ok"):
+            out.append(label + ": є, " + mb((j.get("result") or {}).get("file_size")) + ", " + kind)
+        elif "too big" in (j.get("description") or "").lower():
+            out.append(label + ": є, понад 20 МБ, " + kind)
+        else:
+            out.append(label + ": ЗЛАМАНИЙ, " + str(j.get("description")))
+    return "\n".join(out)
 
 
 # ---------- маршрути ----------
@@ -756,6 +812,50 @@ def hookinfo():
 @app.get("/db/" + SECRET)
 def db_status():
     return "<pre>" + status_text() + "</pre>"
+
+
+@app.get("/inbox/" + SECRET)
+def inbox_page():
+    """Усі матеріали з бази рядками «kind:file_id»: з них збираються COURSE*_FILES."""
+    store.session_begin()
+    try:
+        return "<pre>" + assets_lines() + "</pre>"
+    finally:
+        store.session_end()
+
+
+@app.get("/perevirka/" + SECRET)
+def perevirka_page():
+    return "<pre>" + perevirka_lines() + "</pre>"
+
+
+@app.post("/zalyvka/" + SECRET)
+def zalyvka():
+    """
+    Заливка файлу в Telegram з боку сесії, без токена в її руках: сесія шле
+    файл сюди, бот надсилає його адміну і повертає рядок «kind:file_id».
+    Так гайд v9 не лежить у публічному репозиторії. Захищено тим самим
+    секретом, що й вебхук, /db і /dm.
+    """
+    f = request.files.get("file")
+    if not f or not ADMIN_ID:
+        return "потрібен файл у полі file і ADMIN_ID", 400
+    blob = f.read()
+    name = f.filename or "file.bin"
+    r = send_file(ADMIN_ID, name, blob, "Заливка: " + name + ", " + mb(len(blob)))
+    doc = (r or {}).get("document") or {}
+    fid = doc.get("file_id")
+    if not fid:
+        return "не залилось: " + name, 502
+    store.session_begin()
+    try:
+        store.add_asset(ADMIN_ID, fid, "документ", bucket="zalyvka",
+                        file_unique_id=doc.get("file_unique_id"),
+                        file_name=name, file_size=len(blob))
+    finally:
+        store.session_end()
+    log.info("ЗАЛИВКА %s, %s б, file_id=%s", name, len(blob), fid)
+    return "document:" + fid + "\n" + name + ", " + mb(len(blob)) + "\n"
 
 
 @app.get("/jars/" + SECRET)
@@ -977,13 +1077,16 @@ def hook():
                         send(chat_id, "Сховище вимкнене.")
                     return "ok"
                 if text.startswith("/inbox"):
-                    body = inbox_text()
+                    body = assets_lines(limit=40)
                     for i in range(0, len(body), 3900):
                         send(chat_id, body[i:i + 3900])
                     return "ok"
-                fid_line = admin_file_id(m)
+                if text.startswith("/perevirka"):
+                    send(chat_id, perevirka_lines())
+                    return "ok"
+                fid_line = admin_file(m)
                 if fid_line:
-                    send(chat_id, "Рядок для COURSE1_FILES або COURSE2_FILES:\n" + fid_line)
+                    send(chat_id, "У базі, кошик kurs:\n" + fid_line)
                     return "ok"
 
             # Іра: кидає що завгодно, бот приймає і мовчить.
@@ -1048,7 +1151,7 @@ def hook():
                              "\n\nФайл прийде сюди сам, зазвичай за хвилину після оплати.")
                 else:
                     body += "\n\nРеквізити надішлю сюди найближчим часом ♥️ Заявку вже бачу."
-                send(chat_id, body, pay_kb(data))
+                send(chat_id, body, pay_kb(data, uid))
                 notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
                        give_kb(uid, data))
             elif data.startswith("noget:"):
@@ -1058,7 +1161,7 @@ def hook():
                 store.log_event(uid, "noget", {"code": code})
                 notify("КАЖЕ, ЩО ОПЛАТИВ, А ФАЙЛУ НЕМАЄ\n" + pname(key) + "\n" + who(u)
                        + "\nКод: " + code, give_kb(uid, key))
-            elif data.startswith("paid:") and TEST_MODE:
+            elif data.startswith("paid:") and TEST_MODE and uid in NOTIFY_IDS:
                 key = data.split(":")[1]
                 code = order_code(uid, key)
                 ok = deliver(uid, key)
@@ -1104,8 +1207,6 @@ def ensure_webhook():
 if os.getenv("NO_THREADS", "").strip() != "1":
     threading.Thread(target=ensure_webhook, daemon=True).start()
     threading.Thread(target=mono_poll, daemon=True).start()
-    if GUIDE_UPLOAD_PATH:
-        threading.Thread(target=upload_guide, daemon=True).start()
 
 
 if __name__ == "__main__":
