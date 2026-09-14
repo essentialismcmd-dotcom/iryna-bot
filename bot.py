@@ -579,6 +579,8 @@ def status_text():
         "Банка: " + ("підключена" if PAY_URL else "не підключена")
         + " · токен Mono: " + ("є" if MONO_TOKEN and MONO_JAR else "немає"),
         "Бот Іри: " + ("увімкнений" if IRA_ON else "вимкнений"),
+        "Магніт: " + ("URL заданий" if MAGNET_URL else "MAGNET_URL не заданий")
+        + " · канал: " + ("кнопка є" if CHANNEL_URL else "CHANNEL_URL не заданий"),
         "Гайд: " + ready_text("t1") + " · тарифи " + ",".join(GUIDE_TIERS) + " · " + str(_G) + " грн",
         "Курс 1: " + ready_text("k1") + " · курс 2: " + ready_text("k2"),
         "Ціни курсів: " + str(_K1) + " / " + str(_K2) + " / " + str(_K12) + " грн",
