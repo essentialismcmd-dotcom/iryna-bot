@@ -21,7 +21,7 @@ os.environ["NO_THREADS"] = "1"
 os.environ["TEST_MODE"] = "1"
 os.environ["PAY_URL"] = "https://send.monobank.ua/jar/test"
 os.environ["GUIDE_FILE_ID"] = "GUIDE"
-os.environ["COURSE1_FILES"] = "video:V1, document:D1,BARE"
+os.environ["COURSE1_FILES"] = "Урок 1 > video:V1, document:D1,BARE | Урок 2 > document:D2, document:D3"
 os.environ["COURSE2_FILES"] = "video:V2"
 os.environ["COURSE_PRICES"] = "1400,1300,2700"
 os.environ["GUIDE_PRICE"] = "650"
@@ -93,8 +93,9 @@ perevirka("ціни зі змінної", (bot._K1, bot._K2, bot._K12, bot._G) =
 perevirka("типові ціни з коду", bot._prices("", [3200, 1900, 4500]) == [3200, 1900, 4500] and bot._price("", 900) == 900 and bot._price("abc", 900) == 900)
 perevirka("коди продуктів", [bot.PRODUCTS[k]["code"] for k in ("t1", "t2", "t3", "k1", "k2", "k12")]
           == ["1", "2", "3", "4", "5", "6"])
-perevirka("файли курсів", bot.COURSE_FILES["k1"] == [("video", "V1"), ("document", "D1"), ("document", "BARE")]
-          and bot.COURSE_FILES["k12"] == bot.COURSE_FILES["k1"] + [("video", "V2")])
+perevirka("файли курсів", bot.COURSE_FILES["k1"] == [("video", "V1"), ("document", "D1"), ("document", "BARE"), ("document", "D2"), ("document", "D3")]
+          and bot.COURSE_FILES["k12"] == bot.COURSE_FILES["k1"] + [("video", "V2")]
+          and [t for t, _ in bot.COURSE_SECTIONS["k1"]] == ["Урок 1", "Урок 2"] and bot.COURSE_SECTIONS["k2"][0][0] == "")
 
 # 2. /start і магніт
 VYKLYKY.clear()
@@ -149,7 +150,9 @@ perevirka("клієнт не може «оплатити» тестом", not [m
 VYKLYKY.clear()
 cb("paid:k12", uid=1)
 metody = [m for m, _ in VYKLYKY if m.startswith("send") and m != "sendMessage"]
-perevirka("видача обох курсів", metody == ["sendVideo", "sendDocument", "sendDocument", "sendVideo"], str(metody))
+perevirka("видача обох курсів: відео, альбом практики, альбом, відео", metody == ["sendVideo", "sendMediaGroup", "sendMediaGroup", "sendVideo"], str(metody))
+perevirka("заголовки уроків надіслані", "Урок 1" in teksty() and "Урок 2" in teksty())
+perevirka("альбом з підписом про практику", any(m == "sendMediaGroup" and p["media"][0].get("caption", "").startswith("Практика") for m, p in VYKLYKY))
 perevirka("відео летить як video", any(m == "sendVideo" and p.get("video") == "V1" for m, p in VYKLYKY))
 perevirka("текст після видачі", any("доступ залишається назавжди" in x for x in teksty()))
 
@@ -174,10 +177,10 @@ perevirka("банка: гайд за старим кодом", any(p.get("docume
 
 # 10. Курс без файлів: не видається, адмін бачить причину
 VYKLYKY.clear()
-bot.COURSE_FILES["k2"] = []
+_k2 = bot.COURSE_SECTIONS["k2"]; bot.COURSE_SECTIONS["k2"] = []; bot.COURSE_FILES["k2"] = []
 cb("paid:k2", uid=1)
 perevirka("порожній курс не видається", any("не задані" in x for x in teksty()))
-bot.COURSE_FILES["k2"] = [("video", "V2")]
+bot.COURSE_SECTIONS["k2"] = _k2; bot.COURSE_FILES["k2"] = [("video", "V2")]
 
 # 11. Ручна видача адміном
 VYKLYKY.clear()
@@ -200,7 +203,7 @@ perevirka("адміну file_id документа", any("document:DOC1" in x fo
 # 13. /status і /inbox не падають без бази
 VYKLYKY.clear()
 msg("/status", uid=1)
-perevirka("/status показує курси", any("Курс 1: у курсі 3 файлів" in x and "1400 / 1300 / 2700" in x and "650 грн" in x for x in teksty()), str(teksty()))
+perevirka("/status показує курси", any("Курс 1: у курсі 5 файлів у 2 розділах" in x and "1400 / 1300 / 2700" in x and "650 грн" in x for x in teksty()), str(teksty()))
 VYKLYKY.clear()
 msg("/inbox", uid=1)
 perevirka("/inbox без бази", any("немає" in x for x in teksty()))
@@ -213,7 +216,7 @@ r = app.post("/zalyvka/sekret", data={"file": (io.BytesIO(b"%PDF-test"), "guide-
 perevirka("заливка віддає file_id", r.status_code == 200 and b"document:NEWGUIDE" in r.data, r.data.decode()[:80])
 perevirka("заливка без файлу відмовляє", app.post("/zalyvka/sekret").status_code == 400)
 perevirka("/inbox і /perevirka живі", app.get("/inbox/sekret").status_code == 200 and app.get("/perevirka/sekret").status_code == 200)
-perevirka("/perevirka бачить гайд і файли курсу", "гайд t1" in app.get("/perevirka/sekret").data.decode() and "k1 №3" in app.get("/perevirka/sekret").data.decode())
+perevirka("/perevirka бачить гайд і файли курсу", "гайд t1" in app.get("/perevirka/sekret").data.decode() and "k1 №5" in app.get("/perevirka/sekret").data.decode())
 
 # 15а. Адмінський текст лягає в базу цілком
 ZAPYSY.clear(); VYKLYKY.clear()

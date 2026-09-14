@@ -110,8 +110,11 @@ RETUSH_PRO = (
     "Якщо основи хочеться освіжити, беріть обидва, так дешевше."
 )
 COURSE_DELIVERED = (
-    "Уроки вище, доступ залишається назавжди ♥️\n\n"
-    "Дивіться по порядку. Питання по уроках пишіть прямо сюди."
+    "Це весь курс, доступ залишається назавжди ♥️\n\n"
+    "Як користуватись: спершу відео уроку, потім відкриваєте практику до нього "
+    "у Photoshop і повторюєте за мною на тих самих кадрах. Файли можна зберегти "
+    "з чату на компʼютер.\n\n"
+    "Питання по уроках пишіть прямо сюди, відповідаю."
 )
 NEXT_AFTER_GUIDE = (
     "І ще одне ♥️ Світло поставили, далі кадр треба довести в ретуші.\n"
@@ -384,26 +387,94 @@ def parse_files(raw):
     return out
 
 
-COURSE_FILES = {"k1": parse_files(COURSE1_FILES), "k2": parse_files(COURSE2_FILES)}
-COURSE_FILES["k12"] = COURSE_FILES["k1"] + COURSE_FILES["k2"]
+PRACTICE_CAPTION = ("Практика до уроку: RAW з камери (.raf), мої налаштування Camera Raw "
+                    "(.xmp, .acr) і готовий PSD. Відкривайте у Photoshop через Camera Raw "
+                    "і повторюйте крок за кроком.")
+
+
+def parse_course(raw):
+    """
+    Курс це список розділів: «Урок 1 · основи > video:..,document:.. | Урок 2 > ..».
+    Розділи через «|», заголовок від файлів через «>». Без заголовків і без
+    «|» це старий плоский формат, він читається як один розділ без назви.
+    """
+    out = []
+    for part in raw.split("|"):
+        part = part.strip()
+        if not part:
+            continue
+        title, sep, files = part.partition(">")
+        if not sep:
+            title, files = "", part
+        items = parse_files(files)
+        if items:
+            out.append((title.strip(), items))
+    return out
+
+
+COURSE_SECTIONS = {"k1": parse_course(COURSE1_FILES), "k2": parse_course(COURSE2_FILES)}
+COURSE_SECTIONS["k12"] = COURSE_SECTIONS["k1"] + COURSE_SECTIONS["k2"]
+COURSE_FILES = {k: [f for _, fs in v for f in fs] for k, v in COURSE_SECTIONS.items()}
+
+
+def _send_album(uid, kind, items, caption):
+    """Документи або фото одним альбомом (2–10 штук). Повертає скільки пішло."""
+    media = [{"type": kind, "media": fid} for fid in items]
+    media[0]["caption"] = caption
+    if api("sendMediaGroup", retry=True, chat_id=uid, media=media):
+        return len(items)
+    # Альбом не пройшов (наприклад, різні типи всередині): віддаємо по одному.
+    n = 0
+    for fid in items:
+        time.sleep(1.0)
+        if api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: fid}):
+            n += 1
+    return n
 
 
 def give_course(uid, key):
-    files = COURSE_FILES.get(key) or []
-    if not files:
+    """
+    Видача по уроках, а не купою: заголовок уроку, відео першим, практика
+    альбомом з підписом, що це за файли. 14.09 Yaro після тесту: «купа файлів,
+    не розумію, як цим скористатися».
+    """
+    sections = COURSE_SECTIONS.get(key) or []
+    total = sum(len(fs) for _, fs in sections)
+    if not total:
         return False
     sent = 0
-    for i, (kind, fid) in enumerate(files):
-        if i:
-            time.sleep(1.0)   # ліміт Telegram: одне повідомлення на секунду в чат
-        if api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: fid}):
-            sent += 1
+    first = True
+    for title, files in sections:
+        if not first:
+            time.sleep(1.0)
+        first = False
+        if title:
+            send(uid, title)
+            time.sleep(1.0)
+        videos = [fid for k, fid in files if k in ("video", "animation", "video_note")]
+        for fid in videos:
+            if api("sendVideo", retry=True, chat_id=uid, video=fid, caption=title or None):
+                sent += 1
+            time.sleep(1.0)
+        for kind in ("document", "photo", "audio", "voice"):
+            items = [fid for k, fid in files if k == kind]
+            for i in range(0, len(items), 10):
+                chunk = items[i:i + 10]
+                if i:
+                    time.sleep(1.0)
+                if len(chunk) == 1:
+                    cap = PRACTICE_CAPTION if kind == "document" else None
+                    if api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: chunk[0], "caption": cap}):
+                        sent += 1
+                else:
+                    sent += _send_album(uid, kind, chunk, PRACTICE_CAPTION if kind == "document" else "")
     if sent == 0:
         return False
-    if sent < len(files):
-        log.warning("курс %s: пішло %s з %s файлів", key, sent, len(files))
+    if sent < total:
+        log.warning("курс %s: пішло %s з %s файлів", key, sent, total)
         notify("Курс " + key + " для id " + str(uid) + ": пішло " + str(sent)
-               + " з " + str(len(files)) + " файлів, глянь журнал.")
+               + " з " + str(total) + " файлів, глянь журнал.")
+    time.sleep(1.0)
     send(uid, COURSE_DELIVERED)
     return True
 
@@ -418,7 +489,8 @@ def deliver(uid, key):
 def ready_text(key):
     if key in COURSES:
         n = len(COURSE_FILES.get(key) or [])
-        return "у курсі " + str(n) + " файлів" if n else "COURSE1_FILES/COURSE2_FILES не задані"
+        m = len(COURSE_SECTIONS.get(key) or [])
+        return ("у курсі " + str(n) + " файлів у " + str(m) + " розділах") if n else "COURSE1_FILES/COURSE2_FILES не задані"
     return "на місці" if GUIDE_FILE_ID else "GUIDE_FILE_ID не заданий"
 
 
