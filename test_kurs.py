@@ -221,6 +221,10 @@ msg("СХЕМА 4\nМодель ставимо далеко від фону", ui
 perevirka("текст адміна в базі цілком", ZAPYSY and ZAPYSY[-1].get("caption", "").startswith("СХЕМА 4") and ZAPYSY[-1].get("bucket") == "kurs", str(ZAPYSY))
 perevirka("/events і /file живі без бази", app.get("/events/sekret").status_code == 200 and app.get("/file/sekret/1").status_code == 404)
 
+# 15б. /nova чистить адміна
+VYKLYKY.clear(); msg("/nova", uid=1)
+perevirka("/nova відповідає", any("Чисто" in x for x in teksty()))
+
 # 15. /privacy живий
 perevirka("/privacy віддає сторінку", app.get("/privacy").status_code == 200)
 

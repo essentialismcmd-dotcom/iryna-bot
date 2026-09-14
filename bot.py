@@ -1143,6 +1143,11 @@ def hook():
                 if text.startswith("/perevirka"):
                     send(chat_id, perevirka_lines())
                     return "ok"
+                if text.startswith("/nova"):
+                    # Почати з чистого: далі він видаляє чат і тисне /start як новачок.
+                    store.forget_user(uid)
+                    send(chat_id, "Чисто. Видали цей чат і зайди в бота заново, побачиш його як нова людина.")
+                    return "ok"
                 fid_line = admin_file(m)
                 if fid_line:
                     send(chat_id, "У базі, кошик kurs:\n" + fid_line)

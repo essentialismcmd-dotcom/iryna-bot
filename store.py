@@ -373,6 +373,18 @@ def set_user(uid, **kw):
              tuple(fields.values()) + (uid,))
 
 
+def forget_user(uid):
+    """
+    Стирає людину з бази, щоб /start побачив її як нову. Для Yaro: він видаляє
+    чат з ботом і дивиться лійку очима новачка. Оплачені покупки не чіпаємо:
+    вони гроші, а не тест.
+    """
+    q("delete from events where user_id = %s", (uid,))
+    q("delete from purchases where user_id = %s and status = 'new'", (uid,))
+    q("delete from users where user_id = %s", (uid,))
+    return True
+
+
 def mark_magnet(uid):
     return q("update users set got_magnet_at = coalesce(got_magnet_at, now()) where user_id = %s", (uid,))
 
