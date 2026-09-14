@@ -1038,7 +1038,7 @@ def inbox_page():
 
 @app.get("/perevirka/" + SECRET)
 def perevirka_page():
-    return "<pre>" + perevirka_lines() + "</pre>"
+    return "<pre>замок: " + lock_text() + "\n" + perevirka_lines() + "</pre>"
 
 
 @app.get("/file/" + SECRET + "/<int:aid>")
