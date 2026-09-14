@@ -2,7 +2,8 @@
 """
 Бот Iryna Rul. Три речі й нічого більше.
 
-1. Лійка: магніт, три пакети гайду, оплата в банку Monobank, видача файлу.
+1. Лійка: магніт, три пакети гайду, два курси ретуші, оплата в банку Monobank,
+   видача файлів.
 2. Приймання матеріалів від Іри: вона кидає що завгодно з коротким підписом,
    рівно як кидала в особистий чат. Бот приймає і мовчить.
 3. База: усе прийняте лежить у Postgres, звідти це дістає Yaro або Клод.
@@ -27,6 +28,16 @@ GUIDE_FILE_ID = os.getenv("GUIDE_FILE_ID", "").strip()
 PAY_URL       = os.getenv("PAY_URL", "").strip()
 MONO_TOKEN    = os.getenv("MONO_TOKEN", "").strip()
 MONO_JAR      = os.getenv("MONO_JAR", "").strip()
+# Курс ретуші. Файли великі (відео), тому не URL, а file_id з цього ж бота:
+# Іра або Yaro пересилає файл боту, бот відповідає рядком «kind:file_id»,
+# ці рядки через кому лягають у змінну. Порядок у змінній це порядок видачі.
+COURSE1_FILES = os.getenv("COURSE1_FILES", "").strip()
+COURSE2_FILES = os.getenv("COURSE2_FILES", "").strip()
+# Ціни курсів у гривнях: перший, другий, обидва. Без змінної беруться з коду.
+COURSE_PRICES = os.getenv("COURSE_PRICES", "").strip()
+# Одноразова заливка гайда: бот при старті надсилає GUIDE_UPLOAD_PATH адміну
+# і пише file_id у лог. Далі file_id вписується в GUIDE_FILE_ID, змінна знімається.
+GUIDE_UPLOAD_PATH = os.getenv("GUIDE_UPLOAD_PATH", "").strip()
 TEST_MODE     = os.getenv("TEST_MODE", "").strip().lower() in ("1", "true", "yes", "on")
 IRA_ON        = os.getenv("IRA_ON", "").strip().lower() in ("1", "true", "yes", "on")
 SECRET        = os.getenv("WEBHOOK_SECRET", "hook")
@@ -62,7 +73,8 @@ AFTER = (
     "Готово, файл вище ♥️\n\n"
     "Спробуйте на найближчій зйомці, це пʼять хвилин на студії.\n\n"
     "У каналі «Iryna Rul | для своїх» розбираю світло і ретуш детальніше.\n"
-    "Хочете всі схеми, а не три, тисніть другу кнопку."
+    "Хочете всі схеми, а не три, тисніть другу кнопку.\n"
+    "Хочете навчитись ретушувати самі, третю."
 )
 GUIDE_INTRO = (
     "Повний гайд «Світло» ♥️\n\n"
@@ -72,6 +84,36 @@ GUIDE_INTRO = (
 )
 NOGET_TEXT = ("Перевірю вручну, зазвичай це кілька хвилин ♥️ "
               "Файл прийде сюди, нічого робити не треба.")
+
+# Курс ретуші. Скрипт з її переписок, де оплата приходила за пʼять хвилин:
+# питання-кваліфікатор, рекомендація конкретного курсу, реквізити.
+RETUSH_INTRO = (
+    "Курс ретуші ♥️\n\n"
+    "Два записані курси: з нуля до чистого бʼюті-портрета і окремо ростовий "
+    "портрет з фешн-корекцією кольору.\n\n"
+    "Щоб порадити свій, одне питання: ви вже знайомі з фотошопом чи тільки починаєте?"
+)
+RETUSH_NEW = (
+    "Тоді вам перший курс ♥️\n\n"
+    "Починаємо з основ фотошопу, три уроки, і далі чотири уроки бʼюті-ретуші "
+    "портрета: шкіра, обʼєм, колір, чистий кадр без «пластику». "
+    "Папка знімків для практики додається.\n\n"
+    "Якщо хочете одразу і ростовий портрет, беріть обидва, так дешевше."
+)
+RETUSH_PRO = (
+    "Тоді вам другий курс ♥️\n\n"
+    "Сорок хвилин розбору ретуші ростового портрета плюс фешн-корекція кольору: "
+    "як я доводжу кадр до журнального вигляду.\n\n"
+    "Якщо основи хочеться освіжити, беріть обидва, так дешевше."
+)
+COURSE_DELIVERED = (
+    "Уроки вище, доступ залишається назавжди ♥️\n\n"
+    "Дивіться по порядку. Питання по уроках пишіть прямо сюди."
+)
+NEXT_AFTER_GUIDE = (
+    "І ще одне ♥️ Світло поставили, далі кадр треба довести в ретуші.\n"
+    "У мене два записані курси, підберу під ваш рівень."
+)
 BROKEN_FILE_TEXT = ("Щось пішло не так з файлом ♥️ "
                     "Уже розбираюсь, надішлю сюди за кілька хвилин.")
 CLIENT_TEXT = ("Прийняла ♥️ Якщо це про зйомку, напишіть в інстаграм, "
@@ -102,8 +144,50 @@ TIERS = {
            "extra": "Надішліть три кадри прямо сюди, я подивлюсь і відповім."},
 }
 
+
+def _prices(raw, default):
+    try:
+        p = [int(x) for x in raw.replace(" ", "").split(",")]
+        return p if len(p) == 3 and all(x > 0 for x in p) else default
+    except ValueError:
+        return default
+
+
+# Ціни за bot/KANAL.md: 1800 / 1300 / обидва 2700. Змінна COURSE_PRICES їх перебиває.
+_K1, _K2, _K12 = _prices(COURSE_PRICES, [1800, 1300, 2700])
+
+COURSES = {
+    "k1": {"name": "Курс ретуші 1: основи і бʼюті-портрет", "uah": _K1,
+           "btn": "Перший курс, " + str(_K1) + " грн",
+           "text": ("Курс ретуші 1, " + str(_K1) + " грн\n\n"
+                    "Основи фотошопу, три уроки, плюс чотири уроки бʼюті-ретуші портрета "
+                    "і папка знімків для практики. Доступ назавжди."),
+           "extra": ""},
+    "k2": {"name": "Курс ретуші 2: ростовий портрет і колір", "uah": _K2,
+           "btn": "Другий курс, " + str(_K2) + " грн",
+           "text": ("Курс ретуші 2, " + str(_K2) + " грн\n\n"
+                    "Розбір ретуші ростового портрета, сорок хвилин, плюс фешн-корекція "
+                    "кольору. Доступ назавжди."),
+           "extra": ""},
+    "k12": {"name": "Обидва курси ретуші", "uah": _K12,
+            "btn": "Обидва курси, " + str(_K12) + " грн",
+            "text": ("Обидва курси ретуші, " + str(_K12) + " грн\n\n"
+                     "Основи, бʼюті-портрет, ростовий портрет і корекція кольору. "
+                     "Усе разом дешевше, ніж окремо. Доступ назавжди."),
+            "extra": ""},
+}
+
+# Один словник на все, що продається. Цифра після дефіса в коді платежу
+# це «code»: 1-3 гайд, 4-6 курси. Старі коди IR...-1 читаються як і раніше.
+PRODUCTS = {}
+for _k, _v in TIERS.items():
+    PRODUCTS[_k] = dict(_v, code=_k[-1], product="guide")
+for _k, _c in (("k1", "4"), ("k2", "5"), ("k12", "6")):
+    PRODUCTS[_k] = dict(COURSES[_k], code=_c, product="course")
+BY_CODE = {v["code"]: k for k, v in PRODUCTS.items()}
+
 DIGITS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-CODE_RE = re.compile(r"IR([0-9A-Z]+)-([123])", re.I)
+CODE_RE = re.compile(r"IR([0-9A-Z]+)-([1-6])", re.I)
 
 
 def b36(n):
@@ -124,8 +208,12 @@ def unb36(s):
     return n
 
 
-def order_code(uid, tier):
-    return "IR" + b36(uid) + "-" + tier[-1]
+def order_code(uid, key):
+    return "IR" + b36(uid) + "-" + PRODUCTS.get(key, {}).get("code", key[-1])
+
+
+def pname(key):
+    return PRODUCTS.get(key, {}).get("name", key)
 
 
 def api(method, **params):
@@ -169,6 +257,7 @@ def after_kb():
     if CHANNEL_URL:
         rows.append([{"text": "Канал «для своїх»", "url": CHANNEL_URL}])
     rows.append([{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}])
+    rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
     return {"inline_keyboard": rows}
 
 
@@ -177,20 +266,37 @@ def tiers_kb():
                                 for k in ("t1", "t2", "t3")]}
 
 
-def pay_kb(tier):
+def retush_kb():
+    return {"inline_keyboard": [
+        [{"text": "Тільки починаю", "callback_data": "q:new"}],
+        [{"text": "Вже працюю у фотошопі", "callback_data": "q:pro"}],
+    ]}
+
+
+def course_kb(first):
+    """Рекомендований курс першою кнопкою, «обидва» завжди другою."""
+    return {"inline_keyboard": [[{"text": COURSES[first]["btn"], "callback_data": first}],
+                                [{"text": COURSES["k12"]["btn"], "callback_data": "k12"}]]}
+
+
+def next_kb():
+    return {"inline_keyboard": [[{"text": "Курс ретуші", "callback_data": "retush"}]]}
+
+
+def pay_kb(key):
     rows = []
     if PAY_URL:
         rows.append([{"text": "Перейти до оплати", "url": PAY_URL}])
     if TEST_MODE:
-        rows.append([{"text": "Я оплатив (тест)", "callback_data": "paid:" + tier}])
+        rows.append([{"text": "Я оплатив (тест)", "callback_data": "paid:" + key}])
     # Найдорожчий глухий кут лійки: людина заплатила, а файл не прийшов.
-    rows.append([{"text": "Оплатив, а файлу немає", "callback_data": "noget:" + tier}])
+    rows.append([{"text": "Оплатив, а файлу немає", "callback_data": "noget:" + key}])
     return {"inline_keyboard": rows}
 
 
-def give_kb(uid, tier):
-    return {"inline_keyboard": [[{"text": "Видати гайд вручну",
-                                  "callback_data": "give:" + str(uid) + ":" + tier}]]}
+def give_kb(uid, key):
+    return {"inline_keyboard": [[{"text": "Видати вручну",
+                                  "callback_data": "give:" + str(uid) + ":" + key}]]}
 
 
 def give_magnet(chat_id):
@@ -211,7 +317,72 @@ def give_guide(uid, tier):
     extra = TIERS.get(tier, {}).get("extra")
     if extra:
         send(uid, extra)
+    # Покупець у момент оплати найтепліший, другого такого моменту не буде.
+    send(uid, NEXT_AFTER_GUIDE, next_kb())
     return True
+
+
+# Telegram не дає змінити тип файлу при повторній відправці за file_id:
+# відео, залите як відео, треба слати sendVideo, а не sendDocument.
+SEND_BY_KIND = {
+    "document": "sendDocument", "video": "sendVideo", "audio": "sendAudio",
+    "photo": "sendPhoto", "voice": "sendVoice", "animation": "sendAnimation",
+    "video_note": "sendVideoNote",
+}
+KIND_UA = {"фото": "photo", "відео": "video", "документ": "document",
+           "голосове": "voice", "аудіо": "audio", "кружечок": "video_note",
+           "гіфка": "animation"}
+
+
+def parse_files(raw):
+    """«video:BAAC...,document:BQAC...» → [(kind, file_id)]. Без kind це документ."""
+    out = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        kind, _, fid = part.rpartition(":")
+        kind = kind.strip().lower() or "document"
+        if kind not in SEND_BY_KIND:
+            kind = "document"
+        if fid.strip():
+            out.append((kind, fid.strip()))
+    return out
+
+
+COURSE_FILES = {"k1": parse_files(COURSE1_FILES), "k2": parse_files(COURSE2_FILES)}
+COURSE_FILES["k12"] = COURSE_FILES["k1"] + COURSE_FILES["k2"]
+
+
+def give_course(uid, key):
+    files = COURSE_FILES.get(key) or []
+    if not files:
+        return False
+    sent = 0
+    for kind, fid in files:
+        if api(SEND_BY_KIND[kind], **{"chat_id": uid, kind: fid}):
+            sent += 1
+        time.sleep(0.3)
+    if sent == 0:
+        return False
+    if sent < len(files):
+        log.warning("курс %s: пішло %s з %s файлів", key, sent, len(files))
+    send(uid, COURSE_DELIVERED)
+    return True
+
+
+def deliver(uid, key):
+    """Видача будь-якого купленого продукту за його ключем."""
+    if key in COURSES:
+        return give_course(uid, key)
+    return give_guide(uid, key)
+
+
+def ready_text(key):
+    if key in COURSES:
+        n = len(COURSE_FILES.get(key) or [])
+        return "у курсі " + str(n) + " файлів" if n else "COURSE1_FILES/COURSE2_FILES не задані"
+    return "на місці" if GUIDE_FILE_ID else "GUIDE_FILE_ID не заданий"
 
 
 # ---------- матеріали від Іри ----------
@@ -280,28 +451,32 @@ def handle_tx(tx):
                "Коли: " + when + "\n"
                "Від кого: " + (tx.get("description") or "не вказано") + "\n"
                "Коментар: " + (tx.get("comment") or "порожній") + "\n\n"
-               "Впізнай по імені і видай гайд вручну.")
+               "Впізнай по імені і видай вручну.")
         return
     try:
         uid = unb36(m.group(1).upper())
     except Exception:
         return
-    tier = "t" + m.group(2)
+    key = BY_CODE.get(m.group(2), "t" + m.group(2))
     code = "IR" + m.group(1).upper() + "-" + m.group(2)
-    need = TIERS.get(tier, {}).get("uah", 0) * 100
+    need = PRODUCTS.get(key, {}).get("uah", 0) * 100
     if amount < need * 0.9:
         store.log_event(uid, "pay_short", {"code": code, "uah": amount // 100})
         notify("Оплата " + str(amount // 100) + " грн за кодом " + code
-               + ", а треба " + str(need // 100) + " грн. Гайд не видано.")
+               + ", а треба " + str(need // 100) + " грн. " + pname(key) + ": не видано.")
         return
     store.mark_paid(code, amount // 100)
-    ok = give_guide(uid, tier)
+    ok = deliver(uid, key)
     if ok:
         store.mark_delivered(code)
     store.log_event(uid, "pay_ok" if ok else "pay_undelivered", {"code": code})
-    notify(("Оплата " + str(amount // 100) + " грн, код " + code + ". Гайд видано автоматично.")
-           if ok else ("Оплата " + str(amount // 100) + " грн, код " + code
-                       + ", але файл не пішов. Перевір GUIDE_FILE_ID."))
+    if ok:
+        notify("Оплата " + str(amount // 100) + " грн, код " + code + ". "
+               + pname(key) + ": видано автоматично.")
+    else:
+        notify("Оплата " + str(amount // 100) + " грн, код " + code
+               + ", але файл не пішов. " + pname(key) + ": " + ready_text(key),
+               give_kb(uid, key))
 
 
 def mono_poll():
@@ -366,7 +541,9 @@ def status_text():
         "Тестовий режим: " + ("увімкнений" if TEST_MODE else "вимкнений"),
         "Банка: " + ("підключена" if PAY_URL else "не підключена"),
         "Бот Іри: " + ("увімкнений" if IRA_ON else "вимкнений"),
-        "Гайд: " + ("на місці" if GUIDE_FILE_ID else "GUIDE_FILE_ID не заданий"),
+        "Гайд: " + ready_text("t1"),
+        "Курс 1: " + ready_text("k1") + " · курс 2: " + ready_text("k2"),
+        "Ціни курсів: " + str(_K1) + " / " + str(_K2) + " / " + str(_K12) + " грн",
     ]
     if d and d.get("now"):
         paid = d.get("paid") or {}
@@ -384,10 +561,70 @@ def send_file(chat_id, name, blob, caption=None):
         r = requests.post(API + "/sendDocument",
                           data={"chat_id": chat_id, "caption": caption or ""},
                           files={"document": (name, blob)}, timeout=60)
-        return bool(r.json().get("ok"))
+        j = r.json()
+        if not j.get("ok"):
+            log.warning("sendDocument: %s", j.get("description"))
+        return j.get("result") if j.get("ok") else None
     except Exception as e:
         log.warning("sendDocument: %s", e)
-        return False
+        return None
+
+
+def upload_guide():
+    """
+    Одноразова заливка гайда без доступу до токена з боку сесії: файл лежить
+    у репозиторії, бот при старті надсилає його адміну і пише file_id у лог
+    і адміну в чат. Далі file_id вписується в GUIDE_FILE_ID, а
+    GUIDE_UPLOAD_PATH знімається, інакше файл летітиме на кожному старті.
+    """
+    if not (GUIDE_UPLOAD_PATH and ADMIN_ID):
+        return
+    if not os.path.exists(GUIDE_UPLOAD_PATH):
+        log.warning("GUIDE_UPLOAD_PATH: файлу немає: %s", GUIDE_UPLOAD_PATH)
+        return
+    time.sleep(3)
+    with open(GUIDE_UPLOAD_PATH, "rb") as f:
+        blob = f.read()
+    name = os.path.basename(GUIDE_UPLOAD_PATH)
+    r = send_file(ADMIN_ID, name, blob, "Заливка гайда, " + str(len(blob)) + " б")
+    fid = ((r or {}).get("document") or {}).get("file_id")
+    if not fid:
+        log.warning("ЗАЛИВКА ГАЙДА НЕ ВДАЛАСЬ: %s", name)
+        return
+    log.info("ЗАЛИВКА ГАЙДА %s, %s б, file_id=%s", name, len(blob), fid)
+    send(ADMIN_ID, "file_id гайда " + name + ":\n" + fid
+         + "\n\nВписати в GUIDE_FILE_ID і зняти GUIDE_UPLOAD_PATH.")
+
+
+def admin_file_id(m):
+    """Адмін кидає будь-який файл, бот відповідає рядком для COURSE*_FILES."""
+    for key, _label in FILE_KINDS:
+        v = m.get(key)
+        if not v:
+            continue
+        if key == "sticker":
+            return None
+        if key == "photo":
+            v = v[-1]
+        size = v.get("file_size")
+        return (key + ":" + v.get("file_id", "?")
+                + ("\n" + str(round(size / 1024 / 1024, 1)) + " МБ" if size else ""))
+    return None
+
+
+def inbox_text(limit=30):
+    """Останні матеріали від Іри рядками «kind:file_id», щоб зібрати курс."""
+    rows = store.bucket_assets("inbox", limit=limit) or []
+    out = []
+    for r in reversed(rows):
+        if not r.get("file_id"):
+            continue
+        kind = KIND_UA.get(r.get("file_kind") or "", r.get("file_kind") or "document")
+        out.append(str(r.get("created_at"))[:16] + "  " + (r.get("caption") or "")[:40]
+                   + "\n" + kind + ":" + r["file_id"])
+    if not rows:
+        return "У базі матеріалів немає або база вимкнена."
+    return "\n\n".join(out) or "У базі тільки текст, файлів немає."
 
 
 # ---------- маршрути ----------
@@ -538,6 +775,181 @@ def jars():
         return "помилка: " + str(e)
 
 
+# --------------------------------------------------------------- дірект
+# Приймач повідомлень Instagram. Два джерела одночасно:
+#
+#   1. Meta напряму, вебхук поля `messages` нашого власного застосунку.
+#   2. Сторонній посередник (ManyChat і подібні), якщо ми колись його візьмемо.
+#
+# 31.08.2026 тут стояв коментар «прямого доступу немає, Advanced Access
+# упирається у ФОП». Це не доведено: документація Meta каже, що застосунок,
+# який обслуговує ЛИШЕ власний або керований акаунт, обходиться Standard
+# Access без App Review і без верифікації бізнесу. Питання відкрите і
+# міряється тестом на трьох сторонах, розбір у K-124.
+#
+# Формат посередника навмисно вільний: поля в різних сервісів звуться
+# по-різному. Тому беремо перше, що знайшли, а сире тіло кладемо в payload,
+# щоб нічого не втратити при зміні провайдера.
+
+VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "").strip() or SECRET
+
+
+def _pick(d, *names, default=None):
+    for n in names:
+        v = d.get(n)
+        if v not in (None, ""):
+            return v
+    return default
+
+
+def _rozgornuty_meta(d):
+    """Meta шле вкладений конверт entry[].messaging[]. Розкладаємо на плоскі
+    записи того ж вигляду, що й від посередника.
+
+    Ключове місце це ЧИЙ ідентифікатор брати за контакт. У ехо (повідомлення
+    написала сама Іра) відправник це її акаунт, а співрозмовниця сидить у
+    recipient. Візьмемо sender наосліп, і вся переписка ляже в тред «Іра з
+    самою собою».
+    """
+    out = []
+    for e in d.get("entry") or []:
+        for m in (e.get("messaging") or e.get("standby") or []):
+            msg = m.get("message") or {}
+            echo = bool(msg.get("is_echo"))
+            spivrozmovnyk = (m.get("recipient") or {}) if echo else (m.get("sender") or {})
+            out.append({
+                "ig_id": spivrozmovnyk.get("id"),
+                "text": msg.get("text"),
+                "is_echo": echo,
+                "mid": msg.get("mid"),
+                "kind": "message" if msg.get("text") else "attachment",
+                "_syre": m,
+            })
+    return out
+
+
+@app.get("/dm-hook/" + SECRET)
+def dm_verify():
+    """Перевірка вебхука від Meta. Вона шле GET з hub.challenge і чекає його
+    назад голим текстом. Окремий шлях, бо GET /dm/<SECRET> віддає сторінку
+    стану, і Meta на ній не пройшла б перевірку. Окремий префікс, а не
+    підшлях, щоб не сперечатись з правилом /dm/<SECRET>/<кого>."""
+    if request.args.get("hub.mode") == "subscribe" and \
+       request.args.get("hub.verify_token") == VERIFY_TOKEN:
+        return request.args.get("hub.challenge", ""), 200
+    return "ni", 403
+
+
+@app.post("/dm-hook/" + SECRET)
+def dm_hook_meta():
+    """Вебхук Meta. Той самий запис, що й у посередника, інший конверт."""
+    d = request.get_json(silent=True) or {}
+    zapysy = _rozgornuty_meta(d)
+    if not zapysy:
+        return {"ok": True, "zapysano": 0}, 200
+    n = 0
+    store.session_begin()
+    try:
+        for z in zapysy:
+            if not z["ig_id"]:
+                continue
+            cid = store.dm_contact(z["ig_id"])
+            store.dm_event(cid, "out" if z["is_echo"] else "in",
+                           body=z["text"], kind=z["kind"],
+                           payload=z["_syre"], ext_id=z["mid"])
+            n += 1
+        return {"ok": True, "zapysano": n}, 200
+    except Exception as e:
+        log.warning("dm_hook_meta впав: %s", e)
+        # Meta повторює доставку на не-200, тому віддаємо 200 і ловимо в лозі.
+        return {"ok": False, "err": str(e)[:200]}, 200
+    finally:
+        store.session_end()
+
+
+@app.post("/dm/" + SECRET)
+def dm_hook():
+    d = request.get_json(silent=True) or {}
+    store.session_begin()
+    try:
+        ig_id = _pick(d, "ig_id", "subscriber_id", "sender_id", "user_id", "id")
+        if not ig_id:
+            return {"ok": False, "err": "немає ідентифікатора"}, 400
+        cid = store.dm_contact(
+            ig_id,
+            username=_pick(d, "username", "ig_username", "user_name"),
+            display_name=_pick(d, "name", "full_name", "display_name"),
+            lang=_pick(d, "lang", "language"),
+        )
+        body = _pick(d, "text", "message", "body", "last_input_text")
+        # in це від людини, out це від акаунта Іри. Прапорець is_echo у Meta
+        # означає, що повідомлення надіслав сам акаунт, зокрема з телефона.
+        echo = bool(_pick(d, "is_echo", "echo", default=False))
+        direction = _pick(d, "direction")
+        if direction not in ("in", "out"):
+            direction = "out" if echo else "in"
+        store.dm_event(cid, direction, body=body,
+                       kind=_pick(d, "kind", default="message"),
+                       payload=d, ext_id=_pick(d, "mid", "message_id", "ext_id"))
+        return {"ok": True, "contact": cid, "direction": direction}
+    except Exception as e:
+        log.warning("dm_hook впав: %s", e)
+        return {"ok": False, "err": str(e)[:200]}, 500
+    finally:
+        store.session_end()
+
+
+@app.get("/dm/" + SECRET)
+def dm_stan():
+    """Що зараз у діректі. Стан обчислюється з подій, не зберігається полем."""
+    store.session_begin()
+    try:
+        st = store.dm_stats()
+        rows = store.dm_state(limit=60)
+        out = ["<pre>", "СТАН ДІРЕКТУ"]
+        sv = (st.get("svizhist") or {}).get("ostannia")
+        out.append("контактів %s, подій %s, остання подія %s" % (
+            (st.get("kontaktiv") or {}).get("n", "?"),
+            (st.get("podii") or {}).get("n", "?"), sv or "НЕМАЄ"))
+        for z in (st.get("zakryttia") or []):
+            out.append("  закрив %s: %s" % (z.get("closed_by"), z.get("n")))
+        out.append("")
+        out.append("%-22s %-7s %5s %5s %8s  %s" % (
+            "хто", "останнє", "від", "нам", "годин", "останнє повідомлення"))
+        for r in rows:
+            out.append("%-22s %-7s %5s %5s %8.1f  %s%s" % (
+                (r.get("username") or r.get("display_name") or r.get("ig_id"))[:22],
+                r.get("hto_ostannim") or "-",
+                r.get("vid_ludyny"), r.get("vid_nas"),
+                float(r.get("hodyn_movchannia") or 0),
+                "[?] " if r.get("pytannia_bez_vidpovidi") else "",
+                (r.get("ostannie") or "")[:60].replace("\n", " ")))
+        return "\n".join(out) + "</pre>"
+    finally:
+        store.session_end()
+
+
+@app.get("/dm/" + SECRET + "/<kogo>")
+def dm_lyudyna(kogo):
+    """Уся переписка з конкретною людиною."""
+    store.session_begin()
+    try:
+        c = store.dm_one(kogo)
+        if not c:
+            return "<pre>не знайдено: " + kogo + "</pre>"
+        out = ["<pre>", "%s  @%s  ig:%s  сегмент:%s" % (
+            c.get("display_name") or "", c.get("username") or "",
+            c.get("ig_id"), c.get("segment") or "-"), ""]
+        for m in reversed(store.dm_thread(c["id"], limit=60)):
+            out.append("%s %-6s %s" % (
+                str(m.get("ts"))[:16],
+                "ІРА" if m.get("direction") == "out" else "клієнт",
+                (m.get("body") or "[вкладення]")[:150].replace("\n", " ")))
+        return "\n".join(out) + "</pre>"
+    finally:
+        store.session_end()
+
+
 @app.post("/" + SECRET)
 def hook():
     upd = request.get_json(silent=True) or {}
@@ -564,9 +976,14 @@ def hook():
                     else:
                         send(chat_id, "Сховище вимкнене.")
                     return "ok"
-                doc = m.get("document")
-                if doc:
-                    send(chat_id, "file_id цього файлу:\n" + doc.get("file_id", "?"))
+                if text.startswith("/inbox"):
+                    body = inbox_text()
+                    for i in range(0, len(body), 3900):
+                        send(chat_id, body[i:i + 3900])
+                    return "ok"
+                fid_line = admin_file_id(m)
+                if fid_line:
+                    send(chat_id, "Рядок для COURSE1_FILES або COURSE2_FILES:\n" + fid_line)
                     return "ok"
 
             # Іра: кидає що завгодно, бот приймає і мовчить.
@@ -608,49 +1025,64 @@ def hook():
             elif data == "guide":
                 store.log_event(uid, "guide_open")
                 send(chat_id, GUIDE_INTRO, tiers_kb())
-            elif data in TIERS:
-                t = TIERS[data]
+            elif data == "retush":
+                store.log_event(uid, "retush_open")
+                send(chat_id, RETUSH_INTRO, retush_kb())
+            elif data in ("q:new", "q:pro"):
+                # Кваліфікатор з її скрипту: новачкам перший курс, решті другий.
+                store.log_event(uid, "retush_level", {"level": data[2:]})
+                if data == "q:new":
+                    send(chat_id, RETUSH_NEW, course_kb("k1"))
+                else:
+                    send(chat_id, RETUSH_PRO, course_kb("k2"))
+            elif data in PRODUCTS:
+                t = PRODUCTS[data]
                 code = order_code(uid, data)
-                store.add_purchase(uid, "guide", tier=data, order_code=code, amount_uah=t["uah"])
+                store.add_purchase(uid, t["product"], tier=data, order_code=code,
+                                   amount_uah=t["uah"])
                 store.log_event(uid, "tier_pick", {"tier": data, "code": code})
                 body = t["text"] + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
                 if PAY_URL:
-                    body += "\n\nФайл прийде сюди сам, зазвичай за хвилину після оплати."
+                    body += ("\n\nФайли прийдуть сюди самі, зазвичай за хвилину після оплати."
+                             if data in COURSES else
+                             "\n\nФайл прийде сюди сам, зазвичай за хвилину після оплати.")
                 else:
                     body += "\n\nРеквізити надішлю сюди найближчим часом ♥️ Заявку вже бачу."
                 send(chat_id, body, pay_kb(data))
                 notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
                        give_kb(uid, data))
             elif data.startswith("noget:"):
-                tier = data.split(":")[1]
-                code = order_code(uid, tier)
+                key = data.split(":")[1]
+                code = order_code(uid, key)
                 send(chat_id, NOGET_TEXT)
                 store.log_event(uid, "noget", {"code": code})
-                notify("КАЖЕ, ЩО ОПЛАТИВ, А ФАЙЛУ НЕМАЄ\n"
-                       + TIERS.get(tier, {}).get("name", tier) + "\n" + who(u)
-                       + "\nКод: " + code, give_kb(uid, tier))
+                notify("КАЖЕ, ЩО ОПЛАТИВ, А ФАЙЛУ НЕМАЄ\n" + pname(key) + "\n" + who(u)
+                       + "\nКод: " + code, give_kb(uid, key))
             elif data.startswith("paid:") and TEST_MODE:
-                tier = data.split(":")[1]
-                code = order_code(uid, tier)
-                ok = give_guide(uid, tier)
+                key = data.split(":")[1]
+                code = order_code(uid, key)
+                ok = deliver(uid, key)
                 if not ok:
                     send(chat_id, BROKEN_FILE_TEXT)
-                    notify("ФАЙЛ НЕ ВИДАВСЯ, перевір GUIDE_FILE_ID\n" + who(u))
+                    notify("ФАЙЛ НЕ ВИДАВСЯ. " + pname(key) + ": " + ready_text(key)
+                           + "\n" + who(u))
                 store.mark_paid(code)
                 if ok:
                     store.mark_delivered(code)
-                store.log_event(uid, "pay_test", {"tier": tier, "ok": ok})
-                notify("ТЕСТ оплати: " + TIERS.get(tier, {}).get("name", tier) + "\n" + who(u))
+                store.log_event(uid, "pay_test", {"tier": key, "ok": ok})
+                notify("ТЕСТ оплати: " + pname(key) + "\n" + who(u))
             elif data.startswith("give:") and uid in NOTIFY_IDS:
                 parts = (data.split(":") + ["", ""])[:3]
                 target = int(parts[1])
-                ok = give_guide(target, parts[2])
-                if ok and parts[2]:
-                    code = order_code(target, parts[2])
+                key = parts[2]
+                ok = deliver(target, key) if key else False
+                if ok:
+                    code = order_code(target, key)
                     store.mark_paid(code)
                     store.mark_delivered(code)
                 store.log_event(target, "give_manual", {"by": uid, "ok": ok})
-                send(chat_id, "Видано" if ok else "Не вдалося, перевір GUIDE_FILE_ID")
+                send(chat_id, "Видано" if ok
+                     else "Не вдалося. " + pname(key) + ": " + ready_text(key))
             return "ok"
     except Exception as e:
         log.exception("update failed: %s", e)
@@ -672,6 +1104,8 @@ def ensure_webhook():
 if os.getenv("NO_THREADS", "").strip() != "1":
     threading.Thread(target=ensure_webhook, daemon=True).start()
     threading.Thread(target=mono_poll, daemon=True).start()
+    if GUIDE_UPLOAD_PATH:
+        threading.Thread(target=upload_guide, daemon=True).start()
 
 
 if __name__ == "__main__":

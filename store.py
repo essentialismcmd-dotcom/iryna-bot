@@ -128,6 +128,61 @@ create table if not exists blocks (
 );
 alter table assets add column if not exists block_id bigint;
 alter table users add column if not exists active_block bigint;
+
+-- Дірект Instagram. Заведено 31.08.2026. Приймається вебхуком від офіційного
+-- посередника Meta, бо прямого доступу до діректу немає: у токені відсутній
+-- instagram_manage_messages, а Advanced Access упирається в верифікацію бізнесу.
+-- Стан НЕ зберігається полем, він обчислюється з подій. Причина в handoff:
+-- ручне поле «статус» стояло в значенні «нове» у 16 блоках з 18.
+create table if not exists dm_contacts (
+    id           bigserial primary key,
+    ig_id        text unique not null,
+    username     text,
+    display_name text,
+    segment      text,
+    is_supplier  boolean not null default false,
+    lang         text,
+    first_seen   timestamptz,
+    last_seen    timestamptz,
+    created_at   timestamptz not null default now()
+);
+create index if not exists dm_contacts_seen on dm_contacts (last_seen desc);
+
+create table if not exists dm_events (
+    id         bigserial primary key,
+    contact_id bigint not null references dm_contacts(id),
+    ts         timestamptz not null,
+    direction  text not null,
+    kind       text not null default 'message',
+    body       text,
+    payload    jsonb,
+    source     text not null default 'webhook',
+    ext_id     text,
+    unique (contact_id, ts, direction, kind, ext_id)
+);
+create index if not exists dm_events_contact on dm_events (contact_id, ts desc);
+create index if not exists dm_events_ts on dm_events (ts desc);
+
+-- Хто закрив угоду. Єдине поле, яке не залежить від жодного доступу до діректу,
+-- і водночас єдине, що відповідає на головне питання проєкту: скільки закрилось
+-- само, а скільки закрила людина руками.
+create table if not exists dm_outcomes (
+    id         bigserial primary key,
+    contact_id bigint not null references dm_contacts(id),
+    outcome    text not null,
+    closed_by  text not null,
+    amount     numeric,
+    currency   text,
+    ts         timestamptz not null default now(),
+    note       text
+);
+
+create table if not exists dm_override (
+    contact_id bigint primary key references dm_contacts(id),
+    stage      text not null,
+    reason     text not null,
+    set_at     timestamptz not null default now()
+);
 alter table users add column if not exists block_msg bigint;
 alter table users add column if not exists as_ira boolean not null default false;
 create index if not exists assets_block on assets (block_id);
@@ -676,4 +731,110 @@ def stats():
                        from users group by 1 order by n desc""", fetch="all"),
         "paid": q("""select count(*) as n, coalesce(sum(amount_uah), 0) as uah
                      from purchases where status in ('paid','delivered')""", fetch="one"),
+    }
+
+
+# ---------------------------------------------------------------- дірект
+# Заведено 31.08.2026. Стан контакту НІКОЛИ не зберігається полем, він
+# обчислюється з подій. Ручне поле «статус» у цьому проєкті вже вмирало:
+# стояло в значенні «нове» у 16 блоках з 18, хоча на них давно відповіли.
+
+def dm_contact(ig_id, username=None, display_name=None, lang=None, ts=None):
+    """Знаходить або заводить контакт. Повертає id."""
+    row = q("select id from dm_contacts where ig_id=%s", (str(ig_id),), fetch="one")
+    if row:
+        q("""update dm_contacts set username=coalesce(%s, username),
+             display_name=coalesce(%s, display_name), lang=coalesce(%s, lang),
+             last_seen=greatest(coalesce(last_seen, to_timestamp(0)), coalesce(%s, now()))
+             where id=%s""", (username, display_name, lang, ts, row["id"]))
+        return row["id"]
+    row = q("""insert into dm_contacts (ig_id, username, display_name, lang, first_seen, last_seen)
+               values (%s,%s,%s,%s, coalesce(%s, now()), coalesce(%s, now()))
+               on conflict (ig_id) do update set username=excluded.username
+               returning id""",
+            (str(ig_id), username, display_name, lang, ts, ts), fetch="one")
+    return row["id"] if row else None
+
+
+def dm_event(contact_id, direction, body=None, ts=None, kind="message",
+             payload=None, ext_id=None, source="webhook"):
+    """direction: in (від людини) або out (від акаунта). Повтор безпечний."""
+    if not contact_id:
+        return
+    q("""insert into dm_events (contact_id, ts, direction, kind, body, payload, source, ext_id)
+         values (%s, coalesce(%s, now()), %s, %s, %s, %s, %s, %s)
+         on conflict do nothing""",
+      (contact_id, ts, direction, kind, body,
+       Jsonb(payload) if (payload and psycopg) else None, source, ext_id))
+    q("""update dm_contacts
+         set last_seen = greatest(coalesce(last_seen, to_timestamp(0)), coalesce(%s, now()))
+         where id=%s""", (ts, contact_id))
+
+
+# Один запит, який відповідає на питання «що зараз у діректі».
+# Усе тут похідне від подій, жодного збереженого статусу.
+_DM_STATE = """
+with ost as (
+    select distinct on (contact_id) contact_id, ts, direction, body
+      from dm_events order by contact_id, ts desc
+),
+lich as (
+    select contact_id,
+           count(*) filter (where direction='in')  as vid_ludyny,
+           count(*) filter (where direction='out') as vid_nas,
+           min(ts) as pershyi, max(ts) as ostannii
+      from dm_events group by contact_id
+)
+select c.id, c.ig_id, c.username, c.display_name, c.segment, c.is_supplier, c.lang,
+       l.vid_ludyny, l.vid_nas, l.pershyi, l.ostannii,
+       o.direction as hto_ostannim, o.body as ostannie,
+       extract(epoch from (now() - l.ostannii))/3600 as hodyn_movchannia,
+       (o.direction='in' and o.body like '%%?%%') as pytannia_bez_vidpovidi,
+       ov.stage as ruchnyi_etap,
+       (select outcome from dm_outcomes where contact_id=c.id order by ts desc limit 1) as rezultat,
+       (select closed_by from dm_outcomes where contact_id=c.id order by ts desc limit 1) as zakryv
+  from dm_contacts c
+  join lich l on l.contact_id=c.id
+  left join ost o on o.contact_id=c.id
+  left join dm_override ov on ov.contact_id=c.id
+ where (%s or c.is_supplier=false)
+ order by l.ostannii desc
+ limit %s
+"""
+
+
+def dm_state(limit=50, include_suppliers=False):
+    return q(_DM_STATE, (include_suppliers, limit), fetch="all") or []
+
+
+def dm_one(kogo):
+    """Пошук людини за username, ig_id або частиною імені."""
+    return q("""select id, ig_id, username, display_name, segment, lang
+                  from dm_contacts
+                 where ig_id=%s or lower(username)=lower(%s)
+                    or lower(display_name) like lower(%s)
+                 order by last_seen desc limit 1""",
+             (str(kogo), str(kogo), "%" + str(kogo) + "%"), fetch="one")
+
+
+def dm_thread(contact_id, limit=40):
+    return q("""select ts, direction, kind, body from dm_events
+                 where contact_id=%s order by ts desc limit %s""",
+             (contact_id, limit), fetch="all") or []
+
+
+def dm_outcome(contact_id, outcome, closed_by, amount=None, currency=None, note=None):
+    """closed_by: system | yaro | iryna. Без нього реєстр збреше про прибутковість."""
+    q("""insert into dm_outcomes (contact_id, outcome, closed_by, amount, currency, note)
+         values (%s,%s,%s,%s,%s,%s)""",
+      (contact_id, outcome, closed_by, amount, currency, note))
+
+
+def dm_stats():
+    return {
+        "kontaktiv": q("select count(*) as n from dm_contacts", fetch="one"),
+        "podii": q("select count(*) as n from dm_events", fetch="one"),
+        "svizhist": q("select max(ts) as ostannia from dm_events", fetch="one"),
+        "zakryttia": q("""select closed_by, count(*) as n from dm_outcomes
+                          where outcome='booked' group by 1""", fetch="all"),
     }
