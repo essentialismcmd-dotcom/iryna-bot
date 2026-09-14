@@ -26,11 +26,13 @@ os.environ["COURSE2_FILES"] = "video:V2"
 os.environ["COURSE_PRICES"] = "1400,1300,2700"
 os.environ["GUIDE_PRICE"] = "650"
 os.environ["NOTIFY_IDS"] = "1"
+os.environ["CHANNEL_URL"] = "https://t.me/test_kanal"
 os.environ.pop("DATABASE_URL", None)
 
 import requests
 
 VYKLYKY = []
+STATUS = {"v": "left"}   # що відповідає getChatMember: left / member / None (помилка)
 
 
 class _R:
@@ -44,6 +46,10 @@ class _R:
 def fake_post(url, json=None, data=None, files=None, timeout=None):
     method = url.rsplit("/", 1)[-1]
     VYKLYKY.append((method, json or data or {}))
+    if method == "getChatMember":
+        if STATUS["v"] is None:
+            return _R({"ok": False, "error_code": 400, "description": "Bad Request: member list is inaccessible"})
+        return _R({"ok": True, "result": {"status": STATUS["v"]}})
     if method == "sendDocument" and files:
         return _R({"ok": True, "result": {"document": {"file_id": "NEWGUIDE"}}})
     return _R({"ok": True, "result": {"message_id": len(VYKLYKY)}})
@@ -102,10 +108,24 @@ VYKLYKY.clear()
 msg("/start")
 perevirka("старт вітає", any("Привіт" in x for x in teksty()))
 
-# 3. Курс: кнопка після магніта
+# 2а. Замок: без підписки магніт не видається
+perevirka("канал з посилання", bot.CHANNEL_ID == "@test_kanal")
 VYKLYKY.clear()
 bot.MAGNET_URL = "https://x/magnit.pdf"
 cb("magnet")
+perevirka("замок: файл не пішов", not [v for v in VYKLYKY if v[0] == "sendDocument"])
+perevirka("замок: текст і кнопки", "подарунок для своїх" in teksty()[-1]
+          and ostannia_klaviatura() == ["Підписатись на канал", "Я в каналі ♥️"], str(ostannia_klaviatura()))
+VYKLYKY.clear()
+STATUS["v"] = None
+cb("magnet")
+perevirka("замок пропускає, коли бот не адмін", [v for v in VYKLYKY if v[0] == "sendDocument"])
+
+# 3. Курс: кнопка після магніта
+STATUS["v"] = "member"
+VYKLYKY.clear()
+cb("magnet")
+perevirka("підписнику файл", [v for v in VYKLYKY if v[0] == "sendDocument"])
 perevirka("після магніта є кнопка курсу", "Курс ретуші" in ostannia_klaviatura(), str(ostannia_klaviatura()))
 
 # 4. Кваліфікатор

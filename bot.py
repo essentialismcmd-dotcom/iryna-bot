@@ -23,6 +23,13 @@ TOKEN         = os.environ["BOT_TOKEN"]
 ADMIN_ID      = int(os.getenv("ADMIN_ID", "0"))
 IRA_ID        = int(os.getenv("IRA_ID", "0"))
 CHANNEL_URL   = os.getenv("CHANNEL_URL", "").strip()
+# Замок: магніт видається тільки підписникам каналу (слово Yaro 14.09).
+# CHANNEL_ID це @username каналу або -100…; без змінної береться з CHANNEL_URL.
+# Перевірка через getChatMember працює лише коли бот адмін каналу; якщо
+# Telegram відповідає помилкою, замок пропускає, щоб лійка не стала.
+CHANNEL_ID    = os.getenv("CHANNEL_ID", "").strip() or (
+    "@" + CHANNEL_URL.rstrip("/").rsplit("/", 1)[-1] if "t.me/" in CHANNEL_URL else "")
+CHANNEL_LOCK  = os.getenv("CHANNEL_LOCK", "1").strip().lower() not in ("0", "false", "no", "off")
 MAGNET_URL    = os.getenv("MAGNET_URL", "").strip()
 GUIDE_FILE_ID = os.getenv("GUIDE_FILE_ID", "").strip()
 PAY_URL       = os.getenv("PAY_URL", "").strip()
@@ -78,6 +85,11 @@ AFTER = (
     "У каналі «Iryna Rul | для своїх» розбираю світло і ретуш детальніше.\n"
     "Хочете всі схеми, а не три, тисніть другу кнопку.\n"
     "Хочете навчитись ретушувати самі, третю."
+)
+LOCK_TEXT = (
+    "Три схеми світла це подарунок для своїх ♥️\n\n"
+    "Підпишіться на канал «Iryna Rul | для своїх», там розбираю світло "
+    "і ретуш детальніше, і тисніть «Я в каналі». Файл прийде одразу."
 )
 GUIDE_INTRO = (
     "Повний гайд «Світло» ♥️\n\n"
@@ -289,6 +301,26 @@ def who(u):
 
 def magnet_kb():
     return {"inline_keyboard": [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]}
+
+
+def lock_kb():
+    return {"inline_keyboard": [
+        [{"text": "Підписатись на канал", "url": CHANNEL_URL or "https://t.me/" + CHANNEL_ID.lstrip("@")}],
+        [{"text": "Я в каналі ♥️", "callback_data": "magnet"}],
+    ]}
+
+
+def in_channel(uid):
+    """
+    True, якщо людина в каналі. None, коли перевірити не вийшло (бот не адмін,
+    канал не заданий): тоді замок пропускає.
+    """
+    if not (CHANNEL_LOCK and CHANNEL_ID):
+        return None
+    r = api("getChatMember", chat_id=CHANNEL_ID, user_id=uid)
+    if not r:
+        return None
+    return r.get("status") in ("member", "administrator", "creator")
 
 
 def after_kb():
@@ -737,7 +769,8 @@ def status_text():
         + " · токен Mono: " + ("є" if MONO_TOKEN and MONO_JAR else "немає"),
         "Бот Іри: " + ("увімкнений" if IRA_ON else "вимкнений"),
         "Магніт: " + ("URL заданий" if MAGNET_URL else "MAGNET_URL не заданий")
-        + " · канал: " + ("кнопка є" if CHANNEL_URL else "CHANNEL_URL не заданий"),
+        + " · канал: " + ("кнопка є" if CHANNEL_URL else "CHANNEL_URL не заданий")
+        + " · замок: " + lock_text(),
         "Гайд: " + ready_text("t1") + " · тарифи " + ",".join(GUIDE_TIERS) + " · " + str(_G) + " грн",
         "Курс 1: " + ready_text("k1") + " · курс 2: " + ready_text("k2"),
         "Ціни курсів: " + str(_K1) + " / " + str(_K2) + " / " + str(_K12) + " грн",
@@ -821,6 +854,20 @@ def assets_lines(limit=200):
     if not rows:
         return "У базі матеріалів немає або база вимкнена."
     return "\n\n".join(out) or "У базі тільки текст, файлів немає."
+
+
+def lock_text():
+    if not CHANNEL_LOCK:
+        return "вимкнений (CHANNEL_LOCK=0)"
+    if not CHANNEL_ID:
+        return "вимкнений, канал не заданий"
+    me = api("getMe") or {}
+    r = api("getChatMember", chat_id=CHANNEL_ID, user_id=me.get("id", 0)) if me else None
+    if not r:
+        return "не працює, бот не адмін " + CHANNEL_ID + " (пропускає всіх)"
+    if r.get("status") != "administrator":
+        return "не працює, бот у " + CHANNEL_ID + " зі статусом " + str(r.get("status")) + " (пропускає всіх)"
+    return "працює, " + CHANNEL_ID
 
 
 def perevirka_lines():
@@ -1356,6 +1403,10 @@ def hook():
             api("answerCallbackQuery", callback_query_id=cq["id"])
 
             if data == "magnet":
+                if in_channel(uid) is False:
+                    store.log_event(uid, "lock")
+                    send(chat_id, LOCK_TEXT, lock_kb())
+                    return "ok"
                 give_magnet(chat_id)
                 store.mark_magnet(uid)
                 store.log_event(uid, "magnet")
