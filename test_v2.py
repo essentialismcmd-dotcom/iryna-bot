@@ -155,14 +155,21 @@ ok("вимкнено: чужий my:guide без курсу", not any("курс"
 VYKLYKY.clear()
 for t in ("/start", "/start guide", "/start fb", "СВІТЛО", "МК", "ЗЙОМКА", "курс", "ретуш", "привіт як справи", "/moi"):
     msg(t, uid=555)
-for d in ("magnet", "guide", "t1", "t2", "t3", "retush", "q:new", "q:pro", "k1", "k2", "k12", "mk", "mk:want", "moi", "noget:t1"):
+for d in ("magnet", "lock:check", "lock:free", "guide", "t1", "t2", "t3", "retush", "q:new", "q:pro", "k1", "k2", "k12", "mk", "mk:want", "moi", "noget:t1"):
     cb(d, uid=555)
 bot.give_magnet(555); bot.give_guide(555, "t1")
 _vse = " ".join(komu(555)).lower() + " " + " ".join(
     b["text"].lower() for m, p in VYKLYKY if p.get("chat_id") == 555 and p.get("reply_markup")
     for r in p["reply_markup"]["inline_keyboard"] for b in r)
-_zle = [w for w in ("курс", "скоро", "записую", "варіант", "1200", "1900", "розбір кадр", "третю") if w in _vse]
+_zle = [w for w in ("курс", "скоро", "записую", "варіант", "1200", "1900", "розбір кадр", "третю",
+                   "ретуш", "другу кнопку") if w in _vse]
 ok("мітла: людина не бачить неіснуючого", not _zle, str(_zle))
+ok("мітла пройшла замок: LOCK_TEXT, LOCK_NOTYET, LOCK_SOFT", all(t in komu(555) for t in
+   (bot.LOCK_TEXT, bot.LOCK_NOTYET, bot.LOCK_SOFT)))
+VYKLYKY.clear(); msg("ретуш", uid=555)
+ok("слово РЕТУШ: гайд і канал, без обіцянки ретуші",
+   knopky(555) == ["Хочу повний гайд «Світло»", "Канал «для своїх»"] and not any("ретуш" in x.lower() for x in komu(555)),
+   str(komu(555)))
 ok("вимкнено: /status каже", "продаж курсів ВИМКНЕНО" in bot.status_text())
 bot.COURSES_ON = True
 
