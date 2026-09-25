@@ -32,6 +32,20 @@ CHANNEL_ID    = os.getenv("CHANNEL_ID", "").strip() or (
 CHANNEL_LOCK  = os.getenv("CHANNEL_LOCK", "1").strip().lower() not in ("0", "false", "no", "off")
 MAGNET_URL    = os.getenv("MAGNET_URL", "").strip()
 GUIDE_FILE_ID = os.getenv("GUIDE_FILE_ID", "").strip()
+# Чинні версії файлів (25.09): гайд v13 і магніт v3d. До цього бот віддавав
+# гайд v10 і магніт v2, бо file_id жили тільки в змінних Render і ніхто не
+# бачив, яка версія за ними стоїть. Тепер: POST /zalyvka/<S>?rol=guide|magnet
+# з файлом, чия назва містить очікуваний шматок, кладе file_id у kv бази, і
+# бот віддає його замість змінної. /perevirka і /status кажуть, яка версія.
+GUIDE_EXPECT  = os.getenv("GUIDE_EXPECT", "SVITLO-guide-2026-09-23-v13").strip()
+MAGNET_EXPECT = os.getenv("MAGNET_EXPECT", "3-skhemy-svitla-2026-09-23-v3d").strip()
+# Старі курси ретуші Іра 24.09 назвала застарілими: «тільки за знижкою»,
+# «1200 гривень максимум за два». COURSE_BUNDLE_ONLY=1 показує лише пакет.
+COURSE_BUNDLE_ONLY = os.getenv("COURSE_BUNDLE_ONLY", "").strip().lower() in ("1", "true", "yes", "on")
+# 25.09 (слово Yaro 01:2x): старі курси 1–2 не продаємо, чекаємо новий від Іри.
+# Без COURSES_ON=1 курсів нема в меню, слово КУРС і старі кнопки кажуть «готую
+# новий», заявок і кодів на k1/k2/k12 бот не дає. Куплене раніше видається як було.
+COURSES_ON = os.getenv("COURSES_ON", "").strip().lower() in ("1", "true", "yes", "on")
 PAY_URL       = os.getenv("PAY_URL", "").strip()
 MONO_TOKEN    = os.getenv("MONO_TOKEN", "").strip()
 MONO_JAR      = os.getenv("MONO_JAR", "").strip()
@@ -66,6 +80,8 @@ def _ids(raw):
 
 
 NOTIFY_IDS = _ids(os.getenv("NOTIFY_IDS", "")) or ([ADMIN_ID] if ADMIN_ID else [])
+# Кому летять заявки на МК і зйомку: це робота Іри, тож сюди можна вписати її id.
+LEAD_IDS = _ids(os.getenv("LEAD_IDS", "")) or NOTIFY_IDS
 
 API = "https://api.telegram.org/bot" + TOKEN
 MONO = "https://api.monobank.ua"
@@ -79,6 +95,16 @@ HELLO = (
     "Три різні картинки за одну зйомку, без докупки обладнання.\n\n"
     "Я віддаю її підписникам свого каналу «для своїх». "
     "Тисніть кнопку, надішлю файл."
+)
+# Людина, що прийшла за посиланням ?start=guide (останні сторінки гайда «Світло»),
+# гайд уже має. До 23.09 бот показував їй той самий HELLO з кнопкою «Забрати три
+# схеми світла», тобто пропонував магніт назад у лійку. Тепер їй іде наступна
+# сходинка, курс ретуші; мітка «guide» і далі пишеться в source_tag і в events.
+GUIDE_HELLO = (
+    "Привіт, це Ірина Руль ♥️\n\n"
+    "Ви прийшли з мого гайда «Світло», отже всі тринадцять схем у вас уже є.\n\n"
+    "Наступний крок: світло поставили, далі кадр треба довести в ретуші. "
+    "У мене два записані курси, підберу під ваш рівень."
 )
 AFTER = (
     "Готово, файл вище ♥️\n\n"
@@ -152,6 +178,61 @@ BROKEN_FILE_TEXT = ("Щось пішло не так з файлом ♥️ "
 CLIENT_TEXT = ("Прийняла ♥️ Якщо це про зйомку, напишіть в інстаграм, "
                "там відповідаю швидше: @iryna_rul_photographer")
 
+# Закріп каналу обіцяє: «напишіть боту слово СВІТЛО, МК або ЗЙОМКА». До 25.09
+# бот на ці слова відповідав «напишіть в інстаграм», тобто обіцянка не
+# працювала. Тепер слово веде на свою сходинку, заявки МК і зйомки падають
+# у LEAD_IDS (без змінної тим самим, кому йдуть заявки на оплату).
+KEYWORDS = {
+    "світло": "guide", "гайд": "guide",
+    "мк": "mk", "майстерклас": "mk", "майстер-клас": "mk",
+    "курс": "retush", "ретуш": "retush", "ретушь": "retush",
+    "зйомка": "shoot", "зйомку": "shoot",
+}
+MK_TEXT = (
+    "Індивідуальний майстер-клас зі світла ♥️\n\n"
+    "У студії, на імпульсному світлі: ставимо схеми під ваш запит, "
+    "ви знімаєте самі, я поруч і виправляю. На виході кадри в портфоліо.\n\n"
+    "Тисніть кнопку, і я напишу вам особисто: дати, місто, деталі."
+)
+MK_THANKS = "Записала ♥️ Напишу вам особисто найближчим часом."
+SHOOT_TEXT = ("Про зйомку швидше в інстаграмі ♥️ @iryna_rul_photographer, "
+              "там відповідаю одразу. Ваше повідомлення я теж бачу.")
+RETUSH_SOON = (
+    "Курс ретуші ♥️\n\n"
+    "Зараз записую новий курс. Щойно буде готовий, зʼявиться тут і в каналі "
+    "«для своїх»."
+)
+GUIDE_HELLO_NOC = (
+    "Привіт, це Ірина Руль ♥️\n\n"
+    "Ви прийшли з мого гайда «Світло», отже всі тринадцять схем у вас уже є.\n\n"
+    "Далі розбираю світло і ретуш у каналі «для своїх». "
+    "Новий курс ретуші зараз записую, зʼявиться тут."
+)
+AFTER_NOC = (
+    "Готово, файл вище ♥️\n\n"
+    "Спробуйте на найближчій зйомці, це пʼять хвилин на студії.\n\n"
+    "У каналі «Iryna Rul | для своїх» розбираю світло і ретуш детальніше.\n"
+    "Хочете всі схеми, а не три, тисніть другу кнопку."
+)
+MOI_EMPTY_NOC = ("Поки нічого не куплено ♥️ Безкоштовні три схеми світла по кнопці нижче, "
+                 "повний гайд там само.")
+RETUSH_BUNDLE = (
+    "Курс ретуші ♥️\n\n"
+    "Два мої записані курси разом: основи фотошопу і бʼюті-портрет, "
+    "плюс ростовий портрет з фешн-корекцією кольору. Знімки для практики додаються.\n\n"
+    "Поки готую новий курс, ці віддаю пакетом зі знижкою."
+)
+
+
+def keyword(text):
+    """Одне слово з закріпу каналу → ключ сходинки, інакше None."""
+    t = (text or "").strip().lower()
+    if not t or len(t) > 20 or " " in t:
+        return None
+    t = re.sub(r"[^\w\-]", "", t)
+    return KEYWORDS.get(t)
+
+
 IRA_HELLO = (
     "Привіт ♥️\n"
     "Кидай сюди все по роботі так само, як кидала мені в чат: правки, фото, "
@@ -170,19 +251,38 @@ def _price(raw, default):
 # Ціна гайда: 20 $ його словом 13.09, за курсом 44.6 це 890, округлено до 900.
 _G = _price(GUIDE_PRICE, 900)
 
+
+def _tier_prices(raw, g):
+    """
+    t2 і t3 завжди дорожчі за сам гайд. До 25.09 t2 стояв числом 900, рівно як
+    t1: після підйому гайда з 650 до 900 розбір кадру став безкоштовним
+    додатком. Тепер надбавка до ціни гайда: +300 (розбір кадру 1 200 грн,
+    TARYFY-2026-09-05.md) і +1 000 (три кадри), або GUIDE_TIER_PRICES="t2,t3".
+    """
+    try:
+        p = [int(x) for x in raw.replace(" ", "").split(",")]
+        if len(p) == 2 and g < p[0] < p[1]:
+            return p
+    except ValueError:
+        pass
+    return [g + 300, g + 1000]
+
+
+_T2, _T3 = _tier_prices(os.getenv("GUIDE_TIER_PRICES", ""), _G)
+
 TIERS = {
     "t1": {"name": "Гайд «Світло»", "uah": _G, "btn": "Гайд, " + str(_G) + " грн",
            "text": ("Гайд «Світло», " + str(_G) + " грн\n\n"
                     "42 сторінки, тринадцять моїх робочих схем: розстановка, "
                     "налаштування і кадр зі зйомки до кожної. Доступ залишається назавжди."),
            "extra": ""},
-    "t2": {"name": "Гайд + розбір одного кадру", "uah": 900, "btn": "Гайд + розбір кадру, 900 грн",
-           "text": ("Гайд «Світло» + розбір одного кадру, 900 грн\n\n"
+    "t2": {"name": "Гайд + розбір одного кадру", "uah": _T2, "btn": "Гайд + розбір кадру, " + str(_T2) + " грн",
+           "text": ("Гайд «Світло» + розбір одного кадру, " + str(_T2) + " грн\n\n"
                     "Той самий гайд, плюс ви надсилаєте мені один свій знімок, "
                     "і я особисто розбираю, що там зі світлом і що змінити, щоб стало краще."),
            "extra": "Надішліть кадр прямо сюди, я подивлюсь і відповім."},
-    "t3": {"name": "Гайд + розбір трьох кадрів", "uah": 1650, "btn": "Гайд + розбір трьох кадрів, 1650 грн",
-           "text": ("Гайд «Світло» + розбір трьох кадрів, 1650 грн\n\n"
+    "t3": {"name": "Гайд + розбір трьох кадрів", "uah": _T3, "btn": "Гайд + розбір трьох кадрів, " + str(_T3) + " грн",
+           "text": ("Гайд «Світло» + розбір трьох кадрів, " + str(_T3) + " грн\n\n"
                     "Гайд, розбір трьох ваших знімків і мої відповіді по вашому обладнанню: "
                     "що у вас є і як з цим зібрати мої схеми."),
            "extra": "Надішліть три кадри прямо сюди, я подивлюсь і відповім."},
@@ -295,6 +395,11 @@ def send(chat_id, text, markup=None):
                reply_markup=markup, disable_web_page_preview=True)
 
 
+def notify_lead(text):
+    for i in LEAD_IDS:
+        send(i, text)
+
+
 def notify(text, markup=None):
     for cid in NOTIFY_IDS:
         send(cid, text, markup)
@@ -311,6 +416,14 @@ def who(u):
 
 def magnet_kb():
     return {"inline_keyboard": [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]}
+
+
+def guide_kb():
+    """Людині з гайда: перша кнопка курс ретуші, магніта в ній нема навмисно."""
+    rows = [[{"text": "Курс ретуші", "callback_data": "retush"}]] if COURSES_ON else []
+    if CHANNEL_URL:
+        rows.append([{"text": "Канал «для своїх»", "url": CHANNEL_URL}])
+    return {"inline_keyboard": rows}
 
 
 def lock_kb():
@@ -338,7 +451,8 @@ def after_kb():
     if CHANNEL_URL:
         rows.append([{"text": "Канал «для своїх»", "url": CHANNEL_URL}])
     rows.append([{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}])
-    rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
+    if COURSES_ON:
+        rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
     return {"inline_keyboard": rows}
 
 
@@ -359,6 +473,24 @@ def course_kb(first):
     """Рекомендований курс першою кнопкою, «обидва» завжди другою."""
     return {"inline_keyboard": [[{"text": COURSES[first]["btn"], "callback_data": first}],
                                 [{"text": COURSES["k12"]["btn"], "callback_data": "k12"}]]}
+
+
+def send_retush(chat_id):
+    """Курс ретуші: кваліфікатор або, з COURSE_BUNDLE_ONLY, одразу пакет."""
+    if not COURSES_ON:
+        kb = ({"inline_keyboard": [[{"text": "Канал «для своїх»", "url": CHANNEL_URL}]]}
+              if CHANNEL_URL else None)
+        send(chat_id, RETUSH_SOON, kb)
+        return
+    if COURSE_BUNDLE_ONLY:
+        send(chat_id, RETUSH_BUNDLE, {"inline_keyboard": [
+            [{"text": COURSES["k12"]["btn"], "callback_data": "k12"}]]})
+    else:
+        send(chat_id, RETUSH_INTRO, retush_kb())
+
+
+def mk_kb():
+    return {"inline_keyboard": [[{"text": "Хочу на майстер-клас", "callback_data": "mk:want"}]]}
 
 
 def retush_kb_one():
@@ -383,26 +515,77 @@ def give_kb(uid, key):
                                   "callback_data": "give:" + str(uid) + ":" + key}]]}
 
 
+_REF_CACHE = {}
+
+
+def file_ref(rol):
+    """
+    Що бот віддає як гайд (rol="guide") чи магніт (rol="magnet"): file_id з kv
+    бази, залитий через /zalyvka?rol=, важить більше за змінну Render. Кеш на
+    хвилину, щоб не ходити в базу на кожну кнопку.
+    """
+    env = GUIDE_FILE_ID if rol == "guide" else MAGNET_URL
+    if not store.ON:
+        return env
+    now = time.time()
+    hit = _REF_CACHE.get(rol)
+    if hit and now - hit[1] < 60:
+        return hit[0]
+    ref = store.kv_get(rol + "_file_id") or env
+    _REF_CACHE[rol] = (ref, now)
+    return ref
+
+
+def guide_ref():
+    return file_ref("guide")
+
+
+def magnet_ref():
+    return file_ref("magnet")
+
+
+def version_line(rol):
+    """Яка версія стоїть за file_id: чинна, стара чи невідома."""
+    expect = GUIDE_EXPECT if rol == "guide" else MAGNET_EXPECT
+    ref = file_ref(rol)
+    if not ref:
+        return "НЕ ЗАДАНИЙ, чекаємо " + expect
+    name = None
+    if store.ON:
+        name = store.kv_get(rol + "_file_name")
+        if not name or store.kv_get(rol + "_file_id") != ref:
+            a = store.asset_by_file_id(ref)
+            name = (a or {}).get("file_name")
+    if not name:
+        return "версія невідома (file_id зі змінної, імені в базі нема), чекаємо " + expect
+    if expect in name:
+        return "чинна, " + name
+    return "СТАРА ВЕРСІЯ " + name + ", чекаємо " + expect
+
+
 def give_magnet(chat_id):
-    if not MAGNET_URL:
+    ref = magnet_ref()
+    if not ref:
         send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
         return
-    if not api("sendDocument", chat_id=chat_id, document=MAGNET_URL):
+    if not api("sendDocument", chat_id=chat_id, document=ref):
         send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
         return
-    send(chat_id, AFTER, after_kb())
+    send(chat_id, AFTER if COURSES_ON else AFTER_NOC, after_kb())
 
 
 def give_guide(uid, tier):
-    if not GUIDE_FILE_ID:
+    ref = guide_ref()
+    if not ref:
         return False
-    if not api("sendDocument", chat_id=uid, document=GUIDE_FILE_ID):
+    if not api("sendDocument", chat_id=uid, document=ref):
         return False
     extra = TIERS.get(tier, {}).get("extra")
     if extra:
         send(uid, extra)
     # Покупець у момент оплати найтепліший, другого такого моменту не буде.
-    send(uid, NEXT_AFTER_GUIDE, retush_kb_one())
+    if COURSES_ON:
+        send(uid, NEXT_AFTER_GUIDE, retush_kb_one())
     return True
 
 
@@ -499,7 +682,7 @@ def lessons_kb(uid, current=None):
     """Кнопки всіх куплених уроків. current це (ключ, номер), його не показуємо."""
     rows = []
     owned = owned_keys(uid)
-    if "t1" in owned and GUIDE_FILE_ID:
+    if "t1" in owned and guide_ref():
         rows.append([{"text": "Гайд «Світло»", "callback_data": "my:guide"}])
     for ckey in ("k1", "k2"):
         if ckey not in owned:
@@ -618,7 +801,7 @@ def ready_text(key):
         n = len(COURSE_FILES.get(key) or [])
         m = len(COURSE_SECTIONS.get(key) or [])
         return ("у курсі " + str(n) + " файлів у " + str(m) + " розділах") if n else "COURSE1_FILES/COURSE2_FILES не задані"
-    return "на місці" if GUIDE_FILE_ID else "GUIDE_FILE_ID не заданий"
+    return "на місці" if guide_ref() else "GUIDE_FILE_ID не заданий"
 
 
 # ---------- матеріали від Іри ----------
@@ -778,12 +961,14 @@ def status_text():
         "Банка: " + ("підключена" if PAY_URL else "не підключена")
         + " · токен Mono: " + ("є" if MONO_TOKEN and MONO_JAR else "немає"),
         "Бот Іри: " + ("увімкнений" if IRA_ON else "вимкнений"),
-        "Магніт: " + ("URL заданий" if MAGNET_URL else "MAGNET_URL не заданий")
+        "Магніт: " + version_line("magnet")
         + " · канал: " + ("кнопка є" if CHANNEL_URL else "CHANNEL_URL не заданий")
         + " · замок: " + lock_text(),
-        "Гайд: " + ready_text("t1") + " · тарифи " + ",".join(GUIDE_TIERS) + " · " + str(_G) + " грн",
+        "Гайд: " + version_line("guide") + " · тарифи " + ",".join(GUIDE_TIERS) + " · "
+        + str(_G) + " / " + str(_T2) + " / " + str(_T3) + " грн",
         "Курс 1: " + ready_text("k1") + " · курс 2: " + ready_text("k2"),
-        "Ціни курсів: " + str(_K1) + " / " + str(_K2) + " / " + str(_K12) + " грн",
+        "Ціни курсів: " + str(_K1) + " / " + str(_K2) + " / " + str(_K12) + " грн"
+        + (" · тільки пакет" if COURSE_BUNDLE_ONLY else "") + ("" if COURSES_ON else " · продаж курсів ВИМКНЕНО"),
     ]
     if d and d.get("now"):
         paid = d.get("paid") or {}
@@ -886,7 +1071,7 @@ def perevirka_lines():
     нікому: він або віддає розмір, або каже «file is too big» (файл є,
     просто понад 20 МБ), або «wrong file_id» (файл зламаний).
     """
-    items = [("гайд t1", "document", GUIDE_FILE_ID)]
+    items = [("гайд t1", "document", guide_ref()), ("магніт", "document", magnet_ref())]
     for key in ("k1", "k2"):
         for i, (kind, fid) in enumerate(COURSE_FILES.get(key) or []):
             items.append((key + " №" + str(i + 1), kind, fid))
@@ -898,10 +1083,14 @@ def perevirka_lines():
         j = api_raw("getFile", file_id=fid)
         if j.get("ok"):
             out.append(label + ": є, " + mb((j.get("result") or {}).get("file_size")) + ", " + kind)
+        elif fid.startswith("http"):
+            out.append(label + ": посилання, getFile його не перевіряє")
         elif "too big" in (j.get("description") or "").lower():
             out.append(label + ": є, понад 20 МБ, " + kind)
         else:
             out.append(label + ": ЗЛАМАНИЙ, " + str(j.get("description")))
+    out.append("версія гайда: " + version_line("guide"))
+    out.append("версія магніта: " + version_line("magnet"))
     return "\n".join(out)
 
 
@@ -1128,7 +1317,25 @@ def zalyvka():
     finally:
         store.session_end()
     log.info("ЗАЛИВКА %s, %s б, file_id=%s", name, len(blob), fid)
-    return "document:" + fid + "\n" + name + ", " + mb(len(blob)) + "\n"
+    out = "document:" + fid + "\n" + name + ", " + mb(len(blob)) + "\n"
+    # ?rol=guide|magnet: цей файл бот віддає далі замість змінної Render.
+    # Тільки коли назва містить чинну версію, щоб v10 не повернувся випадково.
+    rol = (request.args.get("rol") or "").strip()
+    if rol in ("guide", "magnet"):
+        expect = GUIDE_EXPECT if rol == "guide" else MAGNET_EXPECT
+        if expect not in name:
+            return out + "роль " + rol + " НЕ змінена: у назві нема " + expect + "\n", 409
+        if not store.ON:
+            return out + "роль " + rol + " НЕ змінена: бази нема\n", 503
+        store.session_begin()
+        try:
+            store.kv_set(rol + "_file_id", fid)
+            store.kv_set(rol + "_file_name", name)
+        finally:
+            store.session_end()
+        _REF_CACHE.pop(rol, None)
+        out += "роль " + rol + ": бот віддає цей файл\n"
+    return out
 
 
 @app.get("/jars/" + SECRET)
@@ -1386,7 +1593,7 @@ def hook():
             if text.startswith("/moi") or text.strip() == "Мої матеріали":
                 store.touch_user(u)
                 kb = lessons_kb(uid)
-                send(chat_id, MOI_TEXT if kb else MOI_EMPTY, kb or magnet_kb())
+                send(chat_id, MOI_TEXT if kb else (MOI_EMPTY if COURSES_ON else MOI_EMPTY_NOC), kb or magnet_kb())
                 return "ok"
 
             if text.startswith("/start"):
@@ -1396,7 +1603,24 @@ def hook():
                 store.log_event(uid, "start", {"tag": src})
                 if rec.get("is_new", True):
                     notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"))
-                send(chat_id, HELLO, magnet_kb())
+                if src == "guide":
+                    store.log_event(uid, "guide_entry", {"tag": src})
+                    send(chat_id, GUIDE_HELLO if COURSES_ON else GUIDE_HELLO_NOC, guide_kb())
+                else:
+                    send(chat_id, HELLO, magnet_kb())
+            elif keyword(text):
+                k = keyword(text)
+                store.touch_user(u)
+                store.log_event(uid, "keyword", {"word": k})
+                if k == "guide":
+                    send(chat_id, GUIDE_INTRO, tiers_kb())
+                elif k == "retush":
+                    send_retush(chat_id)
+                elif k == "mk":
+                    send(chat_id, MK_TEXT, mk_kb())
+                else:
+                    send(chat_id, SHOOT_TEXT)
+                    notify_lead("Питають про ЗЙОМКУ: " + who(u))
             else:
                 store.touch_user(u)
                 store.log_event(uid, "message", {"text": text[:300]})
@@ -1430,7 +1654,18 @@ def hook():
                 send(chat_id, GUIDE_INTRO, tiers_kb())
             elif data == "retush":
                 store.log_event(uid, "retush_open")
-                send(chat_id, RETUSH_INTRO, retush_kb())
+                send_retush(chat_id)
+            elif data == "mk":
+                store.log_event(uid, "mk_open")
+                send(chat_id, MK_TEXT, mk_kb())
+            elif data == "mk:want":
+                store.log_event(uid, "mk_want")
+                send(chat_id, MK_THANKS)
+                notify_lead("ЗАЯВКА НА МК: " + who(u) + "\nНаписати особисто.")
+            elif not COURSES_ON and (data in ("q:new", "q:pro") or data in COURSES):
+                # Стара кнопка курсу в чаті людини: продажу нема, кажемо «готую новий».
+                store.log_event(uid, "retush_off", {"data": data})
+                send_retush(chat_id)
             elif data in ("q:new", "q:pro"):
                 # Кваліфікатор з її скрипту: новачкам перший курс, решті другий.
                 store.log_event(uid, "retush_level", {"level": data[2:]})
@@ -1476,10 +1711,10 @@ def hook():
                 notify("ТЕСТ оплати: " + pname(key) + "\n" + who(u))
             elif data == "moi":
                 kb = lessons_kb(uid)
-                send(chat_id, MOI_TEXT if kb else MOI_EMPTY, kb or magnet_kb())
+                send(chat_id, MOI_TEXT if kb else (MOI_EMPTY if COURSES_ON else MOI_EMPTY_NOC), kb or magnet_kb())
             elif data == "my:guide":
-                if "t1" in owned_keys(uid) and GUIDE_FILE_ID:
-                    api("sendDocument", chat_id=chat_id, document=GUIDE_FILE_ID)
+                if "t1" in owned_keys(uid) and guide_ref():
+                    api("sendDocument", chat_id=chat_id, document=guide_ref())
                 else:
                     send(chat_id, MOI_EMPTY, magnet_kb())
             elif data.startswith("les:"):

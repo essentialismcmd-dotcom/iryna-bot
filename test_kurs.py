@@ -19,6 +19,7 @@ os.environ["WEBHOOK_SECRET"] = "sekret"
 os.environ["ADMIN_ID"] = "1"
 os.environ["NO_THREADS"] = "1"
 os.environ["TEST_MODE"] = "1"
+os.environ["COURSES_ON"] = "1"   # стара лійка курсів; вимкнений режим у test_v2.py
 os.environ["PAY_URL"] = "https://send.monobank.ua/jar/test"
 os.environ["GUIDE_FILE_ID"] = "GUIDE"
 os.environ["COURSE1_FILES"] = "Урок 1 > video:V1, document:D1,BARE | Урок 2 > document:D2, document:D3"
@@ -107,6 +108,23 @@ perevirka("файли курсів", bot.COURSE_FILES["k1"] == [("video", "V1"),
 VYKLYKY.clear()
 msg("/start")
 perevirka("старт вітає", any("Привіт" in x for x in teksty()))
+
+# 2б. Вхід з гайда: ?start=guide веде на курс ретуші, ?start=magnit на магніт
+VYKLYKY.clear()
+msg("/start guide", uid=778)
+perevirka("з гайда: текст про гайд, не про магніт",
+          "з мого гайда" in teksty()[-1] and "Три схеми світла" not in teksty()[-1], teksty()[-1][:60])
+perevirka("з гайда: перша кнопка курс ретуші, магніта нема",
+          ostannia_klaviatura(778)[:1] == ["Курс ретуші"]
+          and "Забрати три схеми світла" not in ostannia_klaviatura(778), str(ostannia_klaviatura(778)))
+VYKLYKY.clear()
+msg("/start magnit", uid=779)
+perevirka("з магніта: як було, кнопка магніта",
+          ostannia_klaviatura(779) == ["Забрати три схеми світла"], str(ostannia_klaviatura(779)))
+VYKLYKY.clear()
+msg("/start", uid=780)
+perevirka("без мітки: як було, кнопка магніта",
+          ostannia_klaviatura(780) == ["Забрати три схеми світла"], str(ostannia_klaviatura(780)))
 
 # 2а. Замок: без підписки магніт не видається
 perevirka("канал з посилання", bot.CHANNEL_ID == "@test_kanal")

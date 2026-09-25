@@ -866,3 +866,9 @@ def dm_stats():
         "zakryttia": q("""select closed_by, count(*) as n from dm_outcomes
                           where outcome='booked' group by 1""", fetch="all"),
     }
+
+
+def asset_by_file_id(file_id):
+    """Останній запис assets з цим file_id: з нього видно назву файлу (версію)."""
+    return q("select * from assets where file_id = %s order by id desc limit 1",
+             (file_id,), fetch="one")
