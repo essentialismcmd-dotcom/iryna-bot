@@ -88,6 +88,17 @@ ok("слова розпізнаються", [bot.keyword(x) for x in ("СВІТ�
    == ["guide", "mk", "shoot", "retush", None, None])
 VYKLYKY.clear(); msg("СВІТЛО")
 ok("СВІТЛО веде на гайд", any("Повний гайд" in x for x in komu(777)) and knopky() == ["Гайд, 900 грн"], str(knopky()))
+ok("одна кнопка: без «Три варіанти», заклик до кнопки",
+   not any("Три варіанти" in x for x in komu(777)) and any(bot.GUIDE_INTRO_ONE in x for x in komu(777)))
+VYKLYKY.clear(); cb("guide")
+ok("кнопка гайда: той самий текст на одну кнопку",
+   any(bot.GUIDE_INTRO_ONE in x for x in komu(777)) and not any("Три варіанти" in x for x in komu(777)))
+_tiers = bot.GUIDE_TIERS[:]
+bot.GUIDE_TIERS[:] = ["t1", "t2", "t3"]
+VYKLYKY.clear(); msg("СВІТЛО")
+ok("три тарифи: «Три варіанти» і три кнопки",
+   any("Три варіанти, оберіть свій." in x for x in komu(777)) and len(knopky()) == 3, str(knopky()))
+bot.GUIDE_TIERS[:] = _tiers
 VYKLYKY.clear(); msg("МК")
 ok("МК: текст і кнопка заявки", any("майстер-клас" in x for x in komu(777)) and knopky() == ["Хочу на майстер-клас"])
 ok("МК без ціни в тексті", not any("$" in x or "грн" in x for x in komu(777)))
@@ -117,12 +128,41 @@ _kb = [b["text"] for r in bot.after_kb()["inline_keyboard"] for b in r]
 ok("вимкнено: після магніта нема кнопки курсу", "Курс ретуші" not in _kb and "Хочу повний гайд «Світло»" in _kb, str(_kb))
 for d in ("retush", "q:new", "k1", "k2", "k12"):
     VYKLYKY.clear(); cb(d)
-    ok("вимкнено: " + d + " каже «записую новий», без заявки",
-       any("новий курс" in x for x in komu(777)) and not any("ЗАЯВКА" in x for x in komu(1)) and not any("грн" in x for x in komu(777)), str(komu(777)))
+    ok("вимкнено: " + d + " веде на гайд і канал, без заявки",
+       knopky() == ["Хочу повний гайд «Світло»", "Канал «для своїх»"] and not any("ЗАЯВКА" in x for x in komu(1))
+       and not any("грн" in x or "новий курс" in x for x in komu(777)), str(komu(777)) + str(knopky()))
 VYKLYKY.clear(); msg("курс")
-ok("вимкнено: слово КУРС без цін", any("новий курс" in x for x in komu(777)) and not any("грн" in x for x in komu(777)))
+ok("вимкнено: слово КУРС на гайд і канал, без цін", knopky() == ["Хочу повний гайд «Світло»", "Канал «для своїх»"]
+   and not any("грн" in x for x in komu(777)))
 VYKLYKY.clear(); bot.give_guide(777, "t1")
 ok("вимкнено: після гайда без пропозиції курсу", not any("два записані курси" in x for x in komu(777)))
+ok("вимкнено: після гайда наступний крок канал", any("Гайд ваш" in x for x in komu(777)) and knopky() == ["Канал «для своїх»"], str(knopky()))
+VYKLYKY.clear(); cb("t2")
+ok("вимкнено: стара кнопка t2 показує чинний гайд, без заявки",
+   knopky() == ["Гайд, 900 грн"] and not any("ЗАЯВКА" in x for x in komu(1)) and not any("1200" in x for x in komu(777)), str(komu(777)))
+VYKLYKY.clear(); msg("просто питання про щось")
+ok("вимкнено: довільний текст дає наступний крок",
+   knopky() == ["Забрати три схеми світла", "Хочу повний гайд «Світло»", "Канал «для своїх»"], str(knopky()))
+VYKLYKY.clear(); cb("mk:want")
+ok("вимкнено: після заявки на МК кнопка каналу", knopky() == ["Канал «для своїх»"])
+bot.store.purchases_of = lambda uid: []
+VYKLYKY.clear(); msg("/moi", uid=555)
+ok("вимкнено: порожні матеріали без курсу, з гайдом", not any("курс" in x.lower() for x in komu(555))
+   and "Хочу повний гайд «Світло»" in knopky(555), str(komu(555)))
+VYKLYKY.clear(); cb("my:guide", uid=555)
+ok("вимкнено: чужий my:guide без курсу", not any("курс" in x.lower() for x in komu(555)))
+# Мітла: усі шляхи людини без курсів, «скоро», «записую», «три варіанти», цін t2/t3.
+VYKLYKY.clear()
+for t in ("/start", "/start guide", "/start fb", "СВІТЛО", "МК", "ЗЙОМКА", "курс", "ретуш", "привіт як справи", "/moi"):
+    msg(t, uid=555)
+for d in ("magnet", "guide", "t1", "t2", "t3", "retush", "q:new", "q:pro", "k1", "k2", "k12", "mk", "mk:want", "moi", "noget:t1"):
+    cb(d, uid=555)
+bot.give_magnet(555); bot.give_guide(555, "t1")
+_vse = " ".join(komu(555)).lower() + " " + " ".join(
+    b["text"].lower() for m, p in VYKLYKY if p.get("chat_id") == 555 and p.get("reply_markup")
+    for r in p["reply_markup"]["inline_keyboard"] for b in r)
+_zle = [w for w in ("курс", "скоро", "записую", "варіант", "1200", "1900", "розбір кадр", "третю") if w in _vse]
+ok("мітла: людина не бачить неіснуючого", not _zle, str(_zle))
 ok("вимкнено: /status каже", "продаж курсів ВИМКНЕНО" in bot.status_text())
 bot.COURSES_ON = True
 

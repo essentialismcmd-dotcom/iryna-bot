@@ -2,8 +2,9 @@
 """
 Бот Iryna Rul. Три речі й нічого більше.
 
-1. Лійка: магніт, три пакети гайду, два курси ретуші, оплата в банку Monobank,
-   видача файлів.
+1. Лійка: магніт → гайд «Світло» → канал «для своїх» (там МК), оплата в банку
+   Monobank, видача файлів. Тарифи t2/t3 і курси ретуші сплять за перемикачами
+   GUIDE_TIERS і COURSES_ON: людина бачить лише те, що продається зараз.
 2. Приймання матеріалів від Іри: вона кидає що завгодно з коротким підписом,
    рівно як кидала в особистий чат. Бот приймає і мовчить.
 3. База: усе прийняте лежить у Postgres, звідти це дістає Yaro або Клод.
@@ -127,12 +128,19 @@ LOCK_SOFT = (
     "Канал буде поруч, якщо захочете більше."
 )
 LOCK_SEEN = {}
-GUIDE_INTRO = (
+GUIDE_INTRO_HEAD = (
     "Повний гайд «Світло» ♥️\n\n"
     "Усі мої робочі схеми, від чистої комерції до кольору.\n"
     "Кожна з розстановкою, налаштуваннями і кадром зі зйомки.\n\n"
-    "Три варіанти, оберіть свій."
 )
+# Останній рядок за кількістю кнопок: «Три варіанти» лише коли тарифів більше одного.
+GUIDE_INTRO_MANY = {2: "Два варіанти, оберіть свій.", 3: "Три варіанти, оберіть свій."}
+GUIDE_INTRO_ONE = "Натисніть кнопку нижче, і гайд буде ваш."
+
+
+def guide_intro(kb):
+    n = len(kb.get("inline_keyboard", []))
+    return GUIDE_INTRO_HEAD + (GUIDE_INTRO_MANY.get(n, GUIDE_INTRO_MANY[3]) if n > 1 else GUIDE_INTRO_ONE)
 NOGET_TEXT = ("Перевірю вручну, зазвичай це кілька хвилин ♥️ "
               "Файл прийде сюди, нічого робити не треба.")
 
@@ -197,16 +205,16 @@ MK_TEXT = (
 MK_THANKS = "Записала ♥️ Напишу вам особисто найближчим часом."
 SHOOT_TEXT = ("Про зйомку швидше в інстаграмі ♥️ @iryna_rul_photographer, "
               "там відповідаю одразу. Ваше повідомлення я теж бачу.")
+# Курсів у продажу нема (25.09): слово КУРС і старі кнопки курсу ведуть на
+# гайд і канал, без обіцянок «скоро».
 RETUSH_SOON = (
-    "Курс ретуші ♥️\n\n"
-    "Зараз записую новий курс. Щойно буде готовий, зʼявиться тут і в каналі "
-    "«для своїх»."
+    "Ретуш розбираю в каналі «для своїх» ♥️\n\n"
+    "А все моє світло, тринадцять робочих схем, зібране в гайді «Світло»."
 )
 GUIDE_HELLO_NOC = (
     "Привіт, це Ірина Руль ♥️\n\n"
     "Ви прийшли з мого гайда «Світло», отже всі тринадцять схем у вас уже є.\n\n"
-    "Далі розбираю світло і ретуш у каналі «для своїх». "
-    "Новий курс ретуші зараз записую, зʼявиться тут."
+    "Далі розбираю світло і ретуш у каналі «для своїх», кнопка нижче."
 )
 AFTER_NOC = (
     "Готово, файл вище ♥️\n\n"
@@ -214,14 +222,26 @@ AFTER_NOC = (
     "У каналі «Iryna Rul | для своїх» розбираю світло і ретуш детальніше.\n"
     "Хочете всі схеми, а не три, тисніть другу кнопку."
 )
-MOI_EMPTY_NOC = ("Поки нічого не куплено ♥️ Безкоштовні три схеми світла по кнопці нижче, "
-                 "повний гайд там само.")
+MOI_EMPTY_NOC = ("Поки нічого не куплено ♥️ Безкоштовні три схеми світла і повний гайд "
+                 "по кнопках нижче.")
+# Після видачі гайда (без курсів): до 25.09 тут було порожньо, людина
+# отримувала файл і далі нічого. Тепер наступна сходинка, канал.
+NEXT_AFTER_GUIDE_NOC = (
+    "Гайд ваш, доступ залишається назавжди ♥️\n\n"
+    "Далі розбираю світло і ретуш у каналі «Iryna Rul | для своїх», "
+    "там же майстер-класи.\n"
+    "Гайд завжди можна забрати ще раз: /moi."
+)
 RETUSH_BUNDLE = (
     "Курс ретуші ♥️\n\n"
     "Два мої записані курси разом: основи фотошопу і бʼюті-портрет, "
     "плюс ростовий портрет з фешн-корекцією кольору. Знімки для практики додаються.\n\n"
     "Поки готую новий курс, ці віддаю пакетом зі знижкою."
 )
+
+
+def moi_empty():
+    return MOI_EMPTY if COURSES_ON else MOI_EMPTY_NOC
 
 
 def keyword(text):
@@ -456,10 +476,13 @@ def after_kb():
     return {"inline_keyboard": rows}
 
 
+def active_tiers():
+    return [k for k in ("t1", "t2", "t3") if k in GUIDE_TIERS] or ["t1"]
+
+
 def tiers_kb():
-    keys = [k for k in ("t1", "t2", "t3") if k in GUIDE_TIERS] or ["t1"]
     return {"inline_keyboard": [[{"text": TIERS[k]["btn"], "callback_data": k}]
-                                for k in keys]}
+                                for k in active_tiers()]}
 
 
 def retush_kb():
@@ -478,9 +501,7 @@ def course_kb(first):
 def send_retush(chat_id):
     """Курс ретуші: кваліфікатор або, з COURSE_BUNDLE_ONLY, одразу пакет."""
     if not COURSES_ON:
-        kb = ({"inline_keyboard": [[{"text": "Канал «для своїх»", "url": CHANNEL_URL}]]}
-              if CHANNEL_URL else None)
-        send(chat_id, RETUSH_SOON, kb)
+        send(chat_id, RETUSH_SOON, retush_off_kb())
         return
     if COURSE_BUNDLE_ONLY:
         send(chat_id, RETUSH_BUNDLE, {"inline_keyboard": [
@@ -491,6 +512,23 @@ def send_retush(chat_id):
 
 def mk_kb():
     return {"inline_keyboard": [[{"text": "Хочу на майстер-клас", "callback_data": "mk:want"}]]}
+
+
+def channel_rows():
+    return [[{"text": "Канал «для своїх»", "url": CHANNEL_URL}]] if CHANNEL_URL else []
+
+
+def empty_kb():
+    """Порожні «Мої матеріали» і будь-який текст: три схеми, гайд, канал."""
+    rows = [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]
+    if not COURSES_ON:
+        rows.append([{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}])
+    return {"inline_keyboard": rows + channel_rows()}
+
+
+def retush_off_kb():
+    return {"inline_keyboard": [[{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}]]
+            + channel_rows()}
 
 
 def retush_kb_one():
@@ -586,6 +624,8 @@ def give_guide(uid, tier):
     # Покупець у момент оплати найтепліший, другого такого моменту не буде.
     if COURSES_ON:
         send(uid, NEXT_AFTER_GUIDE, retush_kb_one())
+    else:
+        send(uid, NEXT_AFTER_GUIDE_NOC, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
     return True
 
 
@@ -1593,7 +1633,7 @@ def hook():
             if text.startswith("/moi") or text.strip() == "Мої матеріали":
                 store.touch_user(u)
                 kb = lessons_kb(uid)
-                send(chat_id, MOI_TEXT if kb else (MOI_EMPTY if COURSES_ON else MOI_EMPTY_NOC), kb or magnet_kb())
+                send(chat_id, MOI_TEXT if kb else moi_empty(), kb or empty_kb())
                 return "ok"
 
             if text.startswith("/start"):
@@ -1613,7 +1653,8 @@ def hook():
                 store.touch_user(u)
                 store.log_event(uid, "keyword", {"word": k})
                 if k == "guide":
-                    send(chat_id, GUIDE_INTRO, tiers_kb())
+                    kb = tiers_kb()
+                    send(chat_id, guide_intro(kb), kb)
                 elif k == "retush":
                     send_retush(chat_id)
                 elif k == "mk":
@@ -1625,7 +1666,7 @@ def hook():
                 store.touch_user(u)
                 store.log_event(uid, "message", {"text": text[:300]})
                 notify("Повідомлення в боті від " + who(u) + ":\n" + (text or "[не текст]"))
-                send(chat_id, CLIENT_TEXT)
+                send(chat_id, CLIENT_TEXT, empty_kb())
             return "ok"
 
         if "callback_query" in upd:
@@ -1651,7 +1692,8 @@ def hook():
                 store.log_event(uid, "magnet")
             elif data == "guide":
                 store.log_event(uid, "guide_open")
-                send(chat_id, GUIDE_INTRO, tiers_kb())
+                kb = tiers_kb()
+                send(chat_id, guide_intro(kb), kb)
             elif data == "retush":
                 store.log_event(uid, "retush_open")
                 send_retush(chat_id)
@@ -1660,12 +1702,17 @@ def hook():
                 send(chat_id, MK_TEXT, mk_kb())
             elif data == "mk:want":
                 store.log_event(uid, "mk_want")
-                send(chat_id, MK_THANKS)
+                send(chat_id, MK_THANKS, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
                 notify_lead("ЗАЯВКА НА МК: " + who(u) + "\nНаписати особисто.")
             elif not COURSES_ON and (data in ("q:new", "q:pro") or data in COURSES):
                 # Стара кнопка курсу в чаті людини: продажу нема, кажемо «готую новий».
                 store.log_event(uid, "retush_off", {"data": data})
                 send_retush(chat_id)
+            elif data in TIERS and data not in active_tiers():
+                # Стара кнопка тарифу, який зараз не продається: показуємо чинний гайд.
+                store.log_event(uid, "tier_off", {"tier": data})
+                kb = tiers_kb()
+                send(chat_id, guide_intro(kb), kb)
             elif data in ("q:new", "q:pro"):
                 # Кваліфікатор з її скрипту: новачкам перший курс, решті другий.
                 store.log_event(uid, "retush_level", {"level": data[2:]})
@@ -1711,18 +1758,18 @@ def hook():
                 notify("ТЕСТ оплати: " + pname(key) + "\n" + who(u))
             elif data == "moi":
                 kb = lessons_kb(uid)
-                send(chat_id, MOI_TEXT if kb else (MOI_EMPTY if COURSES_ON else MOI_EMPTY_NOC), kb or magnet_kb())
+                send(chat_id, MOI_TEXT if kb else moi_empty(), kb or empty_kb())
             elif data == "my:guide":
                 if "t1" in owned_keys(uid) and guide_ref():
                     api("sendDocument", chat_id=chat_id, document=guide_ref())
                 else:
-                    send(chat_id, MOI_EMPTY, magnet_kb())
+                    send(chat_id, moi_empty(), empty_kb())
             elif data.startswith("les:"):
                 _, ckey, n = (data.split(":") + ["", ""])[:3]
                 if ckey in owned_keys(uid):
                     send_lesson(chat_id, ckey, int(n or 0))
                 else:
-                    send(chat_id, MOI_EMPTY, magnet_kb())
+                    send(chat_id, moi_empty(), empty_kb())
             elif data.startswith("give:") and uid in NOTIFY_IDS:
                 parts = (data.split(":") + ["", ""])[:3]
                 target = int(parts[1])
@@ -1751,7 +1798,7 @@ def ensure_webhook():
         log.info("вебхук поставлений: %s", r)
         api("setMyCommands", commands=[
             {"command": "start", "description": "Три схеми світла безкоштовно"},
-            {"command": "moi", "description": "Мої матеріали: гайд і уроки"},
+            {"command": "moi", "description": "Мої матеріали: усе куплене"},
         ])
     except Exception as e:
         log.warning("ensure_webhook: %s", e)
