@@ -47,6 +47,15 @@ COURSE_BUNDLE_ONLY = os.getenv("COURSE_BUNDLE_ONLY", "").strip().lower() in ("1"
 # Без COURSES_ON=1 курсів нема в меню, слово КУРС і старі кнопки кажуть «готую
 # новий», заявок і кодів на k1/k2/k12 бот не дає. Куплене раніше видається як було.
 COURSES_ON = os.getenv("COURSES_ON", "").strip().lower() in ("1", "true", "yes", "on")
+# Брендинг, рівень 1 (25.09): картинки в стилі гайда v13 до повідомлень лійки.
+# Значення: file_id картинки, залитої цьому боту, або https-URL. Порожня змінна:
+# бот шле просто текст, як до брендингу. Картинки: cowork projects/iryna/bot/brend/.
+START_PIC     = os.getenv("START_PIC", "").strip()     # /start, обкладинка «Привіт, я Іра»
+CARD_MAGNIT   = os.getenv("CARD_MAGNIT", "").strip()   # після видачі трьох схем
+CARD_GUIDE    = os.getenv("CARD_GUIDE", "").strip()    # гайд «Світло», вибір тарифу
+CARD_KANAL    = os.getenv("CARD_KANAL", "").strip()    # замок каналу і крок після гайда
+CARD_MK       = os.getenv("CARD_MK", "").strip()       # МК по світлу
+CAPTION_MAX   = 1024                                    # ліміт підпису до фото в Telegram
 PAY_URL       = os.getenv("PAY_URL", "").strip()
 MONO_TOKEN    = os.getenv("MONO_TOKEN", "").strip()
 MONO_JAR      = os.getenv("MONO_JAR", "").strip()
@@ -415,6 +424,19 @@ def send(chat_id, text, markup=None):
                reply_markup=markup, disable_web_page_preview=True)
 
 
+def send_card(chat_id, pic, text, markup=None):
+    """
+    Картка з підписом: фото + той самий текст і ті самі кнопки. Без картинки,
+    з текстом довшим за підпис (1024) або коли Telegram не прийняв фото,
+    іде звичайний send(), тобто лійка не стає ніколи.
+    """
+    if pic and len(text) <= CAPTION_MAX:
+        r = api("sendPhoto", chat_id=chat_id, photo=pic, caption=text, reply_markup=markup)
+        if r:
+            return r
+    return send(chat_id, text, markup)
+
+
 def notify_lead(text):
     for i in LEAD_IDS:
         send(i, text)
@@ -609,7 +631,7 @@ def give_magnet(chat_id):
     if not api("sendDocument", chat_id=chat_id, document=ref):
         send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
         return
-    send(chat_id, AFTER if COURSES_ON else AFTER_NOC, after_kb())
+    send_card(chat_id, CARD_MAGNIT, AFTER if COURSES_ON else AFTER_NOC, after_kb())
 
 
 def give_guide(uid, tier):
@@ -625,7 +647,7 @@ def give_guide(uid, tier):
     if COURSES_ON:
         send(uid, NEXT_AFTER_GUIDE, retush_kb_one())
     else:
-        send(uid, NEXT_AFTER_GUIDE_NOC, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
+        send_card(uid, CARD_KANAL, NEXT_AFTER_GUIDE_NOC, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
     return True
 
 
@@ -1645,20 +1667,20 @@ def hook():
                     notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"))
                 if src == "guide":
                     store.log_event(uid, "guide_entry", {"tag": src})
-                    send(chat_id, GUIDE_HELLO if COURSES_ON else GUIDE_HELLO_NOC, guide_kb())
+                    send_card(chat_id, START_PIC, GUIDE_HELLO if COURSES_ON else GUIDE_HELLO_NOC, guide_kb())
                 else:
-                    send(chat_id, HELLO, magnet_kb())
+                    send_card(chat_id, START_PIC, HELLO, magnet_kb())
             elif keyword(text):
                 k = keyword(text)
                 store.touch_user(u)
                 store.log_event(uid, "keyword", {"word": k})
                 if k == "guide":
                     kb = tiers_kb()
-                    send(chat_id, guide_intro(kb), kb)
+                    send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
                 elif k == "retush":
                     send_retush(chat_id)
                 elif k == "mk":
-                    send(chat_id, MK_TEXT, mk_kb())
+                    send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
                 else:
                     send(chat_id, SHOOT_TEXT)
                     notify_lead("Питають про ЗЙОМКУ: " + who(u))
@@ -1683,7 +1705,7 @@ def hook():
                     LOCK_SEEN[uid] = n
                     if n < 2:
                         store.log_event(uid, "lock")
-                        send(chat_id, LOCK_TEXT, lock_kb())
+                        send_card(chat_id, CARD_KANAL, LOCK_TEXT, lock_kb())
                         return "ok"
                     store.log_event(uid, "lock_skip")
                     send(chat_id, LOCK_SOFT)
@@ -1693,13 +1715,13 @@ def hook():
             elif data == "guide":
                 store.log_event(uid, "guide_open")
                 kb = tiers_kb()
-                send(chat_id, guide_intro(kb), kb)
+                send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
             elif data == "retush":
                 store.log_event(uid, "retush_open")
                 send_retush(chat_id)
             elif data == "mk":
                 store.log_event(uid, "mk_open")
-                send(chat_id, MK_TEXT, mk_kb())
+                send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
             elif data == "mk:want":
                 store.log_event(uid, "mk_want")
                 send(chat_id, MK_THANKS, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
