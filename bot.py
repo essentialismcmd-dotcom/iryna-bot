@@ -1061,34 +1061,6 @@ def mb(size):
     return str(round((size or 0) / 1024 / 1024, 1)) + " МБ"
 
 
-def admin_file(m):
-    """
-    Адмін кидає або пересилає будь-який файл. Бот кладе його в базу, кошик
-    «kurs», з іменем файлу і підписом, і відповідає рядком для COURSE*_FILES.
-    13.09 Yaro переслав ~60 файлів курсу, а стара версія на них відповідала
-    «Прийняла» і в базу не клала: file_id пропали. Тому спершу база, потім
-    відповідь.
-    """
-    for key, label in FILE_KINDS:
-        v = m.get(key)
-        if not v:
-            continue
-        if key == "sticker":
-            return None
-        if key == "photo":
-            v = v[-1]
-        size = v.get("file_size")
-        name = v.get("file_name") or ""
-        caption = (m.get("caption") or "").strip()
-        store.add_asset(m.get("from", {}).get("id"), v.get("file_id"), label, bucket="kurs",
-                        caption=caption or None, file_unique_id=v.get("file_unique_id"),
-                        media_group=str(m["media_group_id"]) if m.get("media_group_id") else None,
-                        file_name=name or None, file_size=size)
-        return (key + ":" + v.get("file_id", "?")
-                + "\n" + (name or "без імені") + (", " + mb(size) if size else ""))
-    return None
-
-
 def assets_lines(limit=200):
     """Матеріали з бази рядками «kind:file_id», найновіші внизу."""
     rows = store.assets_recent(limit=limit) or []
@@ -1300,6 +1272,38 @@ def inbox_page():
 @app.get("/perevirka/" + SECRET)
 def perevirka_page():
     return "<pre>замок: " + lock_text() + "\n" + perevirka_lines() + "</pre>"
+
+
+@app.get("/skyd/" + SECRET)
+def skyd():
+    """
+    Чистий лист для одного користувача: /skyd/<S>?uid=<telegram id>.
+    Стирає все, що бот про нього памʼятає: рядок users (мітка джерела,
+    отриманий магніт), усі його заявки й покупки (тестові й ручні видачі
+    теж), журнал подій, памʼять замка каналу. Чужі рядки не чіпає: кожен
+    запит має where user_id = uid. Після цього він видаляє чат і тисне
+    /start як нова людина. Без uid нічого не робить.
+    """
+    try:
+        uid = int(request.args.get("uid", ""))
+    except ValueError:
+        return "потрібен ?uid=<telegram id> числом", 400
+    if uid <= 0:
+        return "потрібен ?uid=<telegram id> числом", 400
+    if not store.ON:
+        return "бази нема, стирати нічого", 503
+    store.session_begin()
+    try:
+        n = store.wipe_user(uid)
+    finally:
+        store.session_end()
+    LOCK_SEEN.pop(uid, None)
+    if n is None:
+        return "база не відповіла, нічого не стерто", 503
+    return ("<pre>стерто для " + str(uid) + ": користувач " + str(n.get("users", 0))
+            + ", покупки й заявки " + str(n.get("purchases", 0))
+            + ", події " + str(n.get("events", 0)) + "\n"
+            + "далі: видалити чат з ботом і натиснути /start</pre>")
 
 
 @app.get("/file/" + SECRET + "/<int:aid>")
@@ -1606,42 +1610,16 @@ def hook():
                 return "ok"
             text = (m.get("text") or m.get("caption") or "").strip()
 
-            # Службове для Yaro: у меню команд цього немає навмисно.
-            if uid == ADMIN_ID:
-                if text.startswith("/status"):
-                    send(chat_id, status_text())
-                    return "ok"
-                if text.startswith("/export"):
-                    if store.ON:
-                        send_file(chat_id, "iryna-bot-" + time.strftime("%Y-%m-%d") + ".json",
-                                  store.export_all(), "Вивантаження бази")
-                    else:
-                        send(chat_id, "Сховище вимкнене.")
-                    return "ok"
-                if text.startswith("/inbox"):
-                    body = assets_lines(limit=40)
-                    for i in range(0, len(body), 3900):
-                        send(chat_id, body[i:i + 3900])
-                    return "ok"
-                if text.startswith("/perevirka"):
-                    send(chat_id, perevirka_lines())
-                    return "ok"
-                if text.startswith("/nova"):
-                    # Почати з чистого: далі він видаляє чат і тисне /start як новачок.
-                    store.forget_user(uid)
-                    send(chat_id, "Чисто. Видали цей чат і зайди в бота заново, побачиш його як нова людина.")
-                    return "ok"
-                fid_line = admin_file(m)
-                if fid_line:
-                    send(chat_id, "У базі, кошик kurs:\n" + fid_line)
-                    return "ok"
-                if text and not text.startswith("/"):
-                    # Тексти схем від Іри він теж пересилає. Зберігаємо цілком:
-                    # до 14.09 07:3x вони летіли в events обрізаними до 300 знаків.
-                    store.add_asset(uid, "", "текст", bucket="kurs", caption=text,
-                                    media_group=str(m["media_group_id"]) if m.get("media_group_id") else None)
-                    send(chat_id, "У базі, текст: " + text[:40].replace("\n", " ") + ("…" if len(text) > 40 else ""))
-                    return "ok"
+            # Адмін бачить бот так само, як людина (слово Yaro 25.09): жодних
+            # службових команд у Telegram, кошиків і збереження його тексту як
+            # «матеріалу» (через це слова СВІТЛО/МК в адміна не спрацьовували).
+            # Лишилось одне: /nova стирає його слід, щоб пройти лійку новачком.
+            # Службове для очей живе в HTTP: /db, /perevirka, /zalyvka, /skyd.
+            if uid == ADMIN_ID and text.startswith("/nova"):
+                store.wipe_user(uid)
+                LOCK_SEEN.pop(uid, None)
+                send(chat_id, "Чисто. Видали цей чат і зайди в бота заново, побачиш його як нова людина.")
+                return "ok"
 
             # Іра: кидає що завгодно, бот приймає і мовчить.
             if uid == IRA_ID and IRA_ON:
@@ -1812,16 +1790,34 @@ def hook():
     return "ok"
 
 
+PEOPLE_COMMANDS = [
+    {"command": "start", "description": "Три схеми світла безкоштовно"},
+    {"command": "moi", "description": "Мої матеріали: усе куплене"},
+]
+
+
+def clear_scoped_commands():
+    """
+    Меню команд людини одне для всіх, адмін теж бачить тільки його.
+    Старий код (454d807, 28.08) ставив адміну й Ірі меню з областю дії chat:
+    now, todo, inbox, status, export, пізніше blocks і ira. Telegram тримає
+    таке меню, доки його не видалити, тому код сам по собі його не прибере:
+    знімаємо всі області, що стоять вище за default.
+    """
+    ids = {i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i}
+    for cid in ids:
+        api("deleteMyCommands", scope={"type": "chat", "chat_id": cid})
+    api("deleteMyCommands", scope={"type": "all_private_chats"})
+
+
 def ensure_webhook():
     """Ставимо завжди: після серії таймаутів телеграм іде в довгу паузу."""
     try:
         r = api("setWebhook", url=BASE_URL + "/" + SECRET,
                 allowed_updates=["message", "callback_query"])
         log.info("вебхук поставлений: %s", r)
-        api("setMyCommands", commands=[
-            {"command": "start", "description": "Три схеми світла безкоштовно"},
-            {"command": "moi", "description": "Мої матеріали: усе куплене"},
-        ])
+        api("setMyCommands", commands=PEOPLE_COMMANDS)
+        clear_scoped_commands()
     except Exception as e:
         log.warning("ensure_webhook: %s", e)
 

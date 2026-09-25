@@ -241,26 +241,33 @@ VYKLYKY.clear()
 cb("give:777:k1", uid=1)
 perevirka("ручна видача курсу", any(m == "sendVideo" for m, _ in VYKLYKY) and "Видано" in teksty())
 
-# 12. Адмін кидає відео: отримує рядок kind:file_id
-VYKLYKY.clear()
-msg("", uid=1, video={"file_id": "VID123", "file_size": 52428800})
-perevirka("адміну file_id відео", any("video:VID123" in x and "50.0 МБ" in x for x in teksty()), str(teksty()))
+# 12. Адмін як людина: файл і текст не йдуть у кошики, слова працюють
 ZAPYSY = []
 bot.store.add_asset = lambda *a, **k: ZAPYSY.append(k) or {}
+
+
+def vse_teksty():
+    return " ".join((p.get("text") or p.get("caption") or "") for _, p in VYKLYKY)
+
+
 VYKLYKY.clear()
 msg("урок 2", uid=1, video={"file_id": "VID2", "file_size": 1048576, "file_name": "urok-2.mp4"}, caption="урок 2")
-perevirka("файл адміна лягає в базу з іменем", ZAPYSY and ZAPYSY[-1].get("bucket") == "kurs" and ZAPYSY[-1].get("file_name") == "urok-2.mp4", str(ZAPYSY))
+perevirka("файл адміна не йде в базу і не дає file_id", not ZAPYSY and "video:VID2" not in vse_teksty(), str(teksty()))
+perevirka("файл адміна: відповідь як людині", bot.CLIENT_TEXT in teksty())
 VYKLYKY.clear()
-msg("", uid=1, document={"file_id": "DOC1"})
-perevirka("адміну file_id документа", any("document:DOC1" in x for x in teksty()))
+msg("СВІТЛО", uid=1)
+perevirka("адмін пише СВІТЛО: гайд, як у людини", not ZAPYSY and "Повний гайд" in vse_teksty(), vse_teksty()[:120])
+VYKLYKY.clear()
+msg("МК", uid=1)
+perevirka("адмін пише МК: відповідь МК", not ZAPYSY and bot.MK_TEXT[:30] in vse_teksty(), vse_teksty()[:120])
 
-# 13. /status і /inbox не падають без бази
-VYKLYKY.clear()
-msg("/status", uid=1)
-perevirka("/status показує курси", any("Курс 1: у курсі 5 файлів у 2 розділах" in x and "1400 / 1300 / 2700" in x and "650 грн" in x for x in teksty()), str(teksty()))
-VYKLYKY.clear()
-msg("/inbox", uid=1)
-perevirka("/inbox без бази", any("немає" in x for x in teksty()))
+# 13. Службових команд у Telegram більше нема: адміну вони як будь-який текст
+for kom in ("/status", "/inbox", "/export", "/perevirka", "/todo", "/now", "/blocks", "/ira"):
+    VYKLYKY.clear()
+    msg(kom, uid=1)
+    perevirka(kom + " адміну: як людині", bot.CLIENT_TEXT in teksty() and "База:" not in vse_teksty()
+              and not [m for m, _ in VYKLYKY if m.startswith("send") and m != "sendMessage"], str(teksty())[:120])
+perevirka("/db показує курси", "Курс 1: у курсі 5 файлів у 2 розділах" in app.get("/db/sekret").data.decode())
 
 # 14. Заливка через POST /zalyvka/<S>: файл летить адміну, назад рядок з file_id
 VYKLYKY.clear()
@@ -272,15 +279,65 @@ perevirka("заливка без файлу відмовляє", app.post("/zaly
 perevirka("/inbox і /perevirka живі", app.get("/inbox/sekret").status_code == 200 and app.get("/perevirka/sekret").status_code == 200)
 perevirka("/perevirka бачить гайд і файли курсу", "гайд t1" in app.get("/perevirka/sekret").data.decode() and "k1 №5" in app.get("/perevirka/sekret").data.decode())
 
-# 15а. Адмінський текст лягає в базу цілком
+# 15а. Текст адміна не лягає в базу
 ZAPYSY.clear(); VYKLYKY.clear()
 msg("СХЕМА 4\nМодель ставимо далеко від фону", uid=1)
-perevirka("текст адміна в базі цілком", ZAPYSY and ZAPYSY[-1].get("caption", "").startswith("СХЕМА 4") and ZAPYSY[-1].get("bucket") == "kurs", str(ZAPYSY))
+perevirka("текст адміна не в базі", not ZAPYSY, str(ZAPYSY))
 perevirka("/events і /file живі без бази", app.get("/events/sekret").status_code == 200 and app.get("/file/sekret/1").status_code == 404)
 
-# 15б. /nova чистить адміна
+# 15б. /nova стирає адміна повністю, від людини це просто текст
+STERTO = []
+bot.store.wipe_user = lambda uid: STERTO.append(uid) or {"users": 1, "purchases": 2, "events": 3}
 VYKLYKY.clear(); msg("/nova", uid=1)
-perevirka("/nova відповідає", any("Чисто" in x for x in teksty()))
+perevirka("/nova відповідає і стирає", any("Чисто" in x for x in teksty()) and STERTO == [1])
+VYKLYKY.clear(); STERTO.clear(); msg("/nova", uid=777)
+perevirka("/nova від людини нічого не стирає", STERTO == [] and bot.CLIENT_TEXT in teksty())
+
+# 15в. /skyd/<S>?uid=: чистий лист одній людині
+perevirka("/skyd без uid відмова", app.get("/skyd/sekret").status_code == 400 and app.get("/skyd/sekret?uid=abc").status_code == 400)
+perevirka("/skyd без бази чесна відмова", app.get("/skyd/sekret?uid=777").status_code == 503 and STERTO == [])
+perevirka("/skyd з чужим секретом не існує", app.get("/skyd/inshyi?uid=777").status_code == 404)
+bot.store.ON = True
+bot.LOCK_SEEN[777] = 1
+r = app.get("/skyd/sekret?uid=777")
+perevirka("/skyd стирає рівно цю людину", r.status_code == 200 and STERTO == [777] and 777 not in bot.LOCK_SEEN
+          and "покупки й заявки 2" in r.data.decode(), r.data.decode())
+bot.store.wipe_user = lambda uid: None
+perevirka("/skyd: база не відповіла, так і каже", app.get("/skyd/sekret?uid=777").status_code == 503)
+bot.store.ON = False
+_sql = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "store.py"), encoding="utf-8").read()
+_w = _sql[_sql.index("def wipe_user"):_sql.index("def mark_magnet")].split('"""')[3]
+perevirka("wipe_user: три таблиці, кожна по user_id, матеріали й банку не чіпає",
+          _w.count("where user_id = %s") == 3 and "assets" not in _w and "mono_tx" not in _w, _w)
+
+# 15г. Адмін на /start бачить рівно те, що людина
+def pobachene(uid):
+    """Що пішло в чат цієї людини, без її id: метод, текст/підпис, кнопки."""
+    out = []
+    for m, p in VYKLYKY:
+        if p.get("chat_id") == uid:
+            out.append((m, p.get("text") or p.get("caption"), str(p.get("reply_markup"))))
+    return out
+
+
+for tag in ("", " guide"):
+    VYKLYKY.clear(); msg("/start" + tag, uid=1); admin = pobachene(1)
+    VYKLYKY.clear(); msg("/start" + tag, uid=779); lyudyna = pobachene(779)
+    # адмін також у NOTIFY_IDS, тож отримує ще й «Новий у боті» про себе: це сповіщення, не лійка
+    admin = [x for x in admin if not (x[1] or "").startswith("Новий у боті")]
+    perevirka("/start" + tag + ": адмін = людина", admin == lyudyna and lyudyna, str(admin)[:160] + " | " + str(lyudyna)[:160])
+VYKLYKY.clear(); cb("magnet", uid=1); admin = pobachene(1)
+VYKLYKY.clear(); cb("magnet", uid=779); lyudyna = pobachene(779)
+perevirka("кнопка магніта: адмін = людина", admin == lyudyna and lyudyna, str(admin)[:160])
+
+# 15д. Меню команд: людське для всіх, старі меню адміна й Іри знімаються
+VYKLYKY.clear(); bot.ensure_webhook()
+_menu = [p for m, p in VYKLYKY if m == "setMyCommands"]
+_zniato = [p.get("scope") for m, p in VYKLYKY if m == "deleteMyCommands"]
+perevirka("меню одне: start і moi, без області", len(_menu) == 1 and "scope" not in _menu[0]
+          and [c["command"] for c in _menu[0]["commands"]] == ["start", "moi"], str(_menu))
+perevirka("меню адміна з областю chat зняте", {"type": "chat", "chat_id": 1} in _zniato
+          and {"type": "all_private_chats"} in _zniato, str(_zniato))
 
 # 15. /privacy живий
 perevirka("/privacy віддає сторінку", app.get("/privacy").status_code == 200)

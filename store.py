@@ -11,7 +11,7 @@ Neon не засинає, поки висить відкритий конекш�
 порожнечу. Бот від цього не падає, просто працює як раніше, без памʼяті.
 """
 
-import os, json, time, logging, threading
+import os, time, logging, threading
 from contextlib import contextmanager
 
 log = logging.getLogger("store")
@@ -42,8 +42,7 @@ create table if not exists users (
     created_at    timestamptz not null default now(),
     last_seen_at  timestamptz not null default now(),
     got_magnet_at timestamptz,
-    cabinet_msg   bigint,
-    tasks_msg     bigint
+    cabinet_msg   bigint
 );
 
 create table if not exists purchases (
@@ -79,22 +78,6 @@ alter table assets add column if not exists file_unique_id text;
 create index if not exists assets_bucket on assets (bucket, created_at desc);
 create index if not exists assets_group on assets (media_group);
 
-create table if not exists tasks (
-    id          bigserial primary key,
-    owner       text not null,
-    n           integer not null,
-    text        text not null,
-    done        boolean not null default false,
-    project     text,
-    deferred_at timestamptz,
-    created_by  bigint,
-    created_at  timestamptz not null default now(),
-    closed_at   timestamptz,
-    unique (owner, n)
-);
-alter table tasks add column if not exists project text;
-alter table tasks add column if not exists deferred_at timestamptz;
-
 create table if not exists events (
     id         bigserial primary key,
     user_id    bigint,
@@ -116,18 +99,6 @@ create table if not exists kv (
     v          text,
     updated_at timestamptz not null default now()
 );
-
-create table if not exists blocks (
-    id       bigserial primary key,
-    kind     text not null default 'other',
-    code     text,
-    title    text not null,
-    position integer not null default 0,
-    active   boolean not null default true,
-    unique (kind, code)
-);
-alter table assets add column if not exists block_id bigint;
-alter table users add column if not exists active_block bigint;
 
 -- Дірект Instagram. Заведено 31.08.2026. Приймається вебхуком від офіційного
 -- посередника Meta, бо прямого доступу до діректу немає: у токені відсутній
@@ -183,9 +154,6 @@ create table if not exists dm_override (
     reason     text not null,
     set_at     timestamptz not null default now()
 );
-alter table users add column if not exists block_msg bigint;
-alter table users add column if not exists as_ira boolean not null default false;
-create index if not exists assets_block on assets (block_id);
 -- 14.09.2026: файли курсу від адміна. Імʼя і розмір, щоб зібрати курс без
 -- перегляду кожного відео.
 alter table assets add column if not exists file_name text;
@@ -363,8 +331,7 @@ def list_users(role=None):
 
 
 def set_user(uid, **kw):
-    allowed = ("source_tag", "got_magnet_at", "cabinet_msg", "tasks_msg", "role",
-               "active_block", "block_msg", "as_ira")
+    allowed = ("source_tag", "got_magnet_at", "role")
     fields = {k: v for k, v in kw.items() if k in allowed}
     if not fields:
         return None
@@ -373,16 +340,22 @@ def set_user(uid, **kw):
              tuple(fields.values()) + (uid,))
 
 
-def forget_user(uid):
+def wipe_user(uid):
     """
-    Стирає людину з бази, щоб /start побачив її як нову. Для Yaro: він видаляє
-    чат з ботом і дивиться лійку очима новачка. Оплачені покупки не чіпаємо:
-    вони гроші, а не тест.
+    Чистий лист для однієї людини: /skyd і /nova. Стирає її рядок users
+    (мітка джерела, магніт), усі її заявки й покупки, включно з тестовими
+    і ручними видачами, і журнал подій. Одним запитом, щоб не лишилось
+    половини. Повертає лічильники або None, якщо база не відповіла.
+    Матеріали (assets) не чіпає: там заливки файлів гайда від адміна.
     """
-    q("delete from events where user_id = %s", (uid,))
-    q("delete from purchases where user_id = %s and status = 'new'", (uid,))
-    q("delete from users where user_id = %s", (uid,))
-    return True
+    return q("""
+        with e as (delete from events where user_id = %s returning 1),
+             p as (delete from purchases where user_id = %s returning 1),
+             u as (delete from users where user_id = %s returning 1)
+        select (select count(*) from u) as users,
+               (select count(*) from p) as purchases,
+               (select count(*) from e) as events
+    """, (uid, uid, uid), fetch="one")
 
 
 def mark_magnet(uid):
@@ -454,14 +427,14 @@ def use_slot(purchase_id):
 # ---------- склад матеріалів ----------
 
 def add_asset(from_user, file_id, file_kind, bucket="inbox", caption=None,
-              media_group=None, file_unique_id=None, block_id=None,
+              media_group=None, file_unique_id=None,
               file_name=None, file_size=None):
     return q("""
         insert into assets (from_user, file_id, file_unique_id, file_kind, bucket,
-                            caption, media_group, block_id, file_name, file_size)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning *
+                            caption, media_group, file_name, file_size)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s) returning *
     """, (from_user, file_id, file_unique_id, file_kind, bucket, caption,
-          media_group, block_id, file_name, file_size), fetch="one")
+          media_group, file_name, file_size), fetch="one")
 
 
 def events_recent(limit=200):
@@ -479,224 +452,9 @@ def get_asset(asset_id):
     return q("select * from assets where id = %s", (asset_id,), fetch="one")
 
 
-def set_bucket(asset_id, bucket):
-    return q("update assets set bucket = %s where id = %s returning *",
-             (bucket, asset_id), fetch="one")
-
-
-def set_bucket_group(media_group, bucket):
-    """Розкладає весь альбом одним рухом. Повертає скільки карток перекладено."""
-    r = q("""update assets set bucket = %s where media_group = %s and bucket = 'inbox'
-             returning id""", (bucket, media_group), fetch="all")
-    return len(r or [])
-
-
-def assets_of_group(media_group, limit=50):
-    return q("""select * from assets where media_group = %s order by id limit %s""",
-             (media_group, limit), fetch="all")
-
-
 def inbox_count():
     r = q("select count(*) as n from assets where bucket = 'inbox'", fetch="one")
     return (r or {}).get("n", 0)
-
-
-def inbox_next():
-    """Найстарша нерозкладена картка. Альбом представлений своєю першою карткою."""
-    return q("""select * from assets where bucket = 'inbox'
-                order by created_at, id limit 1""", fetch="one")
-
-
-def bucket_assets(bucket, limit=20, unused_only=False):
-    sql = "select * from assets where bucket = %s"
-    if unused_only:
-        sql += " and used_at is null"
-    sql += " order by created_at desc limit %s"
-    return q(sql, (bucket, limit), fetch="all")
-
-
-def mark_asset_used(asset_id):
-    return q("update assets set used_at = now() where id = %s", (asset_id,))
-
-
-def bucket_counts():
-    return q("""select bucket, count(*) as n, count(used_at) as used
-                from assets group by bucket order by n desc""", fetch="all")
-
-
-# ---------- блоки матеріалів ----------
-#
-# Блок це не стан, а вказівник: куди зараз падає матеріал від Іри.
-# Активний блок завжди один, решта просто містять матеріали, і назавжди.
-# Тому закривати нічого не треба, протухає лише вказівник.
-
-def seed_blocks(rows):
-    """rows: список (kind, code, title, position). Наявні не чіпає."""
-    n = 0
-    for kind, code, title, pos in rows:
-        r = q("""insert into blocks (kind, code, title, position) values (%s, %s, %s, %s)
-                 on conflict (kind, code) do nothing returning id""",
-              (kind, code, title, pos), fetch="one")
-        if r:
-            n += 1
-    return n
-
-
-def list_blocks(kind=None):
-    if kind:
-        return q("""select * from blocks where active and kind = %s
-                    order by position, id""", (kind,), fetch="all")
-    return q("select * from blocks where active order by kind, position, id", fetch="all")
-
-
-def block_kinds():
-    return q("""select kind, count(*) as n from blocks where active
-                group by kind order by min(position)""", fetch="all")
-
-
-def get_block(bid):
-    return q("select * from blocks where id = %s", (bid,), fetch="one")
-
-
-def inbox_block():
-    """
-    Блок за замовчуванням. Якщо вона нічого не обрала, матеріал падає сюди,
-    а не в порожнечу. Нічого питати в неї для цього не треба.
-    """
-    r = q("""select * from blocks where kind = 'other' and code = '_inbox'""", fetch="one")
-    if r:
-        return r
-    return q("""insert into blocks (kind, code, title, position, active)
-                values ('other', '_inbox', 'Без блоку', 999, false)
-                on conflict (kind, code) do update set title = excluded.title
-                returning *""", fetch="one")
-
-
-def find_block(text):
-    """
-    Пошук блоку за текстом на кшталт «Схема 5», «схема 05», «Обкладинка».
-    Спершу точний номер, далі назва. Нічого не знайшли, повертаємо None,
-    і повідомлення йде звичайним матеріалом.
-    """
-    t = (text or "").strip()
-    if not t or len(t) > 60:
-        return None
-    import re as _re
-    # Вона пише живою мовою: «Це все для схеми 8», «далі схема 8», «ось схема 8».
-    # Тому не шукаємо точний шаблон, а прибираємо оголошення і дивимось,
-    # чи лишився зміст. Лишився, значить це матеріал, а не заголовок.
-    m = _re.search(r"схем\w*\s*[№#]?\s*0*(\d{1,2})", t, _re.I)
-    if m:
-        rest = (t[:m.start()] + " " + t[m.end():]).lower()
-        rest = _re.sub(r"[^\w\s]", " ", rest, flags=_re.U)
-        stop = {"це", "оце", "все", "всі", "усе", "для", "по", "до", "на", "далі",
-                "тепер", "зараз", "і", "а", "ось", "от", "кидаю", "скидаю", "надсилаю",
-                "буде", "будуть", "наступна", "наступне", "ще", "тут", "щодо", "така",
-                "нова", "оновлена", "переробила", "мій", "моя"}
-        if not [w for w in rest.split() if w not in stop]:
-            return q("select * from blocks where active and code = %s and kind = 'schema'",
-                     (m.group(1),), fetch="one")
-        return None
-    if len(t) > 30:
-        return None
-    return q("""select * from blocks where active and lower(title) = lower(%s)
-                order by position limit 1""", (t.strip(".").strip(),), fetch="one")
-
-
-def set_active_block(uid, bid):
-    return q("update users set active_block = %s where user_id = %s", (bid, uid))
-
-
-def active_block(uid):
-    r = q("""select b.* from users u join blocks b on b.id = u.active_block
-             where u.user_id = %s""", (uid,), fetch="one")
-    return r
-
-
-def block_tally(bid):
-    """Скільки і чого лежить у блоці, для лічильника в картці."""
-    return q("""select coalesce(file_kind, 'матеріал') as kind, count(*) as n
-                from assets where block_id = %s group by 1 order by n desc""",
-             (bid,), fetch="all")
-
-
-def blocks_with_material():
-    return q("""select b.id, b.kind, b.code, b.title, count(a.id) as n,
-                       max(a.created_at) as last_at
-                from blocks b join assets a on a.block_id = b.id
-                group by b.id, b.kind, b.code, b.title
-                order by max(a.created_at) desc""", fetch="all")
-
-
-# ---------- задачник ----------
-
-def tasks_of(owner, only_open=False, project=None):
-    sql = "select * from tasks where owner = %s"
-    args = [owner]
-    if only_open:
-        sql += " and not done"
-    if project:
-        sql += " and coalesce(project, '') = %s"
-        args.append(project)
-    sql += " order by n"
-    return q(sql, tuple(args), fetch="all")
-
-
-def add_task(owner, text, created_by=None, project=None):
-    return q("""
-        insert into tasks (owner, n, text, created_by, project)
-        values (%s, coalesce((select max(n) from tasks where owner = %s), 0) + 1, %s, %s, %s)
-        returning *
-    """, (owner, owner, text, created_by, project), fetch="one")
-
-
-def close_task(owner, n):
-    return q("""update tasks set done = true, closed_at = now()
-                where owner = %s and n = %s and not done returning *""", (owner, n), fetch="one")
-
-
-def delete_task(owner, n):
-    return q("delete from tasks where owner = %s and n = %s returning *", (owner, n), fetch="one")
-
-
-def set_task_project(owner, n, project):
-    return q("""update tasks set project = %s where owner = %s and n = %s returning *""",
-             (project or None, owner, n), fetch="one")
-
-
-def defer_task(owner, n):
-    """Відкладає задачу в кінець черги «що зараз», не закриваючи її."""
-    return q("""update tasks set deferred_at = now()
-                where owner = %s and n = %s and not done returning *""", (owner, n), fetch="one")
-
-
-def next_task(owner, project=None):
-    """
-    Рівно одна задача на питання «що зараз»: найстарша відкрита,
-    відкладені йдуть після невідкладених.
-    """
-    sql = "select * from tasks where owner = %s and not done"
-    args = [owner]
-    if project:
-        sql += " and coalesce(project, '') = %s"
-        args.append(project)
-    sql += " order by deferred_at nulls first, n limit 1"
-    return q(sql, tuple(args), fetch="one")
-
-
-def projects_of(owner):
-    return q("""select coalesce(project, '') as project, count(*) as n
-                from tasks where owner = %s and not done
-                group by 1 order by n desc""", (owner,), fetch="all")
-
-
-def seed_tasks(owner, items):
-    """Засіває список один раз. Якщо в цього власника вже щось є, нічого не робить."""
-    if tasks_of(owner):
-        return 0
-    for t in items:
-        add_task(owner, t)
-    return len(items)
 
 
 # ---------- платежі Monobank ----------
@@ -724,18 +482,6 @@ def kv_get(k, default=None):
 def kv_set(k, v):
     return q("""insert into kv (k, v) values (%s, %s)
                 on conflict (k) do update set v = excluded.v, updated_at = now()""", (k, str(v)))
-
-
-# ---------- вивантаження ----------
-
-TABLES = ("users", "purchases", "assets", "tasks", "events", "mono_tx", "kv")
-
-
-def export_all():
-    out = {}
-    for t in TABLES:
-        out[t] = q("select * from " + t + " order by 1", fetch="all") or []
-    return json.dumps(out, ensure_ascii=False, indent=1, default=str).encode("utf-8")
 
 
 def stats_day():
