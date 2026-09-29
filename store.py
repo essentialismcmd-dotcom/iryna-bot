@@ -508,6 +508,34 @@ def stats():
     }
 
 
+def starts_stats(skip_ids):
+    """
+    Лічильник стартів для адміна. Рахуємо події kind='start' (кожен /start
+    пишеться з міткою в payload.tag), без адміна й Іри. Повертає None,
+    якщо база не відповіла.
+    """
+    skip = list(skip_ids) or [0]
+    tot = q("""select count(distinct user_id) as people, count(*) as presses,
+                      count(distinct user_id) filter (where created_at > now() - interval '24 hours') as day,
+                      count(distinct user_id) filter (where created_at > now() - interval '7 days') as week
+               from events where kind = 'start' and not (user_id = any(%s))""",
+            (skip,), fetch="one")
+    if not tot:
+        return None
+    tags = q("""select coalesce(nullif(payload->>'tag', ''), 'без мітки') as tag,
+                       count(distinct user_id) as people, count(*) as presses
+                from events where kind = 'start' and not (user_id = any(%s))
+                group by 1 order by people desc, presses desc""", (skip,), fetch="all")
+    mg = q("""select count(distinct user_id) as n from events
+              where kind = 'magnet' and not (user_id = any(%s))""", (skip,), fetch="one")
+    # q() на збої дає [] і на "all", і на «нічого нема»: якщо старти є, а розбивка
+    # порожня, це збій запиту, а не «стартів ще нема». None = база не відповіла.
+    tags_ok = bool(tags) or not tot["presses"]
+    return {"people": tot["people"], "presses": tot["presses"], "day": tot["day"],
+            "week": tot["week"], "magnet": mg["n"] if mg else None,
+            "tags": (tags or []) if tags_ok else None}
+
+
 # ---------------------------------------------------------------- дірект
 # Заведено 31.08.2026. Стан контакту НІКОЛИ не зберігається полем, він
 # обчислюється з подій. Ручне поле «статус» у цьому проєкті вже вмирало:

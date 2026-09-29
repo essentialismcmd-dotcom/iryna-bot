@@ -14,7 +14,7 @@ except Exception:
 os.environ.update({"BOT_TOKEN": "test:token", "WEBHOOK_SECRET": "sekret", "ADMIN_ID": "1",
                    "NO_THREADS": "1", "GUIDE_FILE_ID": "GUIDE", "NOTIFY_IDS": "1",
                    "LEAD_IDS": "1,2", "CHANNEL_URL": "https://t.me/test_kanal",
-                   "COURSES_ON": "1"})
+                   "COURSES_ON": "1", "PAY_URL": "https://pay.test/jar"})
 for k in ("DATABASE_URL", "GUIDE_PRICE", "GUIDE_TIER_PRICES", "COURSE_PRICES", "COURSE_BUNDLE_ONLY"):
     os.environ.pop(k, None)
 
@@ -164,8 +164,7 @@ _vse = " ".join(komu(555)).lower() + " " + " ".join(
 _zle = [w for w in ("курс", "скоро", "записую", "варіант", "1200", "1900", "розбір кадр", "третю",
                    "ретуш", "другу кнопку") if w in _vse]
 ok("мітла: людина не бачить неіснуючого", not _zle, str(_zle))
-ok("мітла пройшла замок: LOCK_TEXT, LOCK_NOTYET, LOCK_SOFT", all(t in komu(555) for t in
-   (bot.LOCK_TEXT, bot.LOCK_NOTYET, bot.LOCK_SOFT)))
+ok("мітла: замка перед файлом нема", not any("Схеми лежать у каналі" in x or "Я в каналі" in x for x in komu(555)))
 VYKLYKY.clear(); msg("ретуш", uid=555)
 ok("слово РЕТУШ: гайд і канал, без обіцянки ретуші",
    knopky(555) == ["Хочу повний гайд «Світло»", "Канал «для своїх»"] and not any("ретуш" in x.lower() for x in komu(555)),

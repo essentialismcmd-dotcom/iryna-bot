@@ -126,49 +126,34 @@ msg("/start", uid=780)
 perevirka("без мітки: як було, кнопка магніта",
           ostannia_klaviatura(780) == ["Забрати три схеми світла"], str(ostannia_klaviatura(780)))
 
-# 2а. Замок: без підписки магніт не видається
+# 2а. Канал після файлу (З9 §6 п.6): файл одразу, замка перед ним нема
 perevirka("канал з посилання", bot.CHANNEL_ID == "@test_kanal")
 VYKLYKY.clear()
 bot.MAGNET_URL = "https://x/magnit.pdf"
 cb("magnet")
-perevirka("замок: файл не пішов", not [v for v in VYKLYKY if v[0] == "sendDocument"])
-perevirka("замок: текст і дві кнопки, обхідної нема", "для своїх" in teksty()[-1]
-          and ostannia_klaviatura() == ["Перейти в канал", "Я в каналі, надіслати файл"], str(ostannia_klaviatura()))
-_kb0 = bot.lock_kb()["inline_keyboard"]
-perevirka("замок: перша кнопка веде в канал", _kb0[0][0].get("url") == "https://t.me/test_kanal"
-          and _kb0[1][0].get("callback_data") == "lock:check")
-VYKLYKY.clear()
-cb("magnet")
-perevirka("замок: другий натиск магніта файл не дає (механіки другого натиску нема)",
-          not [v for v in VYKLYKY if v[0] == "sendDocument"] and not hasattr(bot, "LOCK_SEEN"))
+_iw = [i for i, v in enumerate(VYKLYKY) if v[0] == "sendDocument"]
+perevirka("без підписки: файл іде одразу, першим натиском", bool(_iw))
+perevirka("без підписки: файл раніше за прохання про канал",
+          _iw and _iw[0] < max(i for i, v in enumerate(VYKLYKY) if v[0] in ("sendMessage", "sendPhoto")))
+perevirka("після файлу кнопка каналу", "Канал «для своїх»" in ostannia_klaviatura(), str(ostannia_klaviatura()))
+perevirka("замка перед файлом нема: жодного getChatMember і «Я в каналі»",
+          not [v for v in VYKLYKY if v[0] == "getChatMember"]
+          and not any("Я в каналі" in x for x in ostannia_klaviatura()) and not hasattr(bot, "lock_kb"))
 VYKLYKY.clear()
 cb("lock:check")
-perevirka("«Я в каналі» без підписки: файлу нема, мʼякий текст", not [v for v in VYKLYKY if v[0] == "sendDocument"]
-          and teksty() and teksty()[-1] == bot.LOCK_NOTYET, str(teksty()))
-perevirka("«Я в каналі» без підписки: канал, ще раз, файл без підписки",
-          ostannia_klaviatura() == ["Перейти в канал", "Перевірити ще раз", bot.LOCK_FREE_BTN], str(ostannia_klaviatura()))
-perevirka("мʼякий текст без докору", not any(w in bot.LOCK_NOTYET.lower() + bot.LOCK_SOFT.lower()
-          for w in ("не хочете", "не підписал", "все одно", "усе одно", "шкода", "на жаль")))
-VYKLYKY.clear()
-cb("lock:check")
-perevirka("«Перевірити ще раз» знову мʼяко, вибір лишається", ostannia_klaviatura()[-1] == bot.LOCK_FREE_BTN
-          and not [v for v in VYKLYKY if v[0] == "sendDocument"])
+perevirka("стара кнопка «Я в каналі» у чаті: файл одразу", [v for v in VYKLYKY if v[0] == "sendDocument"])
 VYKLYKY.clear()
 cb("lock:free")
-perevirka("«" + bot.LOCK_FREE_BTN + "»: файл одразу і LOCK_SOFT, без перевірки",
-          [v for v in VYKLYKY if v[0] == "sendDocument"] and teksty()[0] == bot.LOCK_SOFT
-          and not [v for v in VYKLYKY if v[0] == "getChatMember"], str(teksty()))
-perevirka("без підписки після файла кнопка каналу", "Канал «для своїх»" in ostannia_klaviatura(), str(ostannia_klaviatura()))
+perevirka("стара кнопка «Спершу файл, канал пізніше»: файл одразу", [v for v in VYKLYKY if v[0] == "sendDocument"])
 STATUS["v"] = "member"
 VYKLYKY.clear()
-cb("lock:check")
-perevirka("«Я в каналі» з підпискою: файл, без LOCK_SOFT", [v for v in VYKLYKY if v[0] == "sendDocument"]
-          and bot.LOCK_SOFT not in teksty() and bot.LOCK_NOTYET not in teksty())
-STATUS["v"] = "left"
-VYKLYKY.clear()
-STATUS["v"] = None
 cb("magnet")
-perevirka("замок пропускає, коли бот не адмін", [v for v in VYKLYKY if v[0] == "sendDocument"])
+perevirka("підписник: файл теж одразу", [v for v in VYKLYKY if v[0] == "sendDocument"])
+STATUS["v"] = None
+VYKLYKY.clear()
+cb("magnet")
+perevirka("бот не адмін каналу: файл одразу", [v for v in VYKLYKY if v[0] == "sendDocument"])
+STATUS["v"] = "left"
 
 # 3. Курс: кнопка після магніта
 STATUS["v"] = "member"

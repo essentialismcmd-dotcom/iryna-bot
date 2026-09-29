@@ -15,7 +15,8 @@ os.environ.update({"BOT_TOKEN": "test:token", "WEBHOOK_SECRET": "sekret", "ADMIN
                    "NO_THREADS": "1", "GUIDE_FILE_ID": "GUIDE", "MAGNET_URL": "MAGNIT",
                    "NOTIFY_IDS": "1", "CHANNEL_URL": "https://t.me/test_kanal",
                    "START_PIC": "PIC_START", "CARD_MAGNIT": "PIC_MAGNIT", "CARD_GUIDE": "PIC_GUIDE",
-                   "CARD_KANAL": "PIC_KANAL", "CARD_MK": "PIC_MK", "CHANNEL_LOCK": "0"})
+                   "CARD_KANAL": "PIC_KANAL", "CARD_MK": "PIC_MK", "CHANNEL_LOCK": "0",
+                   "PAY_URL": "https://pay.test/jar"})
 for k in ("DATABASE_URL", "COURSES_ON", "GUIDE_PRICE", "COURSE_PRICES"):
     os.environ.pop(k, None)
 
@@ -123,7 +124,7 @@ VYKLYKY.clear()
 bot.send_card(777, "", "текст", None)
 ok("порожня змінна: лише текст", not foto() and teksty() and teksty()[0]["text"] == "текст")
 
-for nazva in ("HELLO", "GUIDE_HELLO_NOC", "AFTER_NOC", "LOCK_TEXT", "MK_TEXT", "NEXT_AFTER_GUIDE_NOC"):
+for nazva in ("HELLO", "GUIDE_HELLO_NOC", "AFTER_NOC", "AFTER_NOPAY", "PAUSED_TEXT", "MK_TEXT", "NEXT_AFTER_GUIDE_NOC"):
     ok("довжина %s ≤ 1024" % nazva, len(getattr(bot, nazva)) <= 1024, str(len(getattr(bot, nazva))))
 ok("довжина вступу гайда ≤ 1024", len(bot.guide_intro(bot.tiers_kb())) <= 1024)
 

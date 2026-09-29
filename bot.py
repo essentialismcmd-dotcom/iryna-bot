@@ -14,7 +14,7 @@
 Правило: у боті лишається те, що працює само, а не те, що вимагає навчання.
 """
 
-import os, re, time, logging, threading
+import os, re, time, html, logging, threading
 import requests
 from flask import Flask, request
 
@@ -24,13 +24,11 @@ TOKEN         = os.environ["BOT_TOKEN"]
 ADMIN_ID      = int(os.getenv("ADMIN_ID", "0"))
 IRA_ID        = int(os.getenv("IRA_ID", "0"))
 CHANNEL_URL   = os.getenv("CHANNEL_URL", "").strip()
-# Замок: магніт видається тільки підписникам каналу (слово Yaro 14.09).
-# CHANNEL_ID це @username каналу або -100…; без змінної береться з CHANNEL_URL.
-# Перевірка через getChatMember працює лише коли бот адмін каналу; якщо
-# Telegram відповідає помилкою, замок пропускає, щоб лійка не стала.
+# Замка нема: магніт видається всім одразу, канал просимо після файлу (кнопка
+# каналу). CHANNEL_ID це @username каналу або -100…; без змінної береться з
+# CHANNEL_URL; з нього виходить посилання на канал, коли CHANNEL_URL не заданий.
 CHANNEL_ID    = os.getenv("CHANNEL_ID", "").strip() or (
     "@" + CHANNEL_URL.rstrip("/").rsplit("/", 1)[-1] if "t.me/" in CHANNEL_URL else "")
-CHANNEL_LOCK  = os.getenv("CHANNEL_LOCK", "1").strip().lower() not in ("0", "false", "no", "off")
 MAGNET_URL    = os.getenv("MAGNET_URL", "").strip()
 GUIDE_FILE_ID = os.getenv("GUIDE_FILE_ID", "").strip()
 # Чинні версії файлів (25.09): гайд v13 і магніт v3d. До цього бот віддавав
@@ -44,7 +42,7 @@ MAGNET_EXPECT = os.getenv("MAGNET_EXPECT", "3-skhemy-svitla-2026-09-23-v3d").str
 # «1200 гривень максимум за два». COURSE_BUNDLE_ONLY=1 показує лише пакет.
 COURSE_BUNDLE_ONLY = os.getenv("COURSE_BUNDLE_ONLY", "").strip().lower() in ("1", "true", "yes", "on")
 # 25.09 (слово Yaro 01:2x): старі курси 1–2 не продаємо, чекаємо новий від Іри.
-# Без COURSES_ON=1 курсів нема в меню, слово КУРС і старі кнопки кажуть «готую
+# Без COURSES_ON=1 (або без PAY_URL, див. courses_sale) курсів нема в меню, слово КУРС і старі кнопки кажуть «готую
 # новий», заявок і кодів на k1/k2/k12 бот не дає. Куплене раніше видається як було.
 COURSES_ON = os.getenv("COURSES_ON", "").strip().lower() in ("1", "true", "yes", "on")
 # Брендинг, рівень 1 (25.09): картинки в стилі гайда v13 до повідомлень лійки.
@@ -53,7 +51,7 @@ COURSES_ON = os.getenv("COURSES_ON", "").strip().lower() in ("1", "true", "yes",
 START_PIC     = os.getenv("START_PIC", "").strip()     # /start, обкладинка «Привіт, я Іра»
 CARD_MAGNIT   = os.getenv("CARD_MAGNIT", "").strip()   # після видачі трьох схем
 CARD_GUIDE    = os.getenv("CARD_GUIDE", "").strip()    # гайд «Світло», вибір тарифу
-CARD_KANAL    = os.getenv("CARD_KANAL", "").strip()    # замок каналу і крок після гайда
+CARD_KANAL    = os.getenv("CARD_KANAL", "").strip()    # крок після гайда і канал
 CARD_MK       = os.getenv("CARD_MK", "").strip()       # МК по світлу
 CAPTION_MAX   = 1024                                    # ліміт підпису до фото в Telegram
 PAY_URL       = os.getenv("PAY_URL", "").strip()
@@ -122,24 +120,11 @@ AFTER = (
     "У каналі «Iryna Rul | для своїх» розбираю світло детальніше і показую бекстейдж зі зйомок.\n"
     "Хочете всі схеми, а не три, тисніть «Хочу повний гайд»."
 )
-# Замок мʼякий (слово Yaro 14.09: «жорстко змушувати відлякає»). До 25.09 файл
-# ішов на ДРУГИЙ натиск «Я в каналі», але людина цього не знала: прихована
-# механіка. Тепер явно: LOCK_TEXT з двома кнопками (канал, «Я в каналі»);
-# якщо перевірка не бачить людину в каналі, LOCK_NOTYET і третя спокійна
-# кнопка LOCK_FREE_BTN, яка одразу шле файл з LOCK_SOFT, без докору.
-LOCK_TEXT = (
-    "Схеми лежать у каналі «Iryna Rul | для своїх» ♥️\n\n"
-    "Там я показую те, що зазвичай не показують: як насправді ставлю світло "
-    "на зйомці, що роблю, коли схема не спрацювала, бекстейдж зі студії. "
-    "Без теорії заради теорії, кожен пост можна повторити на студії того ж дня.\n\n"
-    "Підпишіться і поверніться сюди: кнопка «Я в каналі» надішле схеми одразу."
-)
-LOCK_NOTYET = (
-    "Поки не бачу вас у каналі, Telegram іноді оновлюється з затримкою ♥️\n\n"
-    "Можна перевірити ще раз за хвилинку, а можна забрати схеми вже зараз."
-)
-LOCK_FREE_BTN = "Спершу файл, канал пізніше"
-LOCK_SOFT = "Тримайте ♥️ Канал поруч, зазирніть, коли буде хвилинка."
+# Канал просимо ПІСЛЯ файлу (ревізія 29.09, З9 §6 п.6): людина спершу отримує
+# схеми, потім AFTER з кнопкою каналу. Замка перед файлом нема: він коштував
+# 4 натиски і вів у порожнє перше враження. Старі кнопки «Я в каналі» і
+# «Спершу файл, канал пізніше» у чатах людей ще живі: віддають файл одразу.
+LEGACY_LOCK_DATA = ("lock:check", "lock:free")
 GUIDE_INTRO_HEAD = (
     "Повний гайд «Світло» ♥️\n\n"
     "Усі мої робочі схеми, від чистої комерції до кольору.\n"
@@ -237,6 +222,39 @@ AFTER_NOC = (
 )
 MOI_EMPTY_NOC = ("Поки нічого не куплено ♥️ Безкоштовні три схеми світла і повний гайд "
                  "по кнопках нижче.")
+# Без оплати (PAY_URL порожній, ФОП і банка пізніше, слово Yaro 29.09): бот завершений
+# з тим, що є зараз, тобто магніт, канал. Жодних «реквізити», «скоро», «надішлю».
+GUIDE_SALE = bool(PAY_URL)
+
+
+def courses_sale():
+    """
+    Продаж курсів ретуші: лише коли COURSES_ON і є куди платити. Без PAY_URL
+    людина не бачить ні цін, ні кнопок покупки курсу, ні підводок до неї:
+    так само, як за вимкненого COURSES_ON. Доступ до вже куплених уроків від
+    цього не залежить. Функція, а не константа, бо тести й /perevirka читають
+    COURSES_ON і PAY_URL наживо.
+    """
+    return bool(COURSES_ON and PAY_URL)
+AFTER_NOPAY = AFTER_NOC.rsplit("\n", 1)[0]
+MOI_EMPTY_NOPAY = "Поки нічого не куплено ♥️ Безкоштовні три схеми світла по кнопці нижче."
+PAUSED_TEXT = (
+    "Почніть з добірки ♥️ Три схеми світла з одного сетапу, безкоштовно.\n\n"
+    "А розбір світла і бекстейдж зі зйомок дивіться в каналі «для своїх»."
+)
+# Власники курсу: пишуть «я купувала курс» (З9 §6 п.7). Шаблон «напишіть в інстаграм»
+# їм не годиться. Є покупка в базі: ведемо до уроків. Нема: чесно кажемо, куди писати.
+OWNER_RE = re.compile(r"(купув|купив|купил|купля|придбав|оплатив|оплатил|мій курс|мої курси|мой курс|"
+                      r"доступ.{0,20}курс|курс.{0,25}доступ|"
+                      # «вже» лише разом з дією власника, не «вже хочу/можна/буде курс»:
+                      r"(?:вже|уже)\s+(?:\w+\s+)?(?:проходил\w*|проходив\w*|пройшл\w*|пройшов\w*|пройшёл|прошла|прошёл)|"
+                      r"[ув]\s+мене\s+(?:вже\s+|уже\s+)?є\s+(?:\w+\s+)?курс|"
+                      r"у\s+меня\s+(?:уже\s+)?есть\s+(?:\w+\s+)?курс)")
+OWNER_HAS = "Ваш курс на місці ♥️ Усе, що ви купували, зібране тут, тисніть і дивіться."
+OWNER_NONE = ("Дякую, що ви вже з нами ♥️ У цьому боті вашої покупки не бачу, "
+              "можливо, курс брали з іншого акаунта Telegram. Напишіть Ірині в інстаграм, "
+              "там відповідає швидше: @iryna_rul_photographer, і назвіть, з якого акаунта "
+              "чи пошти купували.")
 # Після видачі гайда (без курсів): до 25.09 тут було порожньо, людина
 # отримувала файл і далі нічого. Тепер наступна сходинка, канал.
 NEXT_AFTER_GUIDE_NOC = (
@@ -254,7 +272,9 @@ RETUSH_BUNDLE = (
 
 
 def moi_empty():
-    return MOI_EMPTY if COURSES_ON else MOI_EMPTY_NOC
+    if not GUIDE_SALE:
+        return MOI_EMPTY_NOPAY
+    return MOI_EMPTY if courses_sale() else MOI_EMPTY_NOC
 
 
 def keyword(text):
@@ -466,7 +486,7 @@ def magnet_kb():
 
 def guide_kb():
     """Людині з гайда: перша кнопка курс ретуші, магніта в ній нема навмисно."""
-    rows = [[{"text": "Курс ретуші", "callback_data": "retush"}]] if COURSES_ON else []
+    rows = [[{"text": "Курс ретуші", "callback_data": "retush"}]] if courses_sale() else []
     if CHANNEL_URL:
         rows.append([{"text": "Канал «для своїх»", "url": CHANNEL_URL}])
     return {"inline_keyboard": rows}
@@ -476,42 +496,29 @@ def _lock_url():
     return CHANNEL_URL or "https://t.me/" + CHANNEL_ID.lstrip("@")
 
 
-def lock_kb():
-    """Перший екран замка: лише канал і «Я в каналі», без обхідної кнопки."""
-    return {"inline_keyboard": [
-        [{"text": "Перейти в канал", "url": _lock_url()}],
-        [{"text": "Я в каналі, надіслати файл", "callback_data": "lock:check"}],
-    ]}
+def guide_rows():
+    """Кнопка гайда лише поки є куди платити: без PAY_URL її нема (тупик каси, З9 §6 п.1)."""
+    if not GUIDE_SALE:
+        return []
+    return [[{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}]]
 
 
-def lock_retry_kb():
-    """Перевірка не бачить людину в каналі: ще раз або файл без підписки."""
-    return {"inline_keyboard": [
-        [{"text": "Перейти в канал", "url": _lock_url()}],
-        [{"text": "Перевірити ще раз", "callback_data": "lock:check"}],
-        [{"text": LOCK_FREE_BTN, "callback_data": "lock:free"}],
-    ]}
+def paused_kb():
+    """Замість гайда: безкоштовні схеми і канал."""
+    return {"inline_keyboard": [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]
+            + channel_rows()}
 
 
-def in_channel(uid):
-    """
-    True, якщо людина в каналі. None, коли перевірити не вийшло (бот не адмін,
-    канал не заданий): тоді замок пропускає.
-    """
-    if not (CHANNEL_LOCK and CHANNEL_ID):
-        return None
-    r = api("getChatMember", chat_id=CHANNEL_ID, user_id=uid)
-    if not r:
-        return None
-    return r.get("status") in ("member", "administrator", "creator")
+def send_paused(chat_id):
+    send(chat_id, PAUSED_TEXT, paused_kb())
 
 
 def after_kb():
     rows = []
     if CHANNEL_URL:
         rows.append([{"text": "Канал «для своїх»", "url": CHANNEL_URL}])
-    rows.append([{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}])
-    if COURSES_ON:
+    rows += guide_rows()
+    if courses_sale():
         rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
     return {"inline_keyboard": rows}
 
@@ -540,7 +547,7 @@ def course_kb(first):
 
 def send_retush(chat_id):
     """Курс ретуші: кваліфікатор або, з COURSE_BUNDLE_ONLY, одразу пакет."""
-    if not COURSES_ON:
+    if not courses_sale():
         send(chat_id, RETUSH_SOON, retush_off_kb())
         return
     if COURSE_BUNDLE_ONLY:
@@ -561,14 +568,13 @@ def channel_rows():
 def empty_kb():
     """Порожні «Мої матеріали» і будь-який текст: три схеми, гайд, канал."""
     rows = [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]
-    if not COURSES_ON:
-        rows.append([{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}])
+    if not courses_sale():
+        rows += guide_rows()
     return {"inline_keyboard": rows + channel_rows()}
 
 
 def retush_off_kb():
-    return {"inline_keyboard": [[{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}]]
-            + channel_rows()}
+    return {"inline_keyboard": guide_rows() + channel_rows()}
 
 
 def retush_kb_one():
@@ -649,7 +655,8 @@ def give_magnet(chat_id):
     if not api("sendDocument", chat_id=chat_id, document=ref):
         send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
         return
-    send_card(chat_id, CARD_MAGNIT, AFTER if COURSES_ON else AFTER_NOC, after_kb())
+    text = AFTER_NOPAY if not GUIDE_SALE else (AFTER if courses_sale() else AFTER_NOC)
+    send_card(chat_id, CARD_MAGNIT, text, after_kb())
 
 
 def give_guide(uid, tier):
@@ -662,7 +669,7 @@ def give_guide(uid, tier):
     if extra:
         send(uid, extra)
     # Покупець у момент оплати найтепліший, другого такого моменту не буде.
-    if COURSES_ON:
+    if courses_sale():
         send(uid, NEXT_AFTER_GUIDE, retush_kb_one())
     else:
         send_card(uid, CARD_KANAL, NEXT_AFTER_GUIDE_NOC, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
@@ -1042,13 +1049,12 @@ def status_text():
         + " · токен Mono: " + ("є" if MONO_TOKEN and MONO_JAR else "немає"),
         "Бот Іри: " + ("увімкнений" if IRA_ON else "вимкнений"),
         "Магніт: " + version_line("magnet")
-        + " · канал: " + ("кнопка є" if CHANNEL_URL else "CHANNEL_URL не заданий")
-        + " · замок: " + lock_text(),
+        + " · канал: " + ("кнопка є" if CHANNEL_URL else "CHANNEL_URL не заданий"),
         "Гайд: " + version_line("guide") + " · тарифи " + ",".join(GUIDE_TIERS) + " · "
         + str(_G) + " / " + str(_T2) + " / " + str(_T3) + " грн",
         "Курс 1: " + ready_text("k1") + " · курс 2: " + ready_text("k2"),
         "Ціни курсів: " + str(_K1) + " / " + str(_K2) + " / " + str(_K12) + " грн"
-        + (" · тільки пакет" if COURSE_BUNDLE_ONLY else "") + ("" if COURSES_ON else " · продаж курсів ВИМКНЕНО"),
+        + (" · тільки пакет" if COURSE_BUNDLE_ONLY else "") + ("" if courses_sale() else " · продаж курсів ВИМКНЕНО" + ("" if PAY_URL else " (каси нема)")),
     ]
     if d and d.get("now"):
         paid = d.get("paid") or {}
@@ -1101,20 +1107,6 @@ def assets_lines(limit=200):
     if not rows:
         return "У базі матеріалів немає або база вимкнена."
     return "\n\n".join(out) or "У базі тільки текст, файлів немає."
-
-
-def lock_text():
-    if not CHANNEL_LOCK:
-        return "вимкнений (CHANNEL_LOCK=0)"
-    if not CHANNEL_ID:
-        return "вимкнений, канал не заданий"
-    me = api("getMe") or {}
-    r = api("getChatMember", chat_id=CHANNEL_ID, user_id=me.get("id", 0)) if me else None
-    if not r:
-        return "не працює, бот не адмін " + CHANNEL_ID + " (пропускає всіх)"
-    if r.get("status") != "administrator":
-        return "не працює, бот у " + CHANNEL_ID + " зі статусом " + str(r.get("status")) + " (пропускає всіх)"
-    return "працює, " + CHANNEL_ID
 
 
 def perevirka_lines():
@@ -1272,9 +1264,63 @@ def hookinfo():
         i.get("last_error_message") or "немає")
 
 
+STATS_TAGS_MAX = 30       # міток у відповіді, решта одним рядком
+STATS_TEXT_MAX = 4000     # ліміт Telegram 4096, лишаємо запас
+
+
+def starts_text():
+    """
+    Скільки людей натиснули /start, з розбивкою за міткою ?start= (inst, chat, guide...).
+    Мітку пише людина: у тексті вона лише рядок без переносів, а в HTML її екранує
+    stats_page. Відповідь не довша за STATS_TEXT_MAX.
+    """
+    if not store.ON:
+        return "Бази нема (DATABASE_URL не заданий), рахувати нічого."
+    d = store.starts_stats([i for i in (ADMIN_ID, IRA_ID) if i])
+    if not d:
+        return "База не відповіла, спробуйте ще раз."
+    magnet = d.get("magnet")
+    lines = ["Старти (без адміна й Іри)",
+             "Людей: " + str(d["people"]) + ", натисків /start: " + str(d["presses"]),
+             "За добу: " + str(d["day"]) + ", за 7 днів: " + str(d["week"]),
+             "Отримали магніт: " + (str(magnet) if magnet is not None else "база не відповіла"),
+             "",
+             "За міткою (людей / натисків):"]
+    tags = d.get("tags")
+    if tags is None:
+        lines.append("  розбивка: база не відповіла, спробуйте ще раз")
+    else:
+        for r in tags[:STATS_TAGS_MAX]:
+            tag = " ".join(str(r.get("tag") or "").split()) or "без мітки"
+            lines.append("  " + tag + ": " + str(r["people"]) + " / " + str(r["presses"]))
+        rest = tags[STATS_TAGS_MAX:]
+        if rest:
+            lines.append("  інші (" + str(len(rest)) + " міток): "
+                         + str(sum(int(r["people"] or 0) for r in rest)) + " / "
+                         + str(sum(int(r["presses"] or 0) for r in rest)))
+        if not tags:
+            lines.append("  стартів ще нема")
+    text = "\n".join(lines)
+    return text if len(text) <= STATS_TEXT_MAX else text[:STATS_TEXT_MAX - 1] + "…"
+
+
+def _pre(text):
+    """Текст у HTML-сторінку адміна: усе, що йде з бази чи від людей, екранується."""
+    return "<pre>" + html.escape(text, quote=False) + "</pre>"
+
+
+@app.get("/stats/" + SECRET)
+def stats_page():
+    store.session_begin()
+    try:
+        return _pre(starts_text())
+    finally:
+        store.session_end()
+
+
 @app.get("/db/" + SECRET)
 def db_status():
-    return "<pre>" + status_text() + "</pre>"
+    return _pre(status_text())
 
 
 @app.get("/inbox/" + SECRET)
@@ -1282,14 +1328,14 @@ def inbox_page():
     """Усі матеріали з бази рядками «kind:file_id»: з них збираються COURSE*_FILES."""
     store.session_begin()
     try:
-        return "<pre>" + assets_lines() + "</pre>"
+        return _pre(assets_lines())
     finally:
         store.session_end()
 
 
 @app.get("/perevirka/" + SECRET)
 def perevirka_page():
-    return "<pre>замок: " + lock_text() + "\n" + perevirka_lines() + "</pre>"
+    return _pre(perevirka_lines())
 
 
 @app.get("/skyd/" + SECRET)
@@ -1632,6 +1678,10 @@ def hook():
             # «матеріалу» (через це слова СВІТЛО/МК в адміна не спрацьовували).
             # Лишилось одне: /nova стирає його слід, щоб пройти лійку новачком.
             # Службове для очей живе в HTTP: /db, /perevirka, /zalyvka, /skyd.
+            # Лічильник стартів: /stats (лише адмін, у меню людей його нема).
+            if uid == ADMIN_ID and text.startswith("/stats"):
+                send(chat_id, starts_text())
+                return "ok"
             if uid == ADMIN_ID and text.startswith("/nova"):
                 store.wipe_user(uid)
                 send(chat_id, "Чисто. Видали цей чат і зайди в бота заново, побачиш його як нова людина.")
@@ -1661,14 +1711,16 @@ def hook():
                     notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"))
                 if src == "guide":
                     store.log_event(uid, "guide_entry", {"tag": src})
-                    send_card(chat_id, START_PIC, GUIDE_HELLO if COURSES_ON else GUIDE_HELLO_NOC, guide_kb())
+                    send_card(chat_id, START_PIC, GUIDE_HELLO if courses_sale() else GUIDE_HELLO_NOC, guide_kb())
                 else:
                     send_card(chat_id, START_PIC, HELLO, magnet_kb())
             elif keyword(text):
                 k = keyword(text)
                 store.touch_user(u)
                 store.log_event(uid, "keyword", {"word": k})
-                if k == "guide":
+                if k == "guide" and not GUIDE_SALE:
+                    send_paused(chat_id)
+                elif k == "guide":
                     kb = tiers_kb()
                     send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
                 elif k == "retush":
@@ -1682,7 +1734,24 @@ def hook():
                 store.touch_user(u)
                 store.log_event(uid, "message", {"text": text[:300]})
                 notify("Повідомлення в боті від " + who(u) + ":\n" + (text or "[не текст]"))
-                send(chat_id, CLIENT_TEXT, empty_kb())
+                low = text.lower()
+                if "курс" in low and OWNER_RE.search(low):
+                    # Людина каже, що вже має курс: не шаблон, а відповідь по суті.
+                    store.log_event(uid, "owner_msg")
+                    # Покупка є (курс чи гайд) і є що показати: до уроків. Покупка є, а
+                    # кнопок нема (файли курсу ще не залиті): «не бачу» не кажемо, бо
+                    # бачимо; шаблон «прийняла», адмін уже отримав повідомлення вище.
+                    # Покупки нема зовсім: чесно кажемо, куди писати.
+                    owned = owned_keys(uid)
+                    kb = lessons_kb(uid) if owned else None
+                    if kb:
+                        send(chat_id, OWNER_HAS, kb)
+                    elif owned:
+                        send(chat_id, CLIENT_TEXT, empty_kb())
+                    else:
+                        send(chat_id, OWNER_NONE, empty_kb())
+                else:
+                    send(chat_id, CLIENT_TEXT, empty_kb())
             return "ok"
 
         if "callback_query" in upd:
@@ -1693,23 +1762,19 @@ def hook():
             chat_id = cq["message"]["chat"]["id"]
             api("answerCallbackQuery", callback_query_id=cq["id"])
 
-            if data in ("magnet", "lock:check", "lock:free"):
-                # magnet: перший натиск (і стара кнопка «Я в каналі ♥️» у чатах).
-                # lock:check: «Я в каналі» / «Перевірити ще раз». lock:free: без підписки.
-                if data == "lock:free":
-                    store.log_event(uid, "lock_skip")
-                    send(chat_id, LOCK_SOFT)
-                elif in_channel(uid) is False:
-                    if data == "magnet":
-                        store.log_event(uid, "lock")
-                        send_card(chat_id, CARD_KANAL, LOCK_TEXT, lock_kb())
-                    else:
-                        store.log_event(uid, "lock_notyet")
-                        send(chat_id, LOCK_NOTYET, lock_retry_kb())
-                    return "ok"
+            if data == "magnet" or data in LEGACY_LOCK_DATA:
+                # Файл одразу, канал просимо після нього (AFTER з кнопкою каналу).
+                # lock:check і lock:free: старі кнопки замка в чатах, теж віддають файл.
                 give_magnet(chat_id)
                 store.mark_magnet(uid)
-                store.log_event(uid, "magnet")
+                store.log_event(uid, "magnet", {"legacy": data} if data != "magnet" else None)
+            elif data == "guide" and not GUIDE_SALE:
+                store.log_event(uid, "guide_off")
+                send_paused(chat_id)
+            elif data in TIERS and not GUIDE_SALE:
+                # Стара кнопка «Гайд, 900 грн» у чаті: оплати нема, реквізитів не обіцяємо.
+                store.log_event(uid, "tier_off", {"tier": data})
+                send_paused(chat_id)
             elif data == "guide":
                 store.log_event(uid, "guide_open")
                 kb = tiers_kb()
@@ -1724,7 +1789,7 @@ def hook():
                 store.log_event(uid, "mk_want")
                 send(chat_id, MK_THANKS, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
                 notify_lead("ЗАЯВКА НА МК: " + who(u) + "\nНаписати особисто.")
-            elif not COURSES_ON and (data in ("q:new", "q:pro") or data in COURSES):
+            elif not courses_sale() and (data in ("q:new", "q:pro") or data in COURSES):
                 # Стара кнопка курсу в чаті людини: продажу нема, кажемо «готую новий».
                 store.log_event(uid, "retush_off", {"data": data})
                 send_retush(chat_id)
@@ -1751,8 +1816,6 @@ def hook():
                     body += ("\n\nФайли прийдуть сюди самі, зазвичай за хвилину після оплати."
                              if data in COURSES else
                              "\n\nФайл прийде сюди сам, зазвичай за хвилину після оплати.")
-                else:
-                    body += "\n\nРеквізити надішлю сюди найближчим часом ♥️ Заявку вже бачу."
                 send(chat_id, body, pay_kb(data, uid))
                 notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
                        give_kb(uid, data))
