@@ -89,7 +89,7 @@ def knopky(chat_id):
 
 
 # ---- 1. Тупик каси
-ok("каси нема: GUIDE_SALE вимкнений", bot.GUIDE_SALE is False)
+ok("гайд безкоштовний: кнопка гайда не залежить від PAY_URL", bot.PAY_URL == "" and bot.guide_rows() != [])
 VYKLYKY.clear()
 for t in ("/start", "/start guide", "/start inst", "СВІТЛО", "ГАЙД", "світло", "МК", "ЗЙОМКА", "курс", "ретуш",
           "привіт як справи", "/moi"):
@@ -104,32 +104,32 @@ zle = [w for w in ("реквізит", "скоро", "призначення п�
 ok("жодної обіцянки реквізитів, оплати, «скоро», «надішлю» про гроші, ціни гайда", not zle, str(zle))
 ok("у коді бота нема рядка «Реквізити надішлю»", "Реквізити надішлю" not in open(bot.__file__, encoding="utf-8").read())
 _kn = knopky_vsi(555)
-ok("нема кнопок гайда й тарифів (guide, t1, t2, t3)", not [k for k in _kn if k[1] in ("guide", "t1", "t2", "t3")]
-   and not [k for k in _kn if "гайд" in k[0].lower() and "грн" in k[0].lower()], str(_kn))
+ok("нема кнопок тарифів і оплати (t1, t2, t3); кнопка гайда є", not [k for k in _kn if k[1] in ("t1", "t2", "t3")]
+   and any(k[1] == "guide" for k in _kn) and not [k for k in _kn if "гайд" in k[0].lower() and "грн" in k[0].lower()], str(_kn))
 VYKLYKY.clear()
 cb("t1", uid=556)
-ok("стара кнопка «Гайд, 900 грн»: відповідь без реквізитів, з магнітом і каналом",
-   komu(556) == [bot.PAUSED_TEXT] and knopky(556) == ["Забрати три схеми світла", "Канал «для своїх»"], str(komu(556)))
+ok("стара кнопка «Гайд, 900 грн»: безкоштовний гайд і картка з каналом, без гайда в кнопках",
+   komu(556) == [bot.AFTER_GUIDE_FREE] and knopky(556) == ["Канал «для своїх»"], str(komu(556)))
 VYKLYKY.clear()
 msg("СВІТЛО", uid=557)
-ok("слово СВІТЛО з закріпу: те саме, магніт і канал", komu(557) == [bot.PAUSED_TEXT], str(komu(557)))
+ok("слово СВІТЛО з закріпу: файл гайда і картка з каналом", komu(557) == [bot.AFTER_GUIDE_FREE], str(komu(557)))
 ok("без покупки нічого не записується: заявка не створюється, коду нема",
    not any("IR" in x and x.strip().startswith("IR") for x in komu(557)))
 VYKLYKY.clear()
 cb("magnet", uid=558)
-ok("AFTER після файлу без рядка про кнопку гайда, якої нема",
-   "Хочу повний гайд" not in " ".join(komu(558)) and "Хочете всі схеми" not in " ".join(komu(558)), str(komu(558)))
-ok("порожні матеріали без слова про гайд", "гайд" not in bot.moi_empty().lower(), bot.moi_empty())
+ok("AFTER після магніта зве на кнопку гайда, яка є",
+   "Хочу повний гайд" in " ".join(komu(558)) and "Хочу повний гайд «Світло»" in knopky(558), str(komu(558)))
+ok("порожні матеріали без цін", "грн" not in bot.moi_empty().lower() and "куплено" not in bot.moi_empty().lower(), bot.moi_empty())
 
 # із PAY_URL гайд повертається (перемикач працює в обидва боки)
 bot.PAY_URL = "https://pay.test/jar"
 bot.GUIDE_SALE = True
 VYKLYKY.clear()
 cb("guide", uid=559)
-ok("PAY_URL заданий: гайд і тариф на місці", knopky(559) == [bot.TIERS["t1"]["btn"]], str(knopky(559)))
+ok("PAY_URL заданий: гайд усе одно безкоштовний, одразу файл і картка", komu(559) == [bot.AFTER_GUIDE_FREE], str(komu(559)))
 VYKLYKY.clear()
 cb("t1", uid=559)
-ok("PAY_URL заданий: код і кнопка оплати", any("Перейти до оплати" in x for x in knopky(559)) and "Реквізити" not in " ".join(komu(559)),
+ok("PAY_URL заданий: оплати гайда нема", not any("Перейти до оплати" in x for x in knopky(559)) and "Реквізити" not in " ".join(komu(559)),
    str(komu(559)))
 bot.PAY_URL = ""
 bot.GUIDE_SALE = False
@@ -225,7 +225,7 @@ ok("нема підводок RETUSH_INTRO/NEW/PRO і пакета",
 ok("нема кнопок «Курс ретуші», рівнів і покупки курсів (retush, q:*, k1, k2, k12)",
    not [b for b in _kn if b[1] in ("retush", "q:new", "q:pro", "k1", "k2", "k12")]
    and "Курс ретуші" not in _kn_txt and "Перший курс" not in _kn_txt and "Обидва" not in _kn_txt, str(_kn))
-ok("нема кнопок оплати, гайда і тарифів", not [b for b in _kn if b[1] in ("guide", "t1", "t2", "t3") or "оплат" in b[0].lower()]
+ok("нема кнопок оплати і тарифів", not [b for b in _kn if b[1] in ("t1", "t2", "t3") or "оплат" in b[0].lower()]
    and "Перейти до оплати" not in _kn_txt, str(_kn))
 ok("жодного запису заявки: коду IR... нема в текстах", not any(x.strip().startswith("IR") for x in komu(UID)))
 VYKLYKY.clear()

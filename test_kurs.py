@@ -192,7 +192,8 @@ perevirka("тестова кнопка адміну є", "Я оплатив (т�
 # 6. Старий гайд працює як і раніше, показується тільки t1
 VYKLYKY.clear()
 cb("guide")
-perevirka("тарифи гайда: тільки сам гайд", ostannia_klaviatura() == ["Гайд, 650 грн"], str(ostannia_klaviatura()))
+perevirka("гайд безкоштовний: після файла картка без ціни і без кнопки гайда", "грн" not in " ".join(ostannia_klaviatura())
+          and "Хочу повний гайд «Світло»" not in ostannia_klaviatura(), str(ostannia_klaviatura()))
 VYKLYKY.clear()
 cb("t1")
 perevirka("код гайда старого виду", bot.order_code(777, "t1") == "IR" + bot.b36(777) + "-1")
@@ -267,7 +268,7 @@ perevirka("файл адміна не йде в базу і не дає file_id"
 perevirka("файл адміна: відповідь як людині", bot.CLIENT_TEXT in teksty())
 VYKLYKY.clear()
 msg("СВІТЛО", uid=1)
-perevirka("адмін пише СВІТЛО: гайд, як у людини", not ZAPYSY and "Повний гайд" in vse_teksty(), vse_teksty()[:120])
+perevirka("адмін пише СВІТЛО: гайд, як у людини", not ZAPYSY and bot.AFTER_GUIDE_FREE[:20] in vse_teksty(), vse_teksty()[:120])
 VYKLYKY.clear()
 msg("МК", uid=1)
 perevirka("адмін пише МК: відповідь МК", not ZAPYSY and bot.MK_TEXT[:30] in vse_teksty(), vse_teksty()[:120])

@@ -75,6 +75,7 @@ create table if not exists assets (
     used_at        timestamptz
 );
 alter table assets add column if not exists file_unique_id text;
+alter table users add column if not exists got_guide_at timestamptz;
 create index if not exists assets_bucket on assets (bucket, created_at desc);
 create index if not exists assets_group on assets (media_group);
 
@@ -360,6 +361,16 @@ def wipe_user(uid):
 
 def mark_magnet(uid):
     return q("update users set got_magnet_at = coalesce(got_magnet_at, now()) where user_id = %s", (uid,))
+
+
+def mark_guide(uid):
+    """Безкоштовний гайд отримано: «Мої матеріали» його показують."""
+    return q("update users set got_guide_at = coalesce(got_guide_at, now()) where user_id = %s", (uid,))
+
+
+def has_guide(uid):
+    r = q("select got_guide_at from users where user_id = %s", (uid,), fetch="one")
+    return bool(r and r.get("got_guide_at"))
 
 
 # ---------- журнал подій ----------
