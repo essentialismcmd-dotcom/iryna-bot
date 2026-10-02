@@ -177,9 +177,6 @@ Kab.got.clear()
 bot.handle_tx(tx())
 ok("після оплати теж шле", chekaty(1))
 
-Kab.got.clear()
-cb("guide")
-ok("після гайда теж шле", chekaty(1))
 
 print("3. Кабінет падає: бот не падає і не чекає")
 Kab.got.clear()

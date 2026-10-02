@@ -87,11 +87,18 @@ ok("банка знає ціну t2", bot.PRODUCTS["t2"]["uah"] == 1200)
 ok("слова розпізнаються", [bot.keyword(x) for x in ("СВІТЛО", "мк", "Зйомка!", "курс", "привіт", "хочу світло")]
    == ["guide", "mk", "shoot", "retush", None, None])
 VYKLYKY.clear(); msg("СВІТЛО")
-ok("СВІТЛО віддає безкоштовний гайд і картку з каналом", any(bot.AFTER_GUIDE_FREE in x for x in komu(777))
-   and knopky() == ["Канал «для своїх»", "Курс ретуші"], str(knopky()))
+ok("СВІТЛО веде на гайд", any("Повний гайд" in x for x in komu(777)) and knopky() == ["Гайд, 900 грн"], str(knopky()))
+ok("одна кнопка: без «Три варіанти», заклик до кнопки",
+   not any("Три варіанти" in x for x in komu(777)) and any(bot.GUIDE_INTRO_ONE in x for x in komu(777)))
 VYKLYKY.clear(); cb("guide")
-ok("кнопка гайда: те саме, без цін і вибору тарифу",
-   any(bot.AFTER_GUIDE_FREE in x for x in komu(777)) and not any("грн" in x or "варіанти" in x for x in komu(777)))
+ok("кнопка гайда: той самий текст на одну кнопку",
+   any(bot.GUIDE_INTRO_ONE in x for x in komu(777)) and not any("Три варіанти" in x for x in komu(777)))
+_tiers = bot.GUIDE_TIERS[:]
+bot.GUIDE_TIERS[:] = ["t1", "t2", "t3"]
+VYKLYKY.clear(); msg("СВІТЛО")
+ok("три тарифи: «Три варіанти» і три кнопки",
+   any("Три варіанти, оберіть свій." in x for x in komu(777)) and len(knopky()) == 3, str(knopky()))
+bot.GUIDE_TIERS[:] = _tiers
 VYKLYKY.clear(); msg("МК")
 ok("МК: текст і кнопка заявки", any("майстер-клас" in x for x in komu(777)) and knopky() == ["Хочу на майстер-клас"])
 ok("МК без ціни в тексті", not any("$" in x or "грн" in x for x in komu(777)))
@@ -131,8 +138,8 @@ VYKLYKY.clear(); bot.give_guide(777, "t1")
 ok("вимкнено: після гайда без пропозиції курсу", not any("два записані курси" in x for x in komu(777)))
 ok("вимкнено: після гайда наступний крок канал", any("Гайд ваш" in x for x in komu(777)) and knopky() == ["Канал «для своїх»"], str(knopky()))
 VYKLYKY.clear(); cb("t2")
-ok("вимкнено: стара кнопка t2 віддає безкоштовний гайд, без заявки",
-   knopky() == ["Канал «для своїх»"] and not any("ЗАЯВКА" in x for x in komu(1)) and not any("1200" in x for x in komu(777)), str(komu(777)))
+ok("вимкнено: стара кнопка t2 показує чинний гайд, без заявки",
+   knopky() == ["Гайд, 900 грн"] and not any("ЗАЯВКА" in x for x in komu(1)) and not any("1200" in x for x in komu(777)), str(komu(777)))
 VYKLYKY.clear(); msg("просто питання про щось")
 ok("вимкнено: довільний текст дає наступний крок",
    knopky() == ["Забрати три схеми світла", "Хочу повний гайд «Світло»", "Канал «для своїх»"], str(knopky()))

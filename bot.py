@@ -16,6 +16,7 @@
 
 import os, re, time, html, logging, threading
 import requests
+from urllib.parse import urlencode
 from flask import Flask, request
 
 import store
@@ -225,9 +226,7 @@ MOI_EMPTY_NOC = ("Поки нічого не куплено ♥️ Безкош�
                  "по кнопках нижче.")
 # Без оплати (PAY_URL порожній, ФОП і банка пізніше, слово Yaro 29.09): бот завершений
 # з тим, що є зараз, тобто магніт, канал. Жодних «реквізити», «скоро», «надішлю».
-# Гайд «Світло» безкоштовний (слово Yaro 30.09): одне натискання і PDF, без оплати.
-# GUIDE_SALE лишився константою True, щоб старі перевірки не ламались; від PAY_URL не залежить.
-GUIDE_SALE = True
+GUIDE_SALE = bool(PAY_URL)
 
 
 def courses_sale():
@@ -239,13 +238,8 @@ def courses_sale():
     COURSES_ON і PAY_URL наживо.
     """
     return bool(COURSES_ON and PAY_URL)
-AFTER_NOPAY = AFTER_NOC
-MOI_EMPTY_NOPAY = "Поки тут порожньо ♥️ Три схеми світла і повний гайд безкоштовно, по кнопках нижче."
-# Картка після гайда (безкоштовного): канал, без цін і обіцянок.
-AFTER_GUIDE_FREE = (
-    "Гайд у вас ♥️ Усі тринадцять схем, беріть на найближчу зйомку.\n\n"
-    "Розбір світла і бекстейдж зі зйомок дивіться в каналі «Iryna Rul | для своїх»."
-)
+AFTER_NOPAY = AFTER_NOC.rsplit("\n", 1)[0]
+MOI_EMPTY_NOPAY = "Поки нічого не куплено ♥️ Безкоштовні три схеми світла по кнопці нижче."
 PAUSED_TEXT = (
     "Почніть з добірки ♥️ Три схеми світла з одного сетапу, безкоштовно.\n\n"
     "А розбір світла і бекстейдж зі зйомок дивіться в каналі «для своїх»."
@@ -280,7 +274,9 @@ RETUSH_BUNDLE = (
 
 
 def moi_empty():
-    return MOI_EMPTY if courses_sale() else MOI_EMPTY_NOPAY
+    if not GUIDE_SALE:
+        return MOI_EMPTY_NOPAY
+    return MOI_EMPTY if courses_sale() else MOI_EMPTY_NOC
 
 
 def keyword(text):
@@ -503,7 +499,9 @@ def _lock_url():
 
 
 def guide_rows():
-    """Кнопка гайда стоїть завжди: гайд безкоштовний, від PAY_URL не залежить."""
+    """Кнопка гайда лише поки є куди платити: без PAY_URL її нема (тупик каси, З9 §6 п.1)."""
+    if not GUIDE_SALE:
+        return []
     return [[{"text": "Хочу повний гайд «Світло»", "callback_data": "guide"}]]
 
 
@@ -572,7 +570,8 @@ def channel_rows():
 def empty_kb():
     """Порожні «Мої матеріали» і будь-який текст: три схеми, гайд, канал."""
     rows = [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]
-    rows += guide_rows()
+    if not courses_sale():
+        rows += guide_rows()
     return {"inline_keyboard": rows + channel_rows()}
 
 
@@ -584,10 +583,20 @@ def retush_kb_one():
     return {"inline_keyboard": [[{"text": "Курс ретуші", "callback_data": "retush"}]]}
 
 
+def pay_url(uid, key):
+    """Персональне посилання на банку: сума товару і код людини вже підставлені
+    (перевірено 02.10: ?a=сума&t=коментар, є Apple Pay / Google Pay)."""
+    if not PAY_URL:
+        return ""
+    sep = "&" if "?" in PAY_URL else "?"
+    return PAY_URL + sep + urlencode({"a": PRODUCTS[key]["uah"], "t": order_code(uid, key)})
+
+
 def pay_kb(key, uid=None):
     rows = []
     if PAY_URL:
-        rows.append([{"text": "Перейти до оплати", "url": PAY_URL}])
+        url = pay_url(uid, key) if uid else PAY_URL
+        rows.append([{"text": "Оплатити в кілька кліків" if uid else "Перейти до оплати", "url": url}])
     # Тестова кнопка тільки адмінам: до 14.09 вона стояла всім, і будь-хто
     # міг забрати гайд безкоштовно, поки TEST_MODE увімкнений на проді.
     if TEST_MODE and uid in NOTIFY_IDS:
@@ -658,29 +667,8 @@ def give_magnet(chat_id):
     if not api("sendDocument", chat_id=chat_id, document=ref):
         send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
         return
-    text = AFTER if courses_sale() else AFTER_NOC
+    text = AFTER_NOPAY if not GUIDE_SALE else (AFTER if courses_sale() else AFTER_NOC)
     send_card(chat_id, CARD_MAGNIT, text, after_kb())
-
-
-def free_guide_kb():
-    """Після гайда: канал і (лише коли курси продаються) курс ретуші; кнопки гайда нема."""
-    rows = channel_rows()
-    if courses_sale():
-        rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
-    return {"inline_keyboard": rows} if rows else None
-
-
-def give_free_guide(chat_id, uid):
-    """Безкоштовний гайд одним натисканням: той самий файл (guide_ref), що колись продавався."""
-    ref = guide_ref()
-    if not ref or not api("sendDocument", chat_id=chat_id, document=ref):
-        send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
-        notify("ГАЙД НЕ ВИДАВСЯ (безкоштовний): " + ready_text("t1") + "\n" + who({"id": uid}))
-        return False
-    store.mark_guide(uid)
-    kabinet_mist.push_user(uid)
-    send_card(chat_id, CARD_KANAL, AFTER_GUIDE_FREE, free_guide_kb())
-    return True
 
 
 def give_guide(uid, tier):
@@ -778,8 +766,6 @@ def owned_keys(uid):
     if uid in NOTIFY_IDS:
         return {"t1", "k1", "k2"}
     out = set()
-    if store.has_guide(uid):
-        out.add("t1")      # безкоштовний гайд отримано
     for p in (store.purchases_of(uid) or []):
         t = p.get("tier") or ""
         if t in ("t1", "t2", "t3"):
@@ -1745,9 +1731,11 @@ def hook():
                 k = keyword(text)
                 store.touch_user(u)
                 store.log_event(uid, "keyword", {"word": k})
-                if k == "guide":
-                    store.log_event(uid, "guide_free")
-                    give_free_guide(chat_id, uid)
+                if k == "guide" and not GUIDE_SALE:
+                    send_paused(chat_id)
+                elif k == "guide":
+                    kb = tiers_kb()
+                    send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
                 elif k == "retush":
                     send_retush(chat_id)
                 elif k == "mk":
@@ -1794,11 +1782,17 @@ def hook():
                 store.mark_magnet(uid)
                 store.log_event(uid, "magnet", {"legacy": data} if data != "magnet" else None)
                 kabinet_mist.push_user(uid)
-            elif data == "guide" or data in TIERS:
-                # Гайд безкоштовний: «guide» і старі кнопки тарифів (t1..t3) у чатах
-                # віддають файл одразу, без оплати.
-                store.log_event(uid, "guide_free", {"data": data} if data != "guide" else None)
-                give_free_guide(chat_id, uid)
+            elif data == "guide" and not GUIDE_SALE:
+                store.log_event(uid, "guide_off")
+                send_paused(chat_id)
+            elif data in TIERS and not GUIDE_SALE:
+                # Стара кнопка «Гайд, 900 грн» у чаті: оплати нема, реквізитів не обіцяємо.
+                store.log_event(uid, "tier_off", {"tier": data})
+                send_paused(chat_id)
+            elif data == "guide":
+                store.log_event(uid, "guide_open")
+                kb = tiers_kb()
+                send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
             elif data == "retush":
                 store.log_event(uid, "retush_open")
                 send_retush(chat_id)

@@ -95,11 +95,11 @@ ok("магніт: CARD_MAGNIT з AFTER_NOC", f and f[0]["photo"] == "PIC_MAGNIT"
 
 cb("guide")
 f = foto()
-ok("гайд безкоштовний: файл, потім CARD_KANAL з AFTER_GUIDE_FREE", f and f[0]["photo"] == "PIC_KANAL"
-   and f[0]["caption"] == bot.AFTER_GUIDE_FREE and f[0]["reply_markup"] == bot.free_guide_kb())
+ok("гайд: CARD_GUIDE з тарифом", f and f[0]["photo"] == "PIC_GUIDE" and "Повний гайд" in f[0]["caption"]
+   and f[0]["reply_markup"] == bot.tiers_kb())
 
 msg("світло")
-ok("слово СВІТЛО: те саме, CARD_KANAL", foto() and foto()[0]["photo"] == "PIC_KANAL")
+ok("слово СВІТЛО: CARD_GUIDE", foto() and foto()[0]["photo"] == "PIC_GUIDE")
 
 cb("mk")
 ok("МК: CARD_MK з MK_TEXT", foto() and foto()[0]["photo"] == "PIC_MK" and foto()[0]["caption"] == bot.MK_TEXT)
