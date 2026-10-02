@@ -1881,6 +1881,11 @@ def hook():
                 ok = deliver(target, key) if key else False
                 if ok:
                     code = order_code(target, key)
+                    if key in PRODUCTS:
+                        # Оплата «БЕЗ КОДУ»: тариф не натискали, рядка нема, і без
+                        # нього ні /moi, ні кабінет покупки не бачать.
+                        store.ensure_purchase(target, PRODUCTS[key]["product"], tier=key,
+                                              order_code=code, amount_uah=PRODUCTS[key]["uah"])
                     store.mark_paid(code)
                     store.mark_delivered(code)
                 store.log_event(target, "give_manual", {"by": uid, "ok": ok})

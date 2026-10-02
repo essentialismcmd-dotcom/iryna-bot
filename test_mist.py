@@ -85,6 +85,7 @@ PURCHASES = {777: [{"id": 1, "user_id": 777, "product": "course", "tier": "k1",
                     "order_code": bot.order_code(777, "k1"), "amount_uah": 700,
                     "status": "paid", "source_tag": "ig", "slots_total": 0, "slots_used": 0,
                     "created_at": T, "paid_at": T, "delivered_at": None}]}
+STORE_SPRAVZHNII = (store.get_user, store.purchases_of)   # для розділу 5
 store.get_user = lambda uid: USERS.get(uid)
 store.purchases_of = lambda uid, only_paid=True: PURCHASES.get(uid, [])
 
@@ -261,6 +262,155 @@ ok("звірка бере магніт і гайд", "got_magnet_at is not null"
 kabinet_mist._zvirka_lock.acquire()
 ok("друга звірка в той самий час пропускається", kabinet_mist.zvirka() is None)
 kabinet_mist._zvirka_lock.release()
+
+print("5. «Видати вручну» без рядка покупки (оплата БЕЗ КОДУ)")
+# Підставна таблиця purchases за справжніми функціями store.py: fake_q розуміє
+# рівно ті запити, які шлють add_purchase, ensure_purchase, mark_paid,
+# mark_delivered, get_purchase, purchases_of, get_user. Решта мовчить.
+store.get_user, store.purchases_of = STORE_SPRAVZHNII
+BAZA = {"purchases": [], "users": {}}
+
+
+def fake_q5(sql, args=(), fetch=None):
+    s = " ".join(sql.split())
+    ps = BAZA["purchases"]
+    if s.startswith("insert into purchases"):
+        uid, product, tier, code, uah = args[:5]
+        tag = args[5] if "coalesce" in s else None
+        tag = tag or (BAZA["users"].get(args[-2]) or {}).get("source_tag")
+        was = [p for p in ps if p["order_code"] == code]
+        if was:
+            if "do nothing" in s:
+                return None
+            was[0]["amount_uah"] = uah
+            return was[0]
+        row = {"id": len(ps) + 1, "user_id": uid, "product": product, "tier": tier,
+               "order_code": code, "amount_uah": uah, "status": "new", "source_tag": tag,
+               "slots_total": args[-1], "slots_used": 0, "created_at": T,
+               "paid_at": None, "delivered_at": None}
+        ps.append(row)
+        return row
+    if s.startswith("update purchases set status = 'paid'"):
+        uah, code = args
+        for p in ps:
+            if p["order_code"] == code and p["status"] == "new":
+                p.update(status="paid", paid_at=T, amount_uah=uah if uah is not None else p["amount_uah"])
+                return p
+        return None
+    if s.startswith("update purchases set status = 'delivered'"):
+        for p in ps:
+            if p["order_code"] == args[0]:
+                p.update(status="delivered", delivered_at=T)
+                return p
+        return None
+    if s.startswith("select * from purchases where order_code"):
+        return next((p for p in ps if p["order_code"] == args[0]), None)
+    if s.startswith("select * from purchases where user_id"):
+        return [p for p in ps if p["user_id"] == args[0]
+                and ("status in" not in s or p["status"] in ("paid", "delivered"))]
+    if s.startswith("select * from users where user_id"):
+        return BAZA["users"].get(args[0])
+    return None if fetch != "all" else []
+
+
+store.q = fake_q5
+bot.COURSE_SECTIONS["k1"] = bot.parse_course("Урок 1 > video:V1 | Урок 2 > document:D2")
+for uid in (801, 802, 803):
+    BAZA["users"][uid] = dict(USERS[777], user_id=uid, source_tag="inst", got_magnet_at=None)
+
+
+def ryadky(uid):
+    return [p for p in BAZA["purchases"] if p["user_id"] == uid]
+
+
+def moi_bachyt(uid, ckey="k1"):
+    VYKLYKY.clear()
+    cb("moi", uid=uid)
+    kb = json.dumps([p.get("reply_markup") for m, p in VYKLYKY if p.get("chat_id") == uid], ensure_ascii=False)
+    return ('"les:' + ckey + ':0"') in kb
+
+
+def kabinet_maie(code, s=5.0):
+    kin = time.time() + s
+    while time.time() < kin:
+        for g in list(Kab.got):
+            for p in (g["body"] or {}).get("purchases") or []:
+                if p.get("order_code") == code and p.get("status") == "delivered":
+                    return p
+        time.sleep(0.02)
+    return None
+
+
+KOD_A = bot.order_code(801, "k1")
+ok("до видачі рядка нема і /moi порожній", ryadky(801) == [] and not moi_bachyt(801))
+Kab.got.clear()
+VYKLYKY.clear()
+r = cb("give:801:k1", uid=1)
+ok("адмін бачить «Видано»", r.status_code == 200 and any(
+   m == "sendMessage" and p.get("chat_id") == 1 and p.get("text") == "Видано" for m, p in VYKLYKY))
+ok("уроки пішли людині", "sendMessage" in tg_do(801) or "sendVideo" in tg_do(801), str(tg_do(801)))
+ra = ryadky(801)
+ok("рівно один рядок", len(ra) == 1, str(len(ra)))
+a = ra[0] if ra else {}
+ok("код за правилом order_code", a.get("order_code") == KOD_A == "IR" + bot.b36(801) + "-4", str(a.get("order_code")))
+ok("статус delivered, paid_at і delivered_at є", a.get("status") == "delivered"
+   and a.get("paid_at") is not None and a.get("delivered_at") is not None, str(a))
+ok("product/tier/сума/мітка як при виборі тарифу", a.get("product") == "course" and a.get("tier") == "k1"
+   and a.get("amount_uah") == bot.PRODUCTS["k1"]["uah"] and a.get("source_tag") == "inst"
+   and a.get("slots_total") == 0, str(a))
+ok("/moi бачить курс", moi_bachyt(801))
+pk = kabinet_maie(KOD_A)
+ok("міст штовхнув покупку в кабінет", pk is not None and pk.get("tier") == "k1"
+   and pk.get("user_id") == 801, str(pk))
+
+# той самий кінцевий стан, що й після звичайної оплати з кодом. Кнопка тарифу
+# курсу без COURSES_ON закрита, тож рядок кладемо тим самим викликом, що bot.py
+# при виборі тарифу (add_purchase з ціною тарифу).
+
+
+def vybir_taryfu(uid, key):
+    store.add_purchase(uid, bot.PRODUCTS[key]["product"], tier=key,
+                       order_code=bot.order_code(uid, key), amount_uah=bot.PRODUCTS[key]["uah"])
+
+
+vybir_taryfu(802, "k1")
+bot.handle_tx(tx(802, "k1", bot.PRODUCTS["k1"]["uah"]))
+rb = ryadky(802)
+POLIA = ("product", "tier", "status", "amount_uah", "source_tag", "slots_total", "slots_used")
+ok("оплата з кодом дає той самий рядок", len(rb) == 1 and all(rb[0][k] == a.get(k) for k in POLIA)
+   and rb[0]["paid_at"] is not None and rb[0]["delivered_at"] is not None,
+   str([(k, rb[0][k] if rb else None, a.get(k)) for k in POLIA]))
+
+print("5б. Повторне натискання: без дублікатів")
+Kab.got.clear()
+r = cb("give:801:k1", uid=1)
+ra = ryadky(801)
+ok("той самий один рядок", r.status_code == 200 and len(ra) == 1 and len(BAZA["purchases"]) == 2,
+   str(len(BAZA["purchases"])))
+ok("статус лишився delivered", ra and ra[0]["status"] == "delivered")
+pk = kabinet_maie(KOD_A)
+ok("кабінет знову отримав ту саму одну покупку", pk is not None and all(
+   len([p for p in (g["body"] or {}).get("purchases") or [] if p.get("order_code") == KOD_A]) <= 1
+   for g in Kab.got))
+
+print("5в. Рядок new вже є (людина натиснула тариф): як і раніше")
+vybir_taryfu(803, "k1")
+KOD_C = bot.order_code(803, "k1")
+ryadky(803)[0]["amount_uah"] = 555          # ensure_purchase не має чіпати наявний рядок
+cb("give:803:k1", uid=1)
+rc = ryadky(803)
+ok("один рядок, delivered", len(rc) == 1 and rc[0]["status"] == "delivered", str(rc))
+ok("наявний рядок не переписано (сума 555)", rc and rc[0]["amount_uah"] == 555)
+ok("кабінет отримав", kabinet_maie(KOD_C) is not None)
+
+print("5г. Видача не вдалась: рядка не створюємо (як і раніше)")
+n0 = len(BAZA["purchases"])
+VYKLYKY.clear()
+cb("give:804:k2", uid=1)                    # у k2 уроків нема → deliver False
+ok("рядка нема", len(BAZA["purchases"]) == n0 and ryadky(804) == [])
+ok("адмін бачить «Не вдалося»", any(m == "sendMessage" and p.get("chat_id") == 1
+   and str(p.get("text", "")).startswith("Не вдалося") for m, p in VYKLYKY))
+store.q = store_q
 
 srv.shutdown()
 print()

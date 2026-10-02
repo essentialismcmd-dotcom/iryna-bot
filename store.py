@@ -400,6 +400,22 @@ def add_purchase(uid, product, tier=None, order_code=None, amount_uah=None, sour
           source_tag, uid, SLOTS.get(tier, 0)), fetch="one")
 
 
+def ensure_purchase(uid, product, tier=None, order_code=None, amount_uah=None):
+    """
+    Рядок покупки для ручної видачі: людина могла оплатити «БЕЗ КОДУ», не
+    натиснувши тариф, і рядка тоді нема. Створює такий самий рядок, як при
+    виборі тарифу (статус new); наявний рядок з тим самим кодом не чіпає.
+    """
+    return q("""
+        insert into purchases (user_id, product, tier, order_code, amount_uah, source_tag, slots_total)
+        values (%s, %s, %s, %s, %s,
+                (select source_tag from users where user_id = %s), %s)
+        on conflict (order_code) do nothing
+        returning *
+    """, (uid, product, tier, order_code, amount_uah,
+          uid, SLOTS.get(tier, 0)), fetch="one")
+
+
 def get_purchase(order_code):
     return q("select * from purchases where order_code = %s", (order_code,), fetch="one")
 
