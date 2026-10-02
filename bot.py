@@ -19,6 +19,7 @@ import requests
 from flask import Flask, request
 
 import store
+import kabinet_mist   # міст у кабінет курсів; без KABINET_URL і KABINET_KEY вимкнений
 
 TOKEN         = os.environ["BOT_TOKEN"]
 ADMIN_ID      = int(os.getenv("ADMIN_ID", "0"))
@@ -677,6 +678,7 @@ def give_free_guide(chat_id, uid):
         notify("ГАЙД НЕ ВИДАВСЯ (безкоштовний): " + ready_text("t1") + "\n" + who({"id": uid}))
         return False
     store.mark_guide(uid)
+    kabinet_mist.push_user(uid)
     send_card(chat_id, CARD_KANAL, AFTER_GUIDE_FREE, free_guide_kb())
     return True
 
@@ -1000,6 +1002,7 @@ def handle_tx(tx):
     if ok:
         store.mark_delivered(code)
     store.log_event(uid, "pay_ok" if ok else "pay_undelivered", {"code": code})
+    kabinet_mist.push_user(uid)
     if ok:
         notify("Оплата " + str(amount // 100) + " грн, код " + code + ". "
                + pname(key) + ": видано автоматично.")
@@ -1790,6 +1793,7 @@ def hook():
                 give_magnet(chat_id)
                 store.mark_magnet(uid)
                 store.log_event(uid, "magnet", {"legacy": data} if data != "magnet" else None)
+                kabinet_mist.push_user(uid)
             elif data == "guide" or data in TIERS:
                 # Гайд безкоштовний: «guide» і старі кнопки тарифів (t1..t3) у чатах
                 # віддають файл одразу, без оплати.
@@ -1854,6 +1858,7 @@ def hook():
                 if ok:
                     store.mark_delivered(code)
                 store.log_event(uid, "pay_test", {"tier": key, "ok": ok})
+                kabinet_mist.push_user(uid)
                 notify("ТЕСТ оплати: " + pname(key) + "\n" + who(u))
             elif data == "moi":
                 kb = lessons_kb(uid)
@@ -1879,6 +1884,8 @@ def hook():
                     store.mark_paid(code)
                     store.mark_delivered(code)
                 store.log_event(target, "give_manual", {"by": uid, "ok": ok})
+                if ok:
+                    kabinet_mist.push_user(target)
                 send(chat_id, "Видано" if ok
                      else "Не вдалося. " + pname(key) + ": " + ready_text(key))
             return "ok"
@@ -1924,6 +1931,7 @@ def ensure_webhook():
 if os.getenv("NO_THREADS", "").strip() != "1":
     threading.Thread(target=ensure_webhook, daemon=True).start()
     threading.Thread(target=mono_poll, daemon=True).start()
+    kabinet_mist.start()   # звірка з кабінетом раз на годину; без змінних нічого
 
 
 if __name__ == "__main__":
