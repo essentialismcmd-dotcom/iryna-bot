@@ -32,6 +32,12 @@ CHANNEL_URL   = os.getenv("CHANNEL_URL", "").strip()
 CHANNEL_ID    = os.getenv("CHANNEL_ID", "").strip() or (
     "@" + CHANNEL_URL.rstrip("/").rsplit("/", 1)[-1] if "t.me/" in CHANNEL_URL else "")
 MAGNET_URL    = os.getenv("MAGNET_URL", "").strip()
+# Закріп каналу з кнопкою в бот (слово Yaro 04.10): кнопку під постом каналу
+# може поставити лише бот у момент публікації, тож адмін шле боту /zakrip.
+# ZAKRIP_CHAT за замовчуванням чернетка каналу; оригінал лише окремим словом Yaro.
+ZAKRIP_CHAT   = os.getenv("ZAKRIP_CHAT", "").strip() or "-1004303013438"
+ZAKRIP_URL    = os.getenv("ZAKRIP_URL", "").strip() or "https://t.me/iryna_rul_bot?start=kanal"
+ZAKRIP_BTN    = os.getenv("ZAKRIP_BTN", "").strip() or "Забрати три схеми світла"
 GUIDE_FILE_ID = os.getenv("GUIDE_FILE_ID", "").strip()
 # Чинні версії файлів (25.09): гайд v13 і магніт v3d. До цього бот віддавав
 # гайд v10 і магніт v2, бо file_id жили тільки в змінних Render і ніхто не
@@ -1315,6 +1321,56 @@ STATS_TAGS_MAX = 30       # міток у відповіді, решта одн�
 STATS_TEXT_MAX = 4000     # ліміт Telegram 4096, лишаємо запас
 
 
+def _u16(t):
+    """Довжина в одиницях UTF-16: так Telegram рахує offset у entities."""
+    return len(t.encode("utf-16-le")) // 2
+
+
+def _zakrip_err(desc):
+    low = (desc or "").lower()
+    if any(k in low for k in ("not enough rights", "administrator", "chat not found",
+                              "forbidden", "not a member", "kicked", "have no rights")):
+        return ("Бот не адмін каналу " + ZAKRIP_CHAT + " або не має права публікувати й "
+                "закріплювати. Додай бота адміном каналу (Публікація повідомлень, Закріплення) "
+                "і надішли /zakrip ще раз.\nTelegram: " + (desc or "без опису"))
+    return "Не вийшло: " + (desc or "Telegram не відповів") + ". Спробуй ще раз."
+
+
+def zakrip(m):
+    """
+    /zakrip <текст> або reply /zakrip на повідомлення: бот публікує текст у
+    ZAKRIP_CHAT з кнопкою-посиланням у бот (?start=kanal) і закріплює пост.
+    Reply копіює повідомлення як є (фото, форматування); інакше текст після
+    команди з тим самим форматуванням (entities зсунуті на довжину команди).
+    Повертає відповідь адміну.
+    """
+    kb = {"inline_keyboard": [[{"text": ZAKRIP_BTN, "url": ZAKRIP_URL}]]}
+    raw = m.get("text") or ""
+    parts = raw.split(None, 1)
+    body = parts[1] if len(parts) > 1 else ""
+    rep = m.get("reply_to_message")
+    if not body.strip() and rep and (rep.get("text") or rep.get("caption") or rep.get("photo")):
+        r = api_raw("copyMessage", chat_id=ZAKRIP_CHAT, from_chat_id=m["chat"]["id"],
+                    message_id=rep["message_id"], reply_markup=kb)
+    elif body.strip():
+        cut = _u16(raw[:len(raw) - len(body)])
+        ents = [dict(e, offset=e["offset"] - cut) for e in (m.get("entities") or [])
+                if e.get("type") != "bot_command" and e.get("offset", 0) >= cut]
+        r = api_raw("sendMessage", chat_id=ZAKRIP_CHAT, text=body, entities=ents or None,
+                    reply_markup=kb, disable_web_page_preview=True)
+    else:
+        return ("Надішли /zakrip і текст закріпу одним повідомленням, або відповідай "
+                "/zakrip на повідомлення з текстом. Кнопка «" + ZAKRIP_BTN + "» стане сама.")
+    if not r.get("ok"):
+        return _zakrip_err(r.get("description"))
+    mid = (r.get("result") or {}).get("message_id")
+    p = api_raw("pinChatMessage", chat_id=ZAKRIP_CHAT, message_id=mid, disable_notification=True)
+    if not p.get("ok"):
+        return ("Пост опубліковано (id " + str(mid) + "), але не закріплено. "
+                + _zakrip_err(p.get("description")))
+    return "Готово, id " + str(mid) + ": пост у " + ZAKRIP_CHAT + " з кнопкою «" + ZAKRIP_BTN + "», закріплено."
+
+
 def starts_text():
     """
     Скільки людей натиснули /start, з розбивкою за міткою ?start= (inst, chat, guide...).
@@ -1728,6 +1784,11 @@ def hook():
             # Лічильник стартів: /stats (лише адмін, у меню людей його нема).
             if uid == ADMIN_ID and text.startswith("/stats"):
                 send(chat_id, starts_text())
+                return "ok"
+            # Закріп каналу з кнопкою в бот: /zakrip текст або reply /zakrip.
+            if uid == ADMIN_ID and text and text.split()[0].split("@")[0] == "/zakrip":
+                store.log_event(uid, "zakrip", {})
+                send(chat_id, zakrip(m))
                 return "ok"
             if uid == ADMIN_ID and text.startswith("/nova"):
                 store.wipe_user(uid)
