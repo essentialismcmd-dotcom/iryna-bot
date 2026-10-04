@@ -63,8 +63,7 @@ for cmd in ("/start kurs", "/kurs"):
     ok(cmd + ": що всередині", all(x in t for x in ("18 відео", "135 хвилин", "4 уроки",
        "бʼюті-портрет", "темний фон", "фешн-колір", "пресети", "Доступ назавжди",
        "щодоби після оплати")))
-    ok(cmd + ": код платежу є", "-6" in t.split("
-")[-1] or "IR" in t, t[-60:].replace("\n", " "))
+    ok(cmd + ": код платежу -6", "-6" in t, t[-60:].replace(chr(10), " "))
     ok(cmd + ": без Stars", "Stars" not in t and "star" not in t.lower())
     ok(cmd + ": кнопка оплати карткою", any("pay.test" in (b.get("url") or "") for b in btns(out[0])))
 
