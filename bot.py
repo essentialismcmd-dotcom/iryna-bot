@@ -386,8 +386,9 @@ if COURSE_BUNDLE_ONLY:
         "name": "Курс ретуші",
         "btn": "Курс ретуші, " + str(_K12) + " грн",
         "text": ("Курс ретуші, " + str(_K12) + " грн\n\n"
-                 "Мій цільний курс: основи фотошопу, бʼюті-портрет, ростовий портрет "
-                 "і фешн-корекція кольору. Знімки для практики додаються. Доступ назавжди."),
+                 "Усередині: 18 відео, близько 135 хвилин, 4 уроки: бʼюті-портрет, "
+                 "темний фон, фешн-колір, колір і пресети Іри. "
+                 "Доступ назавжди. Новий урок відкривається щодоби після оплати."),
     })
 
 # Один словник на все, що продається. Цифра після дефіса в коді платежу
@@ -568,6 +569,23 @@ def send_retush(chat_id):
             [{"text": COURSES["k12"]["btn"], "callback_data": "k12"}]]})
     else:
         send(chat_id, RETUSH_INTRO, retush_kb())
+
+
+def pick_product(chat_id, uid, u, data):
+    """Картка товару з кодом платежу і кнопкою оплати (кнопка тарифу і /start kurs)."""
+    t = PRODUCTS[data]
+    code = order_code(uid, data)
+    store.add_purchase(uid, t["product"], tier=data, order_code=code,
+                       amount_uah=t["uah"])
+    store.log_event(uid, "tier_pick", {"tier": data, "code": code})
+    body = t["text"] + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
+    if PAY_URL:
+        body += ("\n\nФайли прийдуть сюди самі, зазвичай за хвилину після оплати."
+                 if data in COURSES else
+                 "\n\nФайл прийде сюди сам, зазвичай за хвилину після оплати.")
+    send(chat_id, body, pay_kb(data, uid))
+    notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
+           give_kb(uid, data))
 
 
 def mk_kb():
@@ -1741,8 +1759,22 @@ def hook():
                 if src == "guide":
                     store.log_event(uid, "guide_entry", {"tag": src})
                     send_card(chat_id, START_PIC, GUIDE_HELLO if courses_sale() else GUIDE_HELLO_NOC, guide_kb())
+                elif src == "kurs" and courses_sale():
+                    # мітка з кабінету: одразу пропозиція курсу, без вітання з магнітом
+                    store.log_event(uid, "kurs_entry", {"tag": src})
+                    if COURSE_BUNDLE_ONLY:
+                        pick_product(chat_id, uid, u, "k12")
+                    else:
+                        send_retush(chat_id)
                 else:
                     send_card(chat_id, START_PIC, HELLO, magnet_kb())
+            elif text.split("@")[0].strip() == "/kurs":
+                store.touch_user(u)
+                store.log_event(uid, "kurs_entry", {"tag": "cmd"})
+                if courses_sale() and COURSE_BUNDLE_ONLY:
+                    pick_product(chat_id, uid, u, "k12")
+                else:
+                    send_retush(chat_id)
             elif keyword(text):
                 k = keyword(text)
                 store.touch_user(u)
@@ -1836,19 +1868,7 @@ def hook():
                 else:
                     send(chat_id, RETUSH_PRO, course_kb("k2"))
             elif data in PRODUCTS:
-                t = PRODUCTS[data]
-                code = order_code(uid, data)
-                store.add_purchase(uid, t["product"], tier=data, order_code=code,
-                                   amount_uah=t["uah"])
-                store.log_event(uid, "tier_pick", {"tier": data, "code": code})
-                body = t["text"] + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
-                if PAY_URL:
-                    body += ("\n\nФайли прийдуть сюди самі, зазвичай за хвилину після оплати."
-                             if data in COURSES else
-                             "\n\nФайл прийде сюди сам, зазвичай за хвилину після оплати.")
-                send(chat_id, body, pay_kb(data, uid))
-                notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
-                       give_kb(uid, data))
+                pick_product(chat_id, uid, u, data)
             elif data.startswith("noget:"):
                 key = data.split(":")[1]
                 code = order_code(uid, key)
@@ -1914,6 +1934,7 @@ def hook():
 PEOPLE_COMMANDS = [
     {"command": "start", "description": "Три схеми світла безкоштовно"},
     {"command": "moi", "description": "Мої матеріали: усе куплене"},
+    {"command": "kurs", "description": "Курс ретуші"},
 ]
 
 

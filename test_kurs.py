@@ -344,8 +344,8 @@ perevirka("кнопка магніта: адмін = людина", admin == lyu
 VYKLYKY.clear(); bot.ensure_webhook()
 _menu = [p for m, p in VYKLYKY if m == "setMyCommands"]
 _zniato = [p.get("scope") for m, p in VYKLYKY if m == "deleteMyCommands"]
-perevirka("меню одне: start і moi, без області", len(_menu) == 1 and "scope" not in _menu[0]
-          and [c["command"] for c in _menu[0]["commands"]] == ["start", "moi"], str(_menu))
+perevirka("меню одне: start, moi, kurs, без області", len(_menu) == 1 and "scope" not in _menu[0]
+          and [c["command"] for c in _menu[0]["commands"]] == ["start", "moi", "kurs"], str(_menu))
 perevirka("меню адміна з областю chat зняте", {"type": "chat", "chat_id": 1} in _zniato
           and {"type": "all_private_chats"} in _zniato, str(_zniato))
 
