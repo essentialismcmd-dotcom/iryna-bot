@@ -36,8 +36,9 @@ MAGNET_URL    = os.getenv("MAGNET_URL", "").strip()
 # може поставити лише бот у момент публікації, тож адмін шле боту /zakrip.
 # ZAKRIP_CHAT за замовчуванням чернетка каналу; оригінал лише окремим словом Yaro.
 ZAKRIP_CHAT   = os.getenv("ZAKRIP_CHAT", "").strip() or "-1004303013438"
-ZAKRIP_URL    = os.getenv("ZAKRIP_URL", "").strip() or "https://t.me/iryna_rul_bot?start=kanal"
-ZAKRIP_BTN    = os.getenv("ZAKRIP_BTN", "").strip() or "Забрати три схеми світла"
+# Кнопка закріпу (TYZHDEN-2026-10-05 рядок 72, слово Yaro «Хочу на МК»): веде на ?start=mk.
+ZAKRIP_URL    = os.getenv("ZAKRIP_URL", "").strip() or "https://t.me/iryna_rul_bot?start=mk"
+ZAKRIP_BTN    = os.getenv("ZAKRIP_BTN", "").strip() or "Хочу на майстер-клас"
 GUIDE_FILE_ID = os.getenv("GUIDE_FILE_ID", "").strip()
 # Чинні версії файлів (25.09): гайд v13 і магніт v3d. До цього бот віддавав
 # гайд v10 і магніт v2, бо file_id жили тільки в змінних Render і ніхто не
@@ -1339,7 +1340,7 @@ def _zakrip_err(desc):
 def zakrip(m):
     """
     /zakrip <текст> або reply /zakrip на повідомлення: бот публікує текст у
-    ZAKRIP_CHAT з кнопкою-посиланням у бот (?start=kanal) і закріплює пост.
+    ZAKRIP_CHAT з кнопкою-посиланням у бот (?start=mk) і закріплює пост.
     Reply копіює повідомлення як є (фото, форматування); інакше текст після
     команди з тим самим форматуванням (entities зсунуті на довжину команди).
     Повертає відповідь адміну.
@@ -1820,6 +1821,10 @@ def hook():
                 if src == "guide":
                     store.log_event(uid, "guide_entry", {"tag": src})
                     send_card(chat_id, START_PIC, GUIDE_HELLO if courses_sale() else GUIDE_HELLO_NOC, guide_kb())
+                elif src == "mk":
+                    # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
+                    store.log_event(uid, "mk_entry", {"tag": src})
+                    send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
                 elif src == "kurs" and courses_sale():
                     # мітка з кабінету: одразу пропозиція курсу, без вітання з магнітом
                     store.log_event(uid, "kurs_entry", {"tag": src})

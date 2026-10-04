@@ -62,8 +62,8 @@ def adminu():
     return [p.get("text", "") for p in vyklyky("sendMessage") if p.get("chat_id") == 1]
 
 
-KB = {"inline_keyboard": [[{"text": "Забрати три схеми світла",
-                            "url": "https://t.me/iryna_rul_bot?start=kanal"}]]}
+KB = {"inline_keyboard": [[{"text": "Хочу на майстер-клас",
+                            "url": "https://t.me/iryna_rul_bot?start=mk"}]]}
 
 perevirka("типовий канал чернетка", bot.ZAKRIP_CHAT == "-1004303013438", bot.ZAKRIP_CHAT)
 
