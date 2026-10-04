@@ -983,6 +983,11 @@ def handle_tx(tx):
         notify("Оплата " + str(amount // 100) + " грн за кодом " + code
                + ", а треба " + str(need // 100) + " грн. " + pname(key) + ": не видано.")
         return
+    if key in PRODUCTS:
+        # Оплата з кодом без натиснутого тарифу: рядка покупки нема, mark_paid
+        # нічого б не оновив, і ні /moi, ні кабінет не побачили б оплату.
+        store.ensure_purchase(uid, PRODUCTS[key]["product"], tier=key,
+                              order_code=code, amount_uah=amount // 100)
     store.mark_paid(code, amount // 100)
     ok = deliver(uid, key)
     if ok:

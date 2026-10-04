@@ -312,7 +312,7 @@ def fake_q5(sql, args=(), fetch=None):
 
 store.q = fake_q5
 bot.COURSE_SECTIONS["k1"] = bot.parse_course("Урок 1 > video:V1 | Урок 2 > document:D2")
-for uid in (801, 802, 803):
+for uid in (801, 802, 803, 805, 806):
     BAZA["users"][uid] = dict(USERS[777], user_id=uid, source_tag="inst", got_magnet_at=None)
 
 
@@ -407,6 +407,26 @@ cb("give:804:k2", uid=1)                    # у k2 уроків нема → de
 ok("рядка нема", len(BAZA["purchases"]) == n0 and ryadky(804) == [])
 ok("адмін бачить «Не вдалося»", any(m == "sendMessage" and p.get("chat_id") == 1
    and str(p.get("text", "")).startswith("Не вдалося") for m, p in VYKLYKY))
+print("5д. Оплата з кодом без натиснутого тарифу (handle_tx)")
+Kab.got.clear()
+n0 = len(BAZA["purchases"])
+ok("рядка до оплати нема", ryadky(805) == [])
+bot.handle_tx(tx(805, "k1", bot.PRODUCTS["k1"]["uah"]))
+rd = ryadky(805)
+ok("рядок створено і доведено до delivered", len(rd) == 1 and rd[0]["status"] == "delivered"
+   and rd[0]["paid_at"] is not None and rd[0]["tier"] == "k1"
+   and rd[0]["order_code"] == bot.order_code(805, "k1"), str(rd))
+ok("/moi бачить курс", moi_bachyt(805))
+ok("кабінет отримав покупку", kabinet_maie(bot.order_code(805, "k1")) is not None)
+vybir_taryfu(806, "k1")
+bot.handle_tx(tx(806, "k1", bot.PRODUCTS["k1"]["uah"]))
+ok("з натиснутим тарифом дубліката нема", len(ryadky(806)) == 1 and ryadky(806)[0]["status"] == "delivered")
+VYKLYKY.clear()
+bot.handle_tx({"id": "nocode", "amount": 100000, "comment": "просто так", "description": "Х", "time": 0})
+ok("БЕЗ КОДУ як і раніше: лише повідомлення, рядка нема",
+   any("БЕЗ КОДУ" in str(p.get("text", "")) for m, p in VYKLYKY)
+   and len(BAZA["purchases"]) == n0 + 2, str(len(BAZA["purchases"])))
+
 store.q = store_q
 
 srv.shutdown()
