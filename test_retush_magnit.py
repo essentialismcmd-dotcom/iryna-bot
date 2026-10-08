@@ -35,7 +35,7 @@ ok("людині пішло одне повідомлення", len(to_user) == 
 p = to_user[0]
 text = p.get("text") or p.get("caption") or ""
 ok("текст дослівно", text == bot.RETUSH_MAGNET_HELLO and text.startswith("Привіт, це Ірина Руль ♥️")
-   and "«Чистка шкіри без втрати текстури»" in text and "10 хвилин" in text)
+   and "«Чистка шкіри без втрати текстури»" in text and "12 хвилин" in text)
 ok("без ціни і світла", not any(w in text.lower() for w in ("грн", "3300", "3 300", "світла", "$")))
 rm = p["reply_markup"]
 rm = __import__("json").loads(rm) if isinstance(rm, str) else rm
