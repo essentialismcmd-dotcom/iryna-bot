@@ -348,6 +348,8 @@ def wipe_user(uid):
     половини. Повертає лічильники або None, якщо база не відповіла.
     Матеріали (assets) не чіпає: там заливки файлів гайда від адміна.
     """
+    # мітка входу (липка) теж стирається, інакше після /nova простий /start повторює стару лінку
+    q("delete from kv where k = %s", ("tag:" + str(uid),))
     return q("""
         with e as (delete from events where user_id = %s returning 1),
              p as (delete from purchases where user_id = %s returning 1),

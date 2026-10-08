@@ -279,7 +279,20 @@ RETUSH_BUNDLE = (
 )
 
 
-def moi_empty():
+def course_person(uid):
+    """Людина прийшла за курсом чи ретушшю (мітка retush/kurs/kurs10): світла їй не показуємо, поки сама не попросить."""
+    try:
+        return bool(uid) and courses_sale() and store.kv_get("tag:" + str(uid)) in ("retush", "kurs", "kurs10")
+    except Exception:
+        return False
+
+
+MOI_EMPTY_COURSE = "Поки нічого не куплено ♥️ Курс ретуші по кнопці нижче."
+
+
+def moi_empty(uid=None):
+    if course_person(uid):
+        return MOI_EMPTY_COURSE
     if not GUIDE_SALE:
         return MOI_EMPTY_NOPAY
     return MOI_EMPTY if courses_sale() else MOI_EMPTY_NOC
@@ -682,10 +695,13 @@ def course_kb(first):
                                 [{"text": COURSES["k12"]["btn"], "callback_data": "k12"}]]}
 
 
-def send_retush(chat_id):
-    """Курс ретуші: кваліфікатор або, з COURSE_BUNDLE_ONLY, одразу пакет."""
+def send_retush(chat_id, uid=None, u=None):
+    """Курс ретуші: кваліфікатор або, з COURSE_BUNDLE_ONLY, одразу картка зі знижкою."""
     if not courses_sale():
         send(chat_id, RETUSH_SOON, retush_off_kb())
+        return
+    if COURSE_BUNDLE_ONLY and uid:
+        pick_product(chat_id, uid, u or {}, "k12")
         return
     if COURSE_BUNDLE_ONLY:
         send(chat_id, RETUSH_BUNDLE, {"inline_keyboard": [
@@ -722,8 +738,11 @@ def channel_rows():
     return [[{"text": "Канал «для своїх»", "url": CHANNEL_URL}]] if CHANNEL_URL else []
 
 
-def empty_kb():
-    """Порожні «Мої матеріали» і будь-який текст: три схеми, гайд, канал."""
+def empty_kb(uid=None):
+    """Порожні «Мої матеріали» і будь-який текст: три схеми, гайд, канал.
+    Людині з міткою курсу: курс і канал, без світла."""
+    if course_person(uid):
+        return {"inline_keyboard": [[{"text": "Курс ретуші", "callback_data": "retush"}]] + channel_rows()}
     rows = [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]
     if not courses_sale():
         rows += guide_rows()
@@ -1967,7 +1986,7 @@ def hook():
             if text.startswith("/moi") or text.strip() == "Мої матеріали":
                 store.touch_user(u)
                 kb = lessons_kb(uid)
-                send(chat_id, MOI_TEXT if kb else moi_empty(), kb or empty_kb())
+                send(chat_id, MOI_TEXT if kb else moi_empty(uid), kb or empty_kb(uid))
                 return "ok"
 
             if text.startswith("/start"):
@@ -2025,7 +2044,7 @@ def hook():
                     kb = tiers_kb()
                     send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
                 elif k == "retush":
-                    send_retush(chat_id)
+                    send_retush(chat_id, uid, u)
                 elif k == "mk":
                     send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
                 else:
@@ -2052,11 +2071,11 @@ def hook():
                     if kb:
                         send(chat_id, OWNER_HAS, kb)
                     elif owned:
-                        send(chat_id, CLIENT_TEXT, empty_kb())
+                        send(chat_id, CLIENT_TEXT, empty_kb(uid))
                     else:
-                        send(chat_id, OWNER_NONE, empty_kb())
+                        send(chat_id, OWNER_NONE, empty_kb(uid))
                 else:
-                    send(chat_id, CLIENT_TEXT, empty_kb())
+                    send(chat_id, CLIENT_TEXT, empty_kb(uid))
             return "ok"
 
         if "callback_query" in upd:
@@ -2087,7 +2106,7 @@ def hook():
                 send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
             elif data == "retush":
                 store.log_event(uid, "retush_open")
-                send_retush(chat_id)
+                send_retush(chat_id, uid, u)
             elif data == "mk":
                 store.log_event(uid, "mk_open")
                 send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
@@ -2104,6 +2123,10 @@ def hook():
                 store.log_event(uid, "tier_off", {"tier": data})
                 kb = tiers_kb()
                 send(chat_id, guide_intro(kb), kb)
+            elif COURSE_BUNDLE_ONLY and data in ("q:new", "q:pro", "k1", "k2"):
+                # Стара кнопка кваліфікатора чи окремого курсу в чаті: продаємо лише цільний курс зі знижкою.
+                store.log_event(uid, "retush_old_btn", {"data": data})
+                pick_product(chat_id, uid, u, "k12")
             elif data in ("q:new", "q:pro"):
                 # Кваліфікатор з її скрипту: новачкам перший курс, решті другий.
                 store.log_event(uid, "retush_level", {"level": data[2:]})
@@ -2136,18 +2159,18 @@ def hook():
                 notify("ТЕСТ оплати: " + pname(key) + "\n" + who(u))
             elif data == "moi":
                 kb = lessons_kb(uid)
-                send(chat_id, MOI_TEXT if kb else moi_empty(), kb or empty_kb())
+                send(chat_id, MOI_TEXT if kb else moi_empty(uid), kb or empty_kb(uid))
             elif data == "my:guide":
                 if "t1" in owned_keys(uid) and guide_ref():
                     api("sendDocument", chat_id=chat_id, document=guide_ref())
                 else:
-                    send(chat_id, moi_empty(), empty_kb())
+                    send(chat_id, moi_empty(uid), empty_kb(uid))
             elif data.startswith("les:"):
                 _, ckey, n = (data.split(":") + ["", ""])[:3]
                 if ckey in owned_keys(uid):
                     send_lesson(chat_id, ckey, int(n or 0))
                 else:
-                    send(chat_id, moi_empty(), empty_kb())
+                    send(chat_id, moi_empty(uid), empty_kb(uid))
             elif data.startswith("give:") and uid in NOTIFY_IDS:
                 parts = (data.split(":") + ["", ""])[:3]
                 target = int(parts[1])

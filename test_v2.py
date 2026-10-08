@@ -115,9 +115,9 @@ VYKLYKY.clear(); cb("retush")
 ok("без режиму: кваліфікатор", knopky() == ["Тільки починаю", "Вже працюю у фотошопі"])
 bot.COURSE_BUNDLE_ONLY = True
 VYKLYKY.clear(); cb("retush")
-ok("тільки пакет: одна кнопка", knopky() == ["Обидва курси, 4500 грн"], str(knopky()))
+ok("тільки пакет: одразу картка зі знижкою 10 %, оплата й код -7", any("-7" in x and "10 %" in x for x in komu(777)) and "Оплатити в кілька кліків" in knopky(), str(knopky()))
 VYKLYKY.clear(); msg("курс")
-ok("слово КУРС теж пакет", knopky() == ["Обидва курси, 4500 грн"])
+ok("слово КУРС теж картка зі знижкою", any("-7" in x and "10 %" in x for x in komu(777)))
 bot.COURSE_BUNDLE_ONLY = False
 
 # 3б. Старі курси зняті з продажу (25.09): COURSES_ON вимкнений
