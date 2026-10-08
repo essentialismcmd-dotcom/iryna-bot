@@ -696,6 +696,9 @@ def send_retush(chat_id):
 
 def pick_product(chat_id, uid, u, data):
     """Картка товару з кодом платежу і кнопкою оплати (кнопка тарифу і /start kurs)."""
+    # 08.10, слово Yaro: знижка 10 % поки для всіх, кожен бачить її як особисту.
+    if data == "k12" and COURSE_BUNDLE_ONLY:
+        data = "k12z"
     t = PRODUCTS[data]
     code = order_code(uid, data)
     store.add_purchase(uid, t["product"], tier=data, order_code=code,
