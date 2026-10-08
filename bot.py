@@ -708,6 +708,29 @@ def retush_kb_one():
     return {"inline_keyboard": [[{"text": "Курс ретуші", "callback_data": "retush"}]]}
 
 
+# Лід-магніт ретуші (MAGNIT-RETUSH-2026-10-08.md, тексти дослівно): без ціни, лише урок 1.5.
+RETUSH_MAGNET_HELLO = (
+    "Привіт, це Ірина Руль ♥️\n\n"
+    "Тут мій урок «Чистка шкіри без втрати текстури» з курсу ретуші, цілком, 10 хвилин.\n"
+    "Прибираємо дефекти, шкіра лишається живою, без «пластику».\n\n"
+    "Тисніть кнопку, урок відкриється в моєму кабінеті курсів."
+)
+RETUSH_LESSON_PART = "1.5"
+
+
+def retush_lesson_url():
+    """Кабінет одразу на уроці 1.5 (кабінет читає ?p= і відкриває частину за номером)."""
+    return kabinet_mist.URL + "/?p=" + RETUSH_LESSON_PART if kabinet_mist.URL else ""
+
+
+def retush_magnet_kb():
+    """Mini App кнопка: Telegram сам передає підписаний initData, вхід без паролів.
+    Без KABINET_URL кнопки нема (тоді лише канал), щоб не слати в нікуди."""
+    url = retush_lesson_url()
+    rows = [[{"text": "Відкрити урок", "web_app": {"url": url}}]] if url else []
+    return {"inline_keyboard": rows + channel_rows()}
+
+
 def pay_url(uid, key):
     """Персональне посилання на банку: сума товару і код людини вже підставлені
     (перевірено 02.10: ?a=сума&t=коментар, є Apple Pay / Google Pay)."""
@@ -1927,6 +1950,11 @@ def hook():
                 if src == "guide":
                     store.log_event(uid, "guide_entry", {"tag": src})
                     send_card(chat_id, START_PIC, GUIDE_HELLO if courses_sale() else GUIDE_HELLO_NOC, guide_kb())
+                elif src == "retush":
+                    # лід-магніт ретуші 08.10: урок 1.5 безкоштовно в кабінеті, без світла і без ціни
+                    store.log_event(uid, "retush_entry", {"tag": src})
+                    send_card(chat_id, START_PIC, RETUSH_MAGNET_HELLO, retush_magnet_kb())
+                    kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
                 elif src == "mk":
                     # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
                     store.log_event(uid, "mk_entry", {"tag": src})
