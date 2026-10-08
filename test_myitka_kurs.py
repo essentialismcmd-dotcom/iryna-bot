@@ -72,7 +72,7 @@ ok("меню: є /kurs «Курс ретуші»", {"command": "kurs", "descript
 # знижка 10 % для першої покупниці (08.10): ?start=kurs10
 out = msg("/start kurs10")
 t = (out[0].get("text") or "") if out else ""
-ok("kurs10: картка з ціною і знижкою", len(out) == 1 and "3300 грн" in t and "10 %: 2970 грн" in t, t[:90])
+ok("kurs10: картка з ціною і знижкою", len(out) == 1 and "3300 грн" in t and "10 % як першій учениці на нашій платформі: 2970 грн" in t, t[:90])
 ok("kurs10: код платежу -7", "-7" in t)
 u = [b.get("url") or "" for b in btns(out[0])] if out else []
 ok("kurs10: банка на 2970", any("a=2970" in x for x in u), str(u))
