@@ -14,7 +14,7 @@
 Правило: у боті лишається те, що працює само, а не те, що вимагає навчання.
 """
 
-import os, re, time, html, logging, threading
+import os, re, json, time, html, logging, threading
 import requests
 from urllib.parse import urlencode
 from flask import Flask, request
@@ -479,6 +479,33 @@ def api(method, retry=False, **params):
 def send(chat_id, text, markup=None):
     return api("sendMessage", chat_id=chat_id, text=text,
                reply_markup=markup, disable_web_page_preview=True)
+
+
+TAGS_STICKY = ("retush", "kurs", "kurs10", "mk", "guide")
+
+
+def send_card_file(chat_id, path, text, markup=None):
+    """Картка з локального файла (Telegram не завжди тягне наш URL): перший раз
+    заливаємо файлом, далі file_id з kv."""
+    key = "pic:" + os.path.basename(path)
+    fid = store.kv_get(key)
+    if fid:
+        return send_card(chat_id, fid, text, markup)
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), path), "rb") as f:
+            j = requests.post(API + "/sendPhoto", data={
+                "chat_id": chat_id, "caption": text,
+                "reply_markup": json.dumps(markup) if markup else ""},
+                files={"photo": f}, timeout=30).json()
+        if j.get("ok"):
+            ph = (j.get("result") or {}).get("photo") or []
+            if ph:
+                store.kv_set(key, ph[-1]["file_id"])
+            return j["result"]
+        log.warning("send_card_file: %s", j.get("description"))
+    except Exception as e:
+        log.warning("send_card_file: %s", e)
+    return send(chat_id, text, markup)
 
 
 def send_card(chat_id, pic, text, markup=None):
@@ -1943,6 +1970,12 @@ def hook():
             if text.startswith("/start"):
                 parts = text.split(None, 1)
                 src = parts[1].strip()[:64] if len(parts) > 1 else ""
+                # 08.10: людина з лінки (retush, kurs10...) тисне просто /start і
+                # отримувала світло. Повторюємо її останню мітку.
+                if src in TAGS_STICKY:
+                    store.kv_set("tag:" + str(uid), src)
+                elif not src:
+                    src = store.kv_get("tag:" + str(uid)) or ""
                 rec = store.touch_user(u, source_tag=src) or {}
                 store.log_event(uid, "start", {"tag": src})
                 if rec.get("is_new", True):
@@ -1953,7 +1986,7 @@ def hook():
                 elif src == "retush":
                     # лід-магніт ретуші 08.10: урок 1.5 безкоштовно в кабінеті, без світла і без ціни
                     store.log_event(uid, "retush_entry", {"tag": src})
-                    send_card(chat_id, BASE_URL + "/static/retush.png", RETUSH_MAGNET_HELLO, retush_magnet_kb())  # обкладинка магніту, без «Студійне світло»
+                    send_card_file(chat_id, "static/retush.png", RETUSH_MAGNET_HELLO, retush_magnet_kb())  # обкладинка магніту, без «Студійне світло»
                     kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
                 elif src == "mk":
                     # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)

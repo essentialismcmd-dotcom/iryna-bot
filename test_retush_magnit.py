@@ -37,7 +37,9 @@ text = p.get("text") or p.get("caption") or ""
 ok("текст дослівно", text == bot.RETUSH_MAGNET_HELLO and text.startswith("Привіт, це Ірина Руль ♥️")
    and "«Чистка шкіри без втрати текстури»" in text and "10 хвилин" in text)
 ok("без ціни і світла", not any(w in text.lower() for w in ("грн", "3300", "3 300", "світла", "$")))
-btns = [b for r in p["reply_markup"]["inline_keyboard"] for b in r]
+rm = p["reply_markup"]
+rm = __import__("json").loads(rm) if isinstance(rm, str) else rm
+btns = [b for r in rm["inline_keyboard"] for b in r]
 ok("кнопка «Відкрити урок» = Mini App на 1.5", btns[0] == {"text": "Відкрити урок", "web_app": {"url": "https://kab.test/?p=1.5"}}, btns)
 ok("магніта світла нема в кнопках", not any("світла" in b["text"] for b in btns))
 ok("повідомлення «Урок ваш» ще не йде", True)
