@@ -395,7 +395,7 @@ if COURSE_BUNDLE_ONLY:
         "text": ("Курс ретуші, " + str(_K12) + " грн\n\n"
                  "Усередині: 18 відео, близько 135 хвилин, 4 уроки: бʼюті-портрет, "
                  "темний фон, фешн-колір, колір і пресети Іри. "
-                 "Доступ назавжди. Новий урок відкривається щодоби після оплати."),
+                 "Доступ назавжди. Увесь курс відкривається одразу після оплати."),
     })
 
 # Один словник на все, що продається. Цифра після дефіса в коді платежу
@@ -415,7 +415,7 @@ PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=(
     "Для вас знижка " + str(KURS_ZNYZHKA) + " %: " + str(_K12Z) + " грн\n\n"
     "Усередині: 18 відео, близько 135 хвилин, 4 уроки: бʼюті-портрет, "
     "темний фон, фешн-колір, колір і пресети Іри. "
-    "Доступ назавжди. Новий урок відкривається щодоби після оплати."))
+    "Доступ назавжди. Увесь курс відкривається одразу після оплати."))
 PRODUCTS["k12z"]["name"] = PRODUCTS["k12"]["name"] + " (знижка " + str(KURS_ZNYZHKA) + " %)"
 BY_CODE = {v["code"]: k for k, v in PRODUCTS.items()}
 
@@ -509,6 +509,83 @@ def who(u):
     tag = "@" + uname if uname else "без юзернейма"
     name = " ".join([x for x in [u.get("first_name"), u.get("last_name")] if x]) or "без імені"
     return name + ", " + tag + ", id " + str(u.get("id"))
+
+
+# ---------- живий фідбек: людина -> Іра/адмін, відповідь reply -> людині ----------
+
+_fb_map = {}      # (chat_id, message_id) у чаті персоналу -> id людини
+_fb_albums = {}   # media_group_id -> коли надіслали підпис
+_ID_RE = re.compile(r"(?:^|\W)id (\d{5,})")
+
+
+def staff_ids():
+    ids = list(NOTIFY_IDS)
+    if IRA_ID and IRA_ID not in ids:
+        ids.append(IRA_ID)
+    return ids
+
+
+def _fb_remember(cid, res, uid):
+    mid = (res or {}).get("message_id") if isinstance(res, dict) else None
+    if mid:
+        _fb_map[(cid, mid)] = uid
+        if len(_fb_map) > 5000:
+            for k in list(_fb_map)[:2000]:
+                _fb_map.pop(k, None)
+
+
+def forward_to_staff(m, chat_id, u):
+    """Файл/фото/відео людини: підпис (хто, чи купила курс) + forwardMessage усім."""
+    uid = u.get("id")
+    gid = m.get("media_group_id")
+    head = True
+    if gid:
+        head = str(gid) not in _fb_albums
+        _fb_albums[str(gid)] = time.time()
+        if len(_fb_albums) > 200:
+            for k in list(_fb_albums)[:100]:
+                _fb_albums.pop(k, None)
+    owned = owned_keys(uid)
+    tag = "купила курс" if ({"k1", "k2"} & owned) else "курс не купувала"
+    cap = (m.get("caption") or "").strip()
+    for cid in staff_ids():
+        if head:
+            _fb_remember(cid, send(cid, "Від " + who(u) + " (" + tag + ")"
+                                   + (":\n" + cap if cap else "")
+                                   + "\nВідповідь: reply на це або на файл нижче."), uid)
+        _fb_remember(cid, api("forwardMessage", chat_id=cid, from_chat_id=chat_id,
+                              message_id=m.get("message_id")), uid)
+
+
+def fb_target(rep):
+    """Кому адресована відповідь: з пам'яті, з forward_origin або з рядка «id N» у підписі."""
+    if not rep:
+        return None
+    t = _fb_map.get((rep.get("_chat"), rep.get("message_id")))
+    if t:
+        return t
+    fo = rep.get("forward_origin") or {}
+    su = fo.get("sender_user") or {}
+    if su.get("id"):
+        return su["id"]
+    mt = _ID_RE.search(rep.get("text") or rep.get("caption") or "")
+    return int(mt.group(1)) if mt else None
+
+
+def staff_reply(m, chat_id):
+    """Reply персоналу на переслане/сповіщення -> copyMessage людині. True, якщо оброблено."""
+    rep = m.get("reply_to_message")
+    if not rep:
+        return False
+    rep = dict(rep, _chat=chat_id)
+    target = fb_target(rep)
+    if not target or target in staff_ids():
+        return False
+    r = api_raw("copyMessage", chat_id=target, from_chat_id=chat_id,
+                message_id=m.get("message_id"))
+    if not r.get("ok"):
+        send(chat_id, "Не вдалось надіслати людині: " + str(r.get("description")))
+    return True
 
 
 # ---------- лійка ----------
@@ -1812,6 +1889,12 @@ def hook():
                 send(chat_id, "Чисто. Видали цей чат і зайди в бота заново, побачиш його як нова людина.")
                 return "ok"
 
+            # Відповідь Іри чи адміна reply-ем на переслане/сповіщення іде людині
+            # (раніше за матеріали Іри, щоб відповідь не потрапила в take_material).
+            if (uid in staff_ids() and m.get("reply_to_message")
+                    and not text.startswith("/") and staff_reply(m, chat_id)):
+                return "ok"
+
             # Іра: кидає що завгодно, бот приймає і мовчить.
             if uid == IRA_ID and IRA_ON:
                 store.touch_user(u, role="ira")
@@ -1820,6 +1903,13 @@ def hook():
                     return "ok"
                 take_material(m, chat_id, uid)
                 return "ok"
+
+            # Файл/фото/відео людини: Ірі й адміну (живий фідбек по ретуші).
+            is_file = extract_file(m)[1] is not None
+            if is_file and uid not in staff_ids():
+                store.touch_user(u)
+                store.log_event(uid, "message", {"text": "[файл] " + text[:300]})
+                forward_to_staff(m, chat_id, u)
 
             if text.startswith("/moi") or text.strip() == "Мої матеріали":
                 store.touch_user(u)
@@ -1880,7 +1970,11 @@ def hook():
             else:
                 store.touch_user(u)
                 store.log_event(uid, "message", {"text": text[:300]})
-                notify("Повідомлення в боті від " + who(u) + ":\n" + (text or "[не текст]"))
+                if not is_file:
+                    ntext = "Повідомлення в боті від " + who(u) + ":\n" + (text or "[не текст]")
+                    notify(ntext)
+                    if IRA_ID and IRA_ID not in NOTIFY_IDS:
+                        _fb_remember(IRA_ID, send(IRA_ID, ntext), uid)
                 low = text.lower()
                 if "курс" in low and OWNER_RE.search(low):
                     # Людина каже, що вже має курс: не шаблон, а відповідь по суті.
