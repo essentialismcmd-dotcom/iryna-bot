@@ -676,9 +676,9 @@ def pick_product(chat_id, uid, u, data):
     store.log_event(uid, "tier_pick", {"tier": data, "code": code})
     body = t["text"] + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
     if PAY_URL:
-        body += ("\n\nФайли прийдуть сюди самі, зазвичай за хвилину після оплати."
+        body += ("\n\nПісля оплати курс відкриється тут, зазвичай протягом кількох хвилин."
                  if t["product"] == "course" else
-                 "\n\nФайл прийде сюди сам, зазвичай за хвилину після оплати.")
+                 "\n\nПісля оплати файл прийде сюди, зазвичай протягом кількох хвилин.")
     send(chat_id, body, pay_kb(data, uid))
     notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
            give_kb(uid, data))
@@ -2135,21 +2135,14 @@ def clear_scoped_commands():
 # Опис до «Старт» («Що вміє цей бот?») за мовою телеграму людини (слово Yaro
 # 08.10): людина з запитом на ретуш не має бачити світло. Українська (типовий
 # опис) лишається про світло; ru і en про курс ретуші.
-DESCRIPTIONS = {
-    "ru": ("Здравствуйте, я Ира ❤️ Бьюти и фешн фотограф, снимаю 6 лет.\n\n"
-           "Здесь мой курс ретуши: как я довожу кадр до журнального вида. "
-           "4 урока, 18 видео: бьюти-портрет, тёмный фон, fashion-цвет, цвет и мои пресеты.\n\n"
-           "Весь курс открывается сразу после оплаты и остаётся у вас навсегда. "
-           "Смотрите в своём темпе, присылайте сюда свою ретушь, я подскажу правки.\n\n"
-           "Нажмите «Старт», и я покажу курс."),
-    "en": ("Hi, I'm Ira ❤️ Beauty and fashion photographer, 6 years behind the camera.\n\n"
-           "This is my retouching course: how I bring a shot to magazine level. "
-           "4 lessons, 18 videos: beauty portrait, dark background, fashion color, "
-           "color grading and my presets.\n\n"
-           "The whole course opens right after payment and stays with you forever. "
-           "Watch at your own pace, send your retouch here and I'll suggest edits.\n\n"
-           "Tap «Start» and I'll show you the course."),
-}
+# Пишемо людям завжди українською (слово Yaro 08.10), тому текст один для ru і en.
+_OPYS_RETUSH = ("Привіт, я Іра ❤️ Бʼюті і фешн фотограф, знімаю вже 6 років.\n\n"
+                "Тут мій курс ретуші: як я доводжу кадр до журнального вигляду. "
+                "4 уроки, 18 відео: бʼюті-портрет, темний фон, фешн-колір, колір і мої пресети.\n\n"
+                "Увесь курс відкривається одразу після оплати і лишається з вами назавжди. "
+                "Дивіться у своєму темпі, надсилайте сюди свою ретуш, підкажу правки.\n\n"
+                "Тисніть «Почати», і я покажу курс.")
+DESCRIPTIONS = {"ru": _OPYS_RETUSH, "en": _OPYS_RETUSH}
 
 
 def set_descriptions():
