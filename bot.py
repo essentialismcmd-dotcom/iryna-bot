@@ -1953,7 +1953,7 @@ def hook():
                 elif src == "retush":
                     # лід-магніт ретуші 08.10: урок 1.5 безкоштовно в кабінеті, без світла і без ціни
                     store.log_event(uid, "retush_entry", {"tag": src})
-                    send_card(chat_id, START_PIC, RETUSH_MAGNET_HELLO, retush_magnet_kb())
+                    send_card(chat_id, BASE_URL + "/static/retush.png", RETUSH_MAGNET_HELLO, retush_magnet_kb())  # обкладинка магніту, без «Студійне світло»
                     kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
                 elif src == "mk":
                     # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
