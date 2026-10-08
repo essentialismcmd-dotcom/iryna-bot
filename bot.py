@@ -14,7 +14,7 @@
 Правило: у боті лишається те, що працює само, а не те, що вимагає навчання.
 """
 
-import os, re, json, time, html, logging, threading
+import os, re, json, time, html, logging, threading, hmac
 import requests
 from urllib.parse import urlencode
 from flask import Flask, request
@@ -1465,6 +1465,33 @@ def privacy():
     застосунку, ця сторінка і є нею. Служить водночас інструкцією з видалення
     даних."""
     return PRYVATNIST, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.post("/kabinet-kupyty")
+def kabinet_kupyty():
+    """Кнопка «Весь курс» у кабінеті (08.10): кабінет просить прислати людині картку курсу
+    зі знижкою, фронт одразу згортається і людина бачить картку в чаті. Ключ той самий,
+    що в мосту (KABINET_KEY, заголовок X-Kabinet-Key); без ключа ендпоінт мертвий."""
+    key = kabinet_mist.KEY
+    got = request.headers.get("X-Kabinet-Key", "")
+    if not key or not hmac.compare_digest(got, key):
+        return "forbidden", 403
+    try:
+        uid = int((request.get_json(silent=True) or {})["user_id"])
+    except Exception:
+        return "bad", 400
+    store.session_begin()
+    try:
+        u = dict(store.get_user(uid) or {})
+        u["id"] = uid
+        store.kv_set("tag:" + str(uid), "retush")   # як /start kurs
+        pick_product(uid, uid, u, "k12")
+    except Exception:
+        log.exception("kabinet-kupyty")
+        return "error", 500
+    finally:
+        store.session_end()
+    return "ok"
 
 
 @app.get("/setup")
