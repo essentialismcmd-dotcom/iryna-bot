@@ -2142,12 +2142,15 @@ _OPYS_RETUSH = ("Привіт, я Іра ❤️ Бʼюті і фешн фото�
                 "Увесь курс відкривається одразу після оплати і лишається з вами назавжди. "
                 "Дивіться у своєму темпі, надсилайте сюди свою ретуш, підкажу правки.\n\n"
                 "Тисніть «Почати», і я покажу курс.")
-DESCRIPTIONS = {"ru": _OPYS_RETUSH, "en": _OPYS_RETUSH}
+# 08.10: і типовий (українська та решта мов) теж про ретуш, поки йде перша
+# покупниця з ретуші; опис про світло: brend/TEKSTY-2026-09-25.md.
+DESCRIPTIONS = {"": _OPYS_RETUSH, "ru": _OPYS_RETUSH, "en": _OPYS_RETUSH}
 
 
 def set_descriptions():
     for lang, text in DESCRIPTIONS.items():
-        r = api("setMyDescription", description=text[:512], language_code=lang)
+        r = (api("setMyDescription", description=text[:512], language_code=lang) if lang
+             else api("setMyDescription", description=text[:512]))
         log.info("опис %s: %s", lang, r)
 
 
