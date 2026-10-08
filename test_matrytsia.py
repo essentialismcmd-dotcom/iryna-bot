@@ -129,20 +129,19 @@ for tag in COURSE_TAGS:
     r = p2.say("/start")
     ok(tag + " після видалення чату: простий /start нема світла", not has_light(r), has_light(r))
     check_basic(tag + " після видалення", r)
+    ok(tag + " після видалення чату: магніт ретуші, не оплата", not has_course_card(r) and any("Відкрити урок" == x.get("text") for m in r for x in m["btns"]))
 
 for a, b in (("retush", "kurs"), ("kurs", "retush"), ("retush", "kurs10"), ("kurs10", "retush"), ("kurs", "kurs10")):
     p = new(); p.say("/start " + a); r = p.say("/start " + b)
     ok(a + "->" + b + ": нема світла", not has_light(r), has_light(r))
     r = p.say("/start")
     ok(a + "->" + b + "->/start: нема світла", not has_light(r), has_light(r))
-    ok(a + "->" + b + "->/start: повторює " + b, store.kv_get("tag:" + str(p.uid)) == b)
-    if b != "retush":
-        ok(a + "->" + b + "->/start: картка курсу", has_course_card(r))
+    ok(a + "->" + b + "->/start: людина ретуші, магніт а не оплата", store.kv_get("tag:" + str(p.uid)) == "retush" and not has_course_card(r) and any("Відкрити урок" == x.get("text") for m in r for x in m["btns"]), r and r[0]["text"][:60])
 
 p = new(); p.say("/start retush"); r = p.say("/start kurs")
 ok("Весь курс з магніту: картка курсу", has_course_card(r) and not has_light(r))
 r = p.say("/start")
-ok("...і далі простий /start: курс, не світло", has_course_card(r) and not has_light(r))
+ok("...і далі простий /start: магніт ретуші, не картка оплати, не світло", not has_course_card(r) and not has_light(r) and any("Відкрити урок" == x.get("text") for m in r for x in m["btns"]))
 
 # світло людина просить сама: має спрацювати
 for tag in COURSE_TAGS:
@@ -186,7 +185,12 @@ for d in ("k12", "k12z", "retush", "q:new", "q:pro", "k1", "k2"):
 # адмін
 adm = P(1)
 r = adm.say("/start kurs10"); ok("адмін kurs10: картка", has_course_card(r))
-r = adm.say("/start"); ok("адмін простий /start після kurs10: курс", has_course_card(r) and not has_light(r))
+r = adm.say("/start"); ok("адмін простий /start після kurs10: магніт ретуші", not has_course_card(r) and not has_light(r) and any("Відкрити урок" == x.get("text") for m in r for x in m["btns"]))
+# старий липкий запис kurs/kurs10 у kv (до 08.10): простий /start дає магніт ретуші
+for old in ("kurs", "kurs10"):
+    p = new(); store.kv_set("tag:" + str(p.uid), old); r = p.say("/start")
+    ok("старий kv " + old + ": простий /start = магніт ретуші", not has_course_card(r) and not has_light(r) and any("Відкрити урок" == x.get("text") for m in r for x in m["btns"]))
+    r = p.say("Мої матеріали"); ok("старий kv " + old + ": Мої матеріали без світла", not has_light(r), has_light(r))
 
 print("ПАДІННЯ: " + str(len(bad)) + "\n" + "\n".join(bad) if bad else "усе зелене")
 sys.exit(1 if bad else 0)

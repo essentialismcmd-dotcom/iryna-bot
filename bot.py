@@ -1994,10 +1994,14 @@ def hook():
                 src = parts[1].strip()[:64] if len(parts) > 1 else ""
                 # 08.10: людина з лінки (retush, kurs10...) тисне просто /start і
                 # отримувала світло. Повторюємо її останню мітку.
+                # Слово Yaro 08.10: людина з kurs/kurs10 це людина ретуші; явний вхід показує
+                # картку курсу, а простий /start і повернення після видалення чату дають магніт ретуші.
                 if src in TAGS_STICKY:
-                    store.kv_set("tag:" + str(uid), src)
+                    store.kv_set("tag:" + str(uid), "retush" if src in ("kurs", "kurs10") else src)
                 elif not src:
                     src = store.kv_get("tag:" + str(uid)) or ""
+                    if src in ("kurs", "kurs10"):   # старі записи до 08.10
+                        src = "retush"
                 rec = store.touch_user(u, source_tag=src) or {}
                 store.log_event(uid, "start", {"tag": src})
                 if rec.get("is_new", True):
