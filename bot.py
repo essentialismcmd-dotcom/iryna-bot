@@ -1512,6 +1512,50 @@ def kabinet_kupyty():
     return "ok"
 
 
+@app.post("/kabinet-podiia")
+def kabinet_podiia():
+    """Подія в кабінеті (08.10): людина почала урок (start) чи додивилась (done). Шлемо
+    персоналу (NOTIFY_IDS) одне повідомлення; не частіше разу на людину+урок+подію (kv).
+    Ключ той самий, що в /kabinet-kupyty; без KABINET_KEY ендпоінт мертвий (403)."""
+    key = kabinet_mist.KEY
+    got = request.headers.get("X-Kabinet-Key", "")
+    if not key or not hmac.compare_digest(got, key):
+        return "forbidden", 403
+    j = request.get_json(silent=True) or {}
+    try:
+        uid = int(j["user_id"])
+        kind = str(j["kind"])
+        lesson = str(j.get("lesson") or "?")[:40]
+    except Exception:
+        return "bad", 400
+    if kind not in ("start", "done"):
+        return "bad", 400
+    store.session_begin()
+    try:
+        k = "kp:%s:%s:%s" % (uid, lesson, kind)
+        if store.kv_get(k):
+            return "dup"
+        store.kv_set(k, "1")
+        u = dict(store.get_user(uid) or {})
+        u["id"] = uid
+        uname = u.get("username")
+        name = " ".join([x for x in [u.get("first_name"), u.get("last_name")] if x]) or "Без імені"
+        tag = "@" + uname if uname else "без юзернейма"
+        if kind == "start":
+            text = "%s (%s, id %s) почала урок %s" % (name, tag, uid, lesson)
+        else:
+            mins = j.get("min")
+            extra = " (%s хв)" % int(mins) if isinstance(mins, (int, float)) and mins > 0 else ""
+            text = "%s (%s, id %s) додивилась урок %s%s" % (name, tag, uid, lesson, extra)
+        notify(text)
+    except Exception:
+        log.exception("kabinet-podiia")
+        return "error", 500
+    finally:
+        store.session_end()
+    return "ok"
+
+
 @app.get("/setup")
 def setup():
     base = request.url_root.rstrip("/")
