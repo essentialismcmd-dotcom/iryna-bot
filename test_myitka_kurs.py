@@ -69,6 +69,24 @@ for cmd in ("/start kurs", "/kurs"):
 
 ok("меню: є /kurs «Курс ретуші»", {"command": "kurs", "description": "Курс ретуші"} in bot.PEOPLE_COMMANDS)
 
+# знижка 10 % для першої покупниці (08.10): ?start=kurs10
+out = msg("/start kurs10")
+t = (out[0].get("text") or "") if out else ""
+ok("kurs10: картка з ціною і знижкою", len(out) == 1 and "3300 грн" in t and "10 %: 2970 грн" in t, t[:90])
+ok("kurs10: код платежу -7", "-7" in t)
+u = [b.get("url") or "" for b in btns(out[0])] if out else []
+ok("kurs10: банка на 2970", any("a=2970" in x for x in u), str(u))
+DANO = []
+bot.deliver, _d = (lambda uid, key: DANO.append(key) or True), bot.deliver
+kod = bot.order_code(777, "k12z")
+bot.handle_tx({"amount": 297000, "comment": kod})
+ok("kurs10: оплата 2970 з кодом -7 видає курс", DANO == ["k12z"], str(DANO))
+DANO.clear()
+bot.handle_tx({"amount": 260000, "comment": kod})
+ok("kurs10: недоплата не видає", DANO == [], str(DANO))
+bot.deliver = _d
+ok("kurs10: видача мапиться на k12", bot.ready_text("k12z") == bot.ready_text("k12"))
+
 # курси вимкнені: /start kurs не ламається, звичайний старт
 bot.COURSES_ON = False
 out = msg("/start kurs")

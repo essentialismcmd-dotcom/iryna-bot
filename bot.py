@@ -405,10 +405,22 @@ for _k, _v in TIERS.items():
     PRODUCTS[_k] = dict(_v, code=_k[-1], product="guide")
 for _k, _c in (("k1", "4"), ("k2", "5"), ("k12", "6")):
     PRODUCTS[_k] = dict(COURSES[_k], code=_c, product="course")
+# Слово Yaro 08.10: перша покупниця (лід з діректу до анонсу) отримує курс
+# зі знижкою 10 % за міткою ?start=kurs10. Окремий продукт з кодом -7, щоб
+# банка перевіряла саме знижену суму; видається як звичайний курс k12.
+KURS_ZNYZHKA = 10
+_K12Z = int(round(_K12 * (100 - KURS_ZNYZHKA) / 100.0))
+PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=(
+    "Курс ретуші, " + str(_K12) + " грн\n"
+    "Для вас знижка " + str(KURS_ZNYZHKA) + " %: " + str(_K12Z) + " грн\n\n"
+    "Усередині: 18 відео, близько 135 хвилин, 4 уроки: бʼюті-портрет, "
+    "темний фон, фешн-колір, колір і пресети Іри. "
+    "Доступ назавжди. Новий урок відкривається щодоби після оплати."))
+PRODUCTS["k12z"]["name"] = PRODUCTS["k12"]["name"] + " (знижка " + str(KURS_ZNYZHKA) + " %)"
 BY_CODE = {v["code"]: k for k, v in PRODUCTS.items()}
 
 DIGITS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-CODE_RE = re.compile(r"IR([0-9A-Z]+)-([1-6])", re.I)
+CODE_RE = re.compile(r"IR([0-9A-Z]+)-([1-7])", re.I)
 
 
 def b36(n):
@@ -588,7 +600,7 @@ def pick_product(chat_id, uid, u, data):
     body = t["text"] + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
     if PAY_URL:
         body += ("\n\nФайли прийдуть сюди самі, зазвичай за хвилину після оплати."
-                 if data in COURSES else
+                 if t["product"] == "course" else
                  "\n\nФайл прийде сюди сам, зазвичай за хвилину після оплати.")
     send(chat_id, body, pay_kb(data, uid))
     notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
@@ -806,7 +818,7 @@ def owned_keys(uid):
         t = p.get("tier") or ""
         if t in ("t1", "t2", "t3"):
             out.add("t1")
-        elif t == "k12":
+        elif t in ("k12", "k12z"):
             out.update({"k1", "k2"})
         elif t in ("k1", "k2"):
             out.add(t)
@@ -926,12 +938,16 @@ def give_course(uid, key):
 
 def deliver(uid, key):
     """Видача будь-якого купленого продукту за його ключем."""
+    if key == "k12z":
+        key = "k12"
     if key in COURSES:
         return give_course(uid, key)
     return give_guide(uid, key)
 
 
 def ready_text(key):
+    if key == "k12z":
+        key = "k12"
     if key in COURSES:
         n = len(COURSE_FILES.get(key) or [])
         m = len(COURSE_SECTIONS.get(key) or [])
@@ -1825,6 +1841,10 @@ def hook():
                     # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
                     store.log_event(uid, "mk_entry", {"tag": src})
                     send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
+                elif src == "kurs10" and courses_sale():
+                    # лід з діректу 08.10: курс зі знижкою 10 %, оплата на знижену суму
+                    store.log_event(uid, "kurs_entry", {"tag": src})
+                    pick_product(chat_id, uid, u, "k12z")
                 elif src == "kurs" and courses_sale():
                     # мітка з кабінету: одразу пропозиція курсу, без вітання з магнітом
                     store.log_event(uid, "kurs_entry", {"tag": src})
