@@ -803,8 +803,8 @@ def pay_kb(key, uid=None):
     return {"inline_keyboard": rows}
 
 
-def give_kb(uid, key):
-    return {"inline_keyboard": [[{"text": "Видати вручну",
+def give_kb(uid, key, text="Видати вручну"):
+    return {"inline_keyboard": [[{"text": text,
                                   "callback_data": "give:" + str(uid) + ":" + key}]]}
 
 
@@ -1092,6 +1092,24 @@ def deliver(uid, key):
     if key in COURSES:
         return give_course(uid, key)
     return give_guide(uid, key)
+
+
+def give_manual(by, target, key):
+    """Ручна видача (кнопка «Видати вручну» і /vydaty): той самий шлях, що й оплата."""
+    ok = deliver(target, key) if key else False
+    if ok:
+        code = order_code(target, key)
+        if key in PRODUCTS:
+            # Оплата «БЕЗ КОДУ»: тариф не натискали, рядка нема, і без
+            # нього ні /moi, ні кабінет покупки не бачать.
+            store.ensure_purchase(target, PRODUCTS[key]["product"], tier=key,
+                                  order_code=code, amount_uah=PRODUCTS[key]["uah"])
+        store.mark_paid(code)
+        store.mark_delivered(code)
+    store.log_event(target, "give_manual", {"by": by, "ok": ok})
+    if ok:
+        kabinet_mist.push_user(target)
+    return ok
 
 
 def ready_text(key):
@@ -1983,6 +2001,21 @@ def hook():
                 store.log_event(uid, "zakrip", {})
                 send(chat_id, zakrip(m))
                 return "ok"
+            # Подарунок: платить інша людина, заявки нема. /vydaty <id> видає курс.
+            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/vydaty":
+                arg = (text.split() + [""])[1]
+                if not arg.isdigit():
+                    send(chat_id, "Напишіть так: /vydaty 458676312 (id людини зі сповіщення «Новий у боті»)")
+                    return "ok"
+                target = int(arg)
+                tu = store.get_user(target) or {}
+                name = who({"id": target, "username": tu.get("username"),
+                            "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
+                if give_manual(uid, target, "k12"):
+                    send(chat_id, "Видано: " + name)
+                else:
+                    send(chat_id, "Не вдалося видати " + name + ". " + pname("k12") + ": " + ready_text("k12"))
+                return "ok"
             if uid == ADMIN_ID and text.startswith("/nova"):
                 store.wipe_user(uid)
                 send(chat_id, "Чисто. Видали цей чат і зайди в бота заново, побачиш його як нова людина.")
@@ -2032,7 +2065,8 @@ def hook():
                 rec = store.touch_user(u, source_tag=src) or {}
                 store.log_event(uid, "start", {"tag": src})
                 if rec.get("is_new", True):
-                    notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"))
+                    notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"),
+                           give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None)
                 if src == "guide":
                     store.log_event(uid, "guide_entry", {"tag": src})
                     send_card(chat_id, START_PIC, GUIDE_HELLO if courses_sale() else GUIDE_HELLO_NOC, guide_kb())
@@ -2206,19 +2240,7 @@ def hook():
                 parts = (data.split(":") + ["", ""])[:3]
                 target = int(parts[1])
                 key = parts[2]
-                ok = deliver(target, key) if key else False
-                if ok:
-                    code = order_code(target, key)
-                    if key in PRODUCTS:
-                        # Оплата «БЕЗ КОДУ»: тариф не натискали, рядка нема, і без
-                        # нього ні /moi, ні кабінет покупки не бачать.
-                        store.ensure_purchase(target, PRODUCTS[key]["product"], tier=key,
-                                              order_code=code, amount_uah=PRODUCTS[key]["uah"])
-                    store.mark_paid(code)
-                    store.mark_delivered(code)
-                store.log_event(target, "give_manual", {"by": uid, "ok": ok})
-                if ok:
-                    kabinet_mist.push_user(target)
+                ok = give_manual(uid, target, key)
                 send(chat_id, "Видано" if ok
                      else "Не вдалося. " + pname(key) + ": " + ready_text(key))
             return "ok"

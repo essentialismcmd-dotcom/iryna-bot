@@ -349,6 +349,32 @@ perevirka("меню одне: start, moi, kurs, без області", len(_men
 perevirka("меню адміна з областю chat зняте", {"type": "chat", "chat_id": 1} in _zniato
           and {"type": "all_private_chats"} in _zniato, str(_zniato))
 
+# 14b. Подарунок: кнопка в «Новий у боті» і /vydaty
+VYKLYKY.clear()
+msg("/start retush", uid=9101)
+_n = [p for m, p in VYKLYKY if m == "sendMessage" and "Новий у боті" in (p.get("text") or "")]
+perevirka("новий з міткою курсу: кнопка «Видати курс вручну»",
+          _n and _n[0].get("reply_markup", {}).get("inline_keyboard", [[{}]])[0][0].get("callback_data") == "give:9101:k12"
+          and _n[0]["reply_markup"]["inline_keyboard"][0][0]["text"] == "Видати курс вручну", str(_n)[:200])
+VYKLYKY.clear()
+msg("/start guide", uid=9102)
+_n = [p for m, p in VYKLYKY if m == "sendMessage" and "Новий у боті" in (p.get("text") or "")]
+perevirka("мітка не курсу: без кнопки", _n and not _n[0].get("reply_markup"))
+VYKLYKY.clear()
+cb("give:9101:k12", uid=1)
+perevirka("кнопка give:k12 відкриває курс", "Готово, курс ваш" in vse_teksty() and any(m == "sendVideo" for m, _ in VYKLYKY))
+VYKLYKY.clear()
+msg("/vydaty 9103", uid=777)
+perevirka("/vydaty не для людини: нічого", not [m for m, _ in VYKLYKY if m == "sendVideo"])
+VYKLYKY.clear()
+msg("/vydaty 9103", uid=1)
+perevirka("/vydaty: людині курс", any(m == "sendVideo" and p.get("chat_id") == 9103 for m, p in VYKLYKY)
+          and "Готово, курс ваш" in vse_teksty(), vse_teksty()[:100])
+perevirka("/vydaty: відповідь «Видано: …»", any(x.startswith("Видано: ") and "9103" in x for x in teksty()), str(teksty()))
+VYKLYKY.clear()
+msg("/vydaty", uid=1)
+perevirka("/vydaty без id: підказка", any("/vydaty" in x for x in teksty()) and not [m for m, _ in VYKLYKY if m == "sendVideo"])
+
 # 15. /privacy живий
 perevirka("/privacy віддає сторінку", app.get("/privacy").status_code == 200)
 
