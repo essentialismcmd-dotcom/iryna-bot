@@ -2224,6 +2224,10 @@ def ensure_webhook():
         api("setMyCommands", commands=PEOPLE_COMMANDS)
         clear_scoped_commands()
         set_descriptions()
+        # 08.10: кнопка «Кабінет» зліва внизу для всіх (раніше лише в окремих чатах)
+        if kabinet_mist.URL:
+            api("setChatMenuButton", menu_button={"type": "web_app", "text": "Кабінет",
+                                                  "web_app": {"url": kabinet_mist.URL + "/"}})
     except Exception as e:
         log.warning("ensure_webhook: %s", e)
 
