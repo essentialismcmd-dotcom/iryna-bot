@@ -515,11 +515,15 @@ def api(method, retry=False, **params):
     інакше один флуд від адміна заблокує потік вебхука на пів хвилини.
     """
     j = api_raw(method, **params)
-    if not j.get("ok") and retry and j.get("error_code") == 429:
+    for _ in range(3 if retry else 0):
+        if j.get("ok") or j.get("error_code") != 429:
+            break
         wait = (j.get("parameters") or {}).get("retry_after") or 3
-        if wait <= 35:
-            time.sleep(wait + 0.5)
-            j = api_raw(method, **params)
+        if wait > 60:
+            break
+        log.info("429 %s: чекаємо retry_after=%s", method, wait)
+        time.sleep(wait + 0.3)
+        j = api_raw(method, **params)
     if not j.get("ok"):
         log.warning("%s: %s", method, j.get("description"))
     return j.get("result")
@@ -993,7 +997,7 @@ COURSE_SECTIONS["k12"] = COURSE_SECTIONS["k1"] + COURSE_SECTIONS["k2"]
 COURSE_FILES = {k: [f for _, fs in v for f in fs] for k, v in COURSE_SECTIONS.items()}
 
 
-def _send_album(uid, kind, items, caption):
+def _send_album(uid, kind, items, caption, pause=1.0):
     """Документи або фото одним альбомом (2–10 штук). Повертає скільки пішло."""
     media = [{"type": kind, "media": fid} for fid in items]
     media[0]["caption"] = caption
@@ -1001,9 +1005,12 @@ def _send_album(uid, kind, items, caption):
         return len(items)
     # Альбом не пройшов (наприклад, різні типи всередині): віддаємо по одному.
     n = 0
-    for fid in items:
-        time.sleep(1.0)
-        if api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: fid}):
+    for j, fid in enumerate(items):
+        time.sleep(pause)
+        p = {"chat_id": uid, kind: fid}
+        if j == 0 and caption:
+            p["caption"] = caption
+        if api(SEND_BY_KIND[kind], retry=True, **p):
             n += 1
     return n
 
@@ -1126,26 +1133,32 @@ def practice_items(keys):
 
 def send_practice(uid):
     """Кнопка кабінету «Отримати в Telegram»: лише практика (без відео), лише покупцям.
-    Повертає скільки файлів пішло; None, якщо людина не має курсу."""
+    Повертає скільки файлів пішло; None, якщо людина не має курсу.
+    Швидко: перше повідомлення одразу, без пауз, документи альбомами по 10, заголовок
+    розділу це підпис першого файла альбому; на 429 api(retry=True) чекає retry_after."""
     items = practice_items(owned_keys(uid))
     if not items:
         return None
-    send(uid, "Матеріали для практики. Відкривайте у Photoshop через Camera Raw "
-              "і повторюйте крок за кроком.")
+    total = sum(len(d) for _, d in items)
+    t0 = time.time()
+    send(uid, "Надсилаю матеріали для практики: " + str(total) + " файлів ♥️")
     sent = 0
     for title, docs in items:
-        time.sleep(1.0)
-        send(uid, title)
+        cap = title
         for kind in ("document", "photo", "audio", "voice"):
             ids = [f for k, f in docs if k == kind]
             for i in range(0, len(ids), 10):
                 chunk = ids[i:i + 10]
-                time.sleep(1.0)
                 if len(chunk) == 1:
-                    if api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: chunk[0]}):
+                    p = {"chat_id": uid, kind: chunk[0]}
+                    if cap:
+                        p["caption"] = cap
+                    if api(SEND_BY_KIND[kind], retry=True, **p):
                         sent += 1
                 else:
-                    sent += _send_album(uid, kind, chunk, "")
+                    sent += _send_album(uid, kind, chunk, cap or "", pause=0)
+                cap = ""
+    log.info("практика %s: %s з %s файлів за %.1fс", uid, sent, total, time.time() - t0)
     store.log_event(uid, "practice", {"sent": sent})
     return sent
 
@@ -2465,18 +2478,24 @@ def poll_loop():
     def deliver(upd):
         try:
             requests.post(url, json=upd, timeout=90)
+        except requests.exceptions.ConnectionError:
+            # сервер уже закрив прийом (деплой): віддаємо апдейт обробнику напряму, не губимо
+            try:
+                app.test_client().post("/" + SECRET, json=upd)
+            except Exception as e:
+                log.warning("poll: апдейт %s не передано: %s", upd.get("update_id"), e)
         except Exception as e:
             log.warning("poll: передача апдейту %s: %s", upd.get("update_id"), e)
 
     offset = None
-    while True:
+    while not STOP.is_set():
         try:
             j = requests.post(API + "/getUpdates", timeout=65, json={
                 "offset": offset, "timeout": 50,
                 "allowed_updates": ["message", "callback_query"]}).json()
             if not j.get("ok"):
                 log.warning("getUpdates: %s", j.get("description"))
-                time.sleep(2)
+                STOP.wait(2)
                 continue
             for upd in j.get("result") or []:
                 offset = upd["update_id"] + 1
@@ -2487,7 +2506,30 @@ def poll_loop():
                 pool.submit(deliver, upd)
         except Exception as e:
             log.warning("poll: %s", e)
-            time.sleep(2)
+            STOP.wait(2)
+    # SIGTERM: нового getUpdates не робимо (новий інстанс одразу бере polling без Conflict),
+    # а вже отримані апдейти дообробляємо; непідтверджені лишаються в Telegram для нового.
+    pool.shutdown(wait=True)
+    log.info("poll: зупинено (SIGTERM)")
+
+
+STOP = threading.Event()
+
+
+def _on_sigterm(signum, frame, _prev=None):
+    STOP.set()
+    if callable(_prev):
+        _prev(signum, frame)
+
+
+def _hook_sigterm():
+    """Ланцюжок до обробника gunicorn: той гасить воркер, ми зупиняємо polling."""
+    try:
+        import signal
+        prev = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGTERM, lambda s, f: _on_sigterm(s, f, prev))
+    except Exception as e:   # не головний потік (тести)
+        log.info("SIGTERM-хук не поставлено: %s", e)
 
 
 def ensure_webhook():
@@ -2513,6 +2555,7 @@ def ensure_webhook():
 
 
 if os.getenv("NO_THREADS", "").strip() != "1":
+    _hook_sigterm()
     threading.Thread(target=ensure_webhook, daemon=True).start()
     threading.Thread(target=mono_poll, daemon=True).start()
     kabinet_mist.start()   # звірка з кабінетом раз на годину; без змінних нічого

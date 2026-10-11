@@ -38,6 +38,8 @@ check("не покупець: нічого не шлемо", bot.send_practice(5
 bot.owned_keys = lambda uid: {"k1"}
 bot.store.log_event = lambda *a, **k: None
 check("покупець: пішло 4 файли", bot.send_practice(5) == 4)
+check("перше повідомлення одразу, з числом", CALLS[0][0] == "sendMessage" and "4 файлів" in CALLS[0][1]["text"])
+check("заголовок як підпис альбому, не окремим повідомленням", sum(m == "sendMessage" for m, _ in CALLS) == 1 and [p.get("media", [{}])[0].get("caption") for m, p in CALLS if m == "sendMediaGroup"] == ["Урок 1", "Урок 2"])
 check("відео не слали", not any(m == "sendVideo" for m, _ in CALLS))
 
 c = bot.app.test_client()
