@@ -276,7 +276,26 @@ def _ensure():
     return True
 
 
+def timing_reset():
+    _local.db_s = 0.0
+    _local.db_n = 0
+
+
+def timing_get():
+    return getattr(_local, "db_s", 0.0), getattr(_local, "db_n", 0)
+
+
 def q(sql, args=(), fetch=None):
+    """Обгортка з таймінгом для логу повільних вебхуків (див. bot.hook)."""
+    t0 = time.time()
+    try:
+        return _q(sql, args, fetch)
+    finally:
+        _local.db_s = getattr(_local, "db_s", 0.0) + time.time() - t0
+        _local.db_n = getattr(_local, "db_n", 0) + 1
+
+
+def _q(sql, args=(), fetch=None):
     """fetch: None нічого не повертає, 'one' один рядок, 'all' список."""
     if not _ensure():
         return None if fetch != "all" else []
