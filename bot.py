@@ -2375,12 +2375,58 @@ def set_descriptions():
         log.info("опис %s: %s", lang, r)
 
 
+USE_POLLING = os.getenv("USE_POLLING", "1").strip() != "0"   # 11.10: webhook Telegram->Render зависав на ~60 с
+
+
+def poll_loop():
+    """
+    Long polling замість вебхука: Telegram віддає апдейт одразу, без його таймаутів і пауз
+    після помилок доставки (11.10 о 16:28 вебхук мовчав ~60 с: «Read timeout expired»).
+    Апдейт передається тому самому обробнику hook() локальним запитом, логіка не змінена.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=3)
+    url = "http://127.0.0.1:" + os.getenv("PORT", "10000") + "/" + SECRET
+
+    def deliver(upd):
+        try:
+            requests.post(url, json=upd, timeout=90)
+        except Exception as e:
+            log.warning("poll: передача апдейту %s: %s", upd.get("update_id"), e)
+
+    offset = None
+    while True:
+        try:
+            j = requests.post(API + "/getUpdates", timeout=65, json={
+                "offset": offset, "timeout": 50,
+                "allowed_updates": ["message", "callback_query"]}).json()
+            if not j.get("ok"):
+                log.warning("getUpdates: %s", j.get("description"))
+                time.sleep(2)
+                continue
+            for upd in j.get("result") or []:
+                offset = upd["update_id"] + 1
+                m = upd.get("message") or {}
+                if m.get("date"):
+                    log.info("TRACE upd=%s отримано polling, лаг від Telegram %.1fс",
+                             upd["update_id"], time.time() - m["date"])
+                pool.submit(deliver, upd)
+        except Exception as e:
+            log.warning("poll: %s", e)
+            time.sleep(2)
+
+
 def ensure_webhook():
     """Ставимо завжди: після серії таймаутів телеграм іде в довгу паузу."""
     try:
-        r = api("setWebhook", url=BASE_URL + "/" + SECRET,
-                allowed_updates=["message", "callback_query"])
-        log.info("вебхук поставлений: %s", r)
+        if USE_POLLING:
+            r = api("deleteWebhook", drop_pending_updates=False)
+            log.info("вебхук знято, працюємо через getUpdates: %s", r)
+            threading.Thread(target=poll_loop, daemon=True).start()
+        else:
+            r = api("setWebhook", url=BASE_URL + "/" + SECRET,
+                    allowed_updates=["message", "callback_query"])
+            log.info("вебхук поставлений: %s", r)
         api("setMyCommands", commands=PEOPLE_COMMANDS)
         clear_scoped_commands()
         set_descriptions()
