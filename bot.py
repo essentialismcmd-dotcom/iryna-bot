@@ -1149,6 +1149,7 @@ def send_practice(uid):
             ids = [f for k, f in docs if k == kind]
             for i in range(0, len(ids), 10):
                 chunk = ids[i:i + 10]
+                log.info("практика %s: +%.1fс «%s» %s x%s", uid, time.time() - t0, title, kind, len(chunk))
                 if len(chunk) == 1:
                     p = {"chat_id": uid, kind: chunk[0]}
                     if cap:
