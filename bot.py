@@ -1131,17 +1131,61 @@ def practice_items(keys):
     return out
 
 
-def send_practice(uid):
+# Блоки практики (11.10, Іра): файли кожного уроку стоять у кабінеті між підуроками, колір це
+# 5 окремих пресетів. Блок це набір розділів курсу за номером у назві: «Урок N ·» і
+# «Практика · набір N». Набір 1 це «колір 2121001.raf», який Іра поклала в папку уроку 2;
+# набори 2–6 це КОЛІР 1–5 (МАРІЯ32606, ЕВА31164, МК27345, MADINA10956, MADINA10827).
+PRACTICE_BLOCKS = {
+    "u1": ("k1", [("urok", 1)], "Файли до уроку 1: кадр Єви — RAW, налаштування, готовий PSD"),
+    "u2": ("k1", [("urok", 2), ("nabir", 1, "k2")], "Файли до уроку 2: кадр Марії — RAW, налаштування, готовий PSD"),
+    "u3": ("k1", [("urok", 3)], "Файли до уроку 3: кадр Мадіни — RAW, налаштування, готовий PSD"),
+    "c1": ("k2", [("nabir", 2)], "Колір 1: пресет Іри — RAW і налаштування (.xmp, .acr)"),
+    "c2": ("k2", [("nabir", 3)], "Колір 2: пресет Іри — RAW і налаштування (.xmp, .acr)"),
+    "c3": ("k2", [("nabir", 4)], "Колір 3: пресет Іри — RAW і налаштування (.xmp)"),
+    "c4": ("k2", [("nabir", 5)], "Колір 4: пресет Іри — RAW і налаштування (.xmp, .acr)"),
+    "c5": ("k2", [("nabir", 6)], "Колір 5: пресет Іри — RAW і налаштування (.xmp)"),
+}
+_SEC_RE = {"urok": re.compile(r"^\s*Урок\s+(\d+)(?!\d)"), "nabir": re.compile(r"набір\s+(\d+)(?!\d)", re.I)}
+
+
+def _section_matches(title, rule):
+    m = _SEC_RE[rule[0]].search(title or "")
+    return bool(m and int(m.group(1)) == rule[1] and (rule[0] == "nabir" or "практика" in (title or "").lower()))
+
+
+def block_items(block, keys):
+    """Один блок практики: [(підпис, [(kind, fid)])]; порожньо, якщо блоку нема, він не куплений
+    або у файлах курсу його розділів нема. Підпис блоку це підпис першого файла альбому.
+    Правило може мати свій курс третім елементом (колір 2121001.raf лежить у k2, але Іра
+    поклала його в папку уроку 2): без цього курсу його не віддаємо."""
+    spec = PRACTICE_BLOCKS.get(block)
+    if not spec or spec[0] not in keys:
+        return []
+    ckey0, rules, label = spec
+    docs = []
+    for rule in rules:
+        ckey = rule[2] if len(rule) > 2 else ckey0
+        if ckey not in keys:
+            continue
+        for i, (title, files) in enumerate(COURSE_SECTIONS.get(ckey) or []):
+            if _section_matches(title, rule):
+                docs += [(k, f) for k, f in files if not _is_video_item(ckey, i, k, f)]
+    return [(label, docs)] if docs else []
+
+
+def send_practice(uid, block=None):
     """Кнопка кабінету «Отримати в Telegram»: лише практика (без відео), лише покупцям.
-    Повертає скільки файлів пішло; None, якщо людина не має курсу.
+    block (u1–u3, c1–c5) шле файли одного блоку, без нього все. Повертає скільки файлів пішло;
+    None, якщо людина не має курсу або такого блоку нема.
     Швидко: перше повідомлення одразу, без пауз, документи альбомами по 10, заголовок
     розділу це підпис першого файла альбому; на 429 api(retry=True) чекає retry_after."""
-    items = practice_items(owned_keys(uid))
+    keys = owned_keys(uid)
+    items = block_items(block, keys) if block else practice_items(keys)
     if not items:
         return None
     total = sum(len(d) for _, d in items)
     t0 = time.time()
-    send(uid, "Надсилаю матеріали для практики: " + str(total) + " файлів ♥️")
+    send(uid, ("Надсилаю файли: " if block else "Надсилаю матеріали для практики: ") + str(total) + " файлів ♥️")
     sent = 0
     for title, docs in items:
         cap = title
@@ -1160,7 +1204,7 @@ def send_practice(uid):
                     sent += _send_album(uid, kind, chunk, cap or "", pause=0)
                 cap = ""
     log.info("практика %s: %s з %s файлів за %.1fс", uid, sent, total, time.time() - t0)
-    store.log_event(uid, "practice", {"sent": sent})
+    store.log_event(uid, "practice", {"sent": sent, "block": block or "all"})
     return sent
 
 
@@ -1633,14 +1677,18 @@ def kabinet_praktyka():
     if not key or not hmac.compare_digest(got, key):
         return "forbidden", 403
     try:
-        uid = int((request.get_json(silent=True) or {})["user_id"])
+        body = request.get_json(silent=True) or {}
+        uid = int(body["user_id"])
+        block = body.get("block") or None
+        if block is not None and block not in PRACTICE_BLOCKS:
+            return "bad block", 400
     except Exception:
         return "bad", 400
 
     def work():
         store.session_begin()
         try:
-            log.info("kabinet-praktyka: %s, пішло %s", uid, send_practice(uid))
+            log.info("kabinet-praktyka: %s блок %s, пішло %s", uid, block or "all", send_practice(uid, block))
         except Exception:
             log.exception("kabinet-praktyka")
         finally:
