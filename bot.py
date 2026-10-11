@@ -462,14 +462,37 @@ def pname(key):
     return PRODUCTS.get(key, {}).get("name", key)
 
 
+_tm = threading.local()   # таймінг Telegram API в межах одного вебхука
+
+
 def api_raw(method, **params):
     """Сира відповідь Telegram: {ok, result | description, error_code}."""
     params = {k: v for k, v in params.items() if v is not None}
+    t0 = time.time()
     try:
         r = requests.post(API + "/" + method, json=params, timeout=20)
         return r.json()
     except Exception as e:
         return {"ok": False, "description": str(e)}
+    finally:
+        _tm.tg_s = getattr(_tm, "tg_s", 0.0) + time.time() - t0
+        _tm.tg_n = getattr(_tm, "tg_n", 0) + 1
+
+
+def bg(fn, *args, **kw):
+    """Виконати в фоновому потоці, щоб перша відповідь людині не чекала на запис у
+    базу і сповіщення персоналу. Потік має власне зʼєднання з базою."""
+    def run():
+        store.session_begin()
+        try:
+            fn(*args, **kw)
+        except Exception as e:
+            log.warning("bg %s: %s", getattr(fn, "__name__", fn), e)
+        finally:
+            store.session_end()
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    return t
 
 
 def api(method, retry=False, **params):
@@ -2020,6 +2043,9 @@ def dm_lyudyna(kogo):
 @app.post("/" + SECRET)
 def hook():
     upd = request.get_json(silent=True) or {}
+    t_hook = time.time()
+    _tm.tg_s, _tm.tg_n = 0.0, 0
+    store.timing_reset()
     store.session_begin()
     try:
         if "message" in upd:
@@ -2107,29 +2133,32 @@ def hook():
                     if src in ("kurs", "kurs10"):   # старі записи до 08.10
                         src = "retush"
                 rec = store.touch_user(u, source_tag=src) or {}
-                store.log_event(uid, "start", {"tag": src})
-                if rec.get("is_new", True):
-                    notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"),
-                           give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None)
+                # лог і сповіщення персоналу не затримують перший екран людини
+                def _start_after(uid=uid, u=u, src=src, new=rec.get("is_new", True)):
+                    store.log_event(uid, "start", {"tag": src})
+                    if new:
+                        notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"),
+                               give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None)
+                bg(_start_after)
                 if src == "guide":
-                    store.log_event(uid, "guide_entry", {"tag": src})
+                    bg(store.log_event, uid, "guide_entry", {"tag": src})
                     send_card(chat_id, START_PIC, GUIDE_HELLO if courses_sale() else GUIDE_HELLO_NOC, guide_kb())
                 elif src == "retush":
                     # лід-магніт ретуші 08.10: урок 1.5 безкоштовно в кабінеті, без світла і без ціни
-                    store.log_event(uid, "retush_entry", {"tag": src})
+                    bg(store.log_event, uid, "retush_entry", {"tag": src})
                     send_card_file(chat_id, "static/retush-12.png", RETUSH_MAGNET_HELLO, retush_magnet_kb())  # обкладинка магніту, без «Студійне світло»
                     kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
                 elif src == "mk":
                     # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
-                    store.log_event(uid, "mk_entry", {"tag": src})
+                    bg(store.log_event, uid, "mk_entry", {"tag": src})
                     send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
                 elif src == "kurs10" and courses_sale():
                     # лід з діректу 08.10: курс зі знижкою 10 %, оплата на знижену суму
-                    store.log_event(uid, "kurs_entry", {"tag": src})
+                    bg(store.log_event, uid, "kurs_entry", {"tag": src})
                     pick_product(chat_id, uid, u, "k12z")
                 elif src == "kurs" and courses_sale():
                     # мітка з кабінету: одразу пропозиція курсу, без вітання з магнітом
-                    store.log_event(uid, "kurs_entry", {"tag": src})
+                    bg(store.log_event, uid, "kurs_entry", {"tag": src})
                     if COURSE_BUNDLE_ONLY:
                         pick_product(chat_id, uid, u, "k12")
                     else:
@@ -2292,6 +2321,14 @@ def hook():
         log.exception("update failed: %s", e)
     finally:
         store.session_end()
+        total = time.time() - t_hook
+        if total > 0.8:
+            kind = ("cb:" + str((upd.get("callback_query") or {}).get("data"))[:20]
+                    if "callback_query" in upd else
+                    "msg:" + str(((upd.get("message") or {}).get("text") or "")[:20]))
+            dbs, dbn = store.timing_get()
+            log.warning("ПОВІЛЬНИЙ вебхук %.2fс (%s): Telegram %.2fс/%d викликів, база %.2fс/%d запитів",
+                        total, kind, _tm.tg_s, _tm.tg_n, dbs, dbn)
     return "ok"
 
 
