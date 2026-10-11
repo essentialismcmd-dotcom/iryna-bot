@@ -34,7 +34,11 @@ check("k2 лише коли куплений", [t for t, _ in bot.practice_items
 check("без курсу порожньо", bot.practice_items(set()) == [])
 
 bot.owned_keys = lambda uid: set()
-check("не покупець: нічого не шлемо", bot.send_practice(5) is None and not CALLS)
+check("не покупець: нічого не шлемо файлами, але відповідь у чат є", bot.send_practice(5) is None
+      and [m for m, _ in CALLS] == ["sendMessage"] and "після покупки" in CALLS[0][1]["text"])
+CALLS.clear()
+check("адмін (NOTIFY_IDS=1) без покупок отримує блок", bot.send_practice(1, "u1") == 2)
+CALLS.clear()
 bot.owned_keys = lambda uid: {"k1"}
 bot.store.log_event = lambda *a, **k: None
 check("покупець: пішло 5 файлів", bot.send_practice(5) == 5)
@@ -62,9 +66,9 @@ check("u2: урок 2 і набір 1 (колір 2121001.raf)", sorted(ids) == 
 check("u3: лише RAF3", run("u3")[:2] == (1, ["RAF3"]))
 check("c1: набір 2", run("c1")[:2] == (2, ["A2", "B2"]))
 check("c5: набір 6", run("c5")[:2] == (1, ["A6"]))
-check("c3: файлів нема, нічого не шлемо", run("c3")[0] is None and not CALLS)
+check("c3: файлів нема, файлів не шлемо, текст є", run("c3")[0] is None and [m for m, _ in CALLS] == ["sendMessage"])
 bot.owned_keys = lambda uid: {"k1"}
-check("c1 без k2: нічого", run("c1")[0] is None and not CALLS)
+check("c1 без k2: файлів нема, текст є", run("c1")[0] is None and [m for m, _ in CALLS] == ["sendMessage"])
 check("u1 з k1 тільки: не шле u2", "PSD2" not in run("u1")[1])
 bot.owned_keys = lambda uid: {"k1"}
 
@@ -74,4 +78,18 @@ check("поганий блок 400", c.post("/kabinet-praktyka", json={"user_id"
 check("без ключа 403", c.post("/kabinet-praktyka", json={"user_id": 5}).status_code == 403)
 check("поганий ключ 403", c.post("/kabinet-praktyka", json={"user_id": 5}, headers={"X-Kabinet-Key": "no"}).status_code == 403)
 check("без user_id 400", c.post("/kabinet-praktyka", json={}, headers={"X-Kabinet-Key": "kk"}).status_code == 400)
+# виняток у фоновому потоці потрапляє в лог
+import logging, threading
+class H(logging.Handler):
+    def __init__(s): super().__init__(); s.r = []
+    def emit(s, r): s.r.append(r.getMessage())
+h = H(); bot.log.addHandler(h)
+def boom(*a, **k): raise RuntimeError("тест-збій")
+bot.send_practice = boom
+c.post("/kabinet-praktyka", json={"user_id": 5, "block": "u1"}, headers={"X-Kabinet-Key": "kk"})
+time.sleep = __import__("time").sleep
+import time as _t; _t.sleep(0.3)
+check("збій у потоці практики видно в лозі", any("збій uid=5" in m for m in h.r))
+t = threading.Thread(target=lambda: 1 / 0, name="tst"); t.start(); t.join(); _t.sleep(0.1)
+check("excepthook пише невідомі винятки потоків у лог", any("виняток у потоці tst" in m for m in h.r))
 sys.exit(1 if bad else 0)

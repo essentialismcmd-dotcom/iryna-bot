@@ -192,6 +192,9 @@ def _open():
     for attempt in range(2):
         try:
             kw = {"options": PG_OPTS} if USE_OPTS else {}
+            # сокет не висить вічно: перевірка живості та ліміт на непідтверджені дані
+            kw.update(keepalives=1, keepalives_idle=10, keepalives_interval=5,
+                      keepalives_count=3, tcp_user_timeout=15000)
             c = psycopg.connect(DSN, connect_timeout=8, autocommit=True,
                                 row_factory=dict_row, **kw)
             _down_until = 0.0
