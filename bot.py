@@ -1078,7 +1078,7 @@ def send_lesson(uid, ckey, idx):
         time.sleep(1.0)
     docs = []
     for kind, fid in files:
-        if kind in ("video", "animation", "video_note") or fid.startswith("BAAC") or kind == "document" and _looks_video(ckey, idx, fid):
+        if _is_video_item(ckey, idx, kind, fid):
             if send_video_or_file(uid, kind, fid, title or None):
                 sent += 1
             time.sleep(1.0)
@@ -1106,10 +1106,57 @@ def send_lesson(uid, ckey, idx):
     return sent > 0
 
 
+def _is_video_item(ckey, idx, kind, fid):
+    return kind in ("video", "animation", "video_note") or fid.startswith("BAAC")         or kind == "document" and _looks_video(ckey, idx, fid)
+
+
+def practice_items(keys):
+    """Матеріали для практики: усе, що в розділах курсу не відео (RAW, .xmp/.acr, PSD).
+    Повертає [(заголовок, [(kind, fid)])] лише для розділів, де щось є."""
+    out = []
+    for ckey in ("k1", "k2"):
+        if ckey not in keys:
+            continue
+        for i, (title, files) in enumerate(COURSE_SECTIONS.get(ckey) or []):
+            docs = [(k, f) for k, f in files if not _is_video_item(ckey, i, k, f)]
+            if docs:
+                out.append((title or ("Урок " + str(i + 1)), docs))
+    return out
+
+
+def send_practice(uid):
+    """Кнопка кабінету «Отримати в Telegram»: лише практика (без відео), лише покупцям.
+    Повертає скільки файлів пішло; None, якщо людина не має курсу."""
+    items = practice_items(owned_keys(uid))
+    if not items:
+        return None
+    send(uid, "Матеріали для практики. Відкривайте у Photoshop через Camera Raw "
+              "і повторюйте крок за кроком.")
+    sent = 0
+    for title, docs in items:
+        time.sleep(1.0)
+        send(uid, title)
+        for kind in ("document", "photo", "audio", "voice"):
+            ids = [f for k, f in docs if k == kind]
+            for i in range(0, len(ids), 10):
+                chunk = ids[i:i + 10]
+                time.sleep(1.0)
+                if len(chunk) == 1:
+                    if api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: chunk[0]}):
+                        sent += 1
+                else:
+                    sent += _send_album(uid, kind, chunk, "")
+    store.log_event(uid, "practice", {"sent": sent})
+    return sent
+
+
 def _looks_video(ckey, idx, fid):
     """Перший файл розділу з «Відео» у назві це відео, навіть якщо залите документом."""
     title = (COURSE_SECTIONS.get(ckey) or [("", [])])[idx][0].lower()
     return title.startswith("відео")
+
+
+log.info("практика: %s", [(t, len(d)) for t, d in practice_items({"k1", "k2"})])   # без id, лише лічильники
 
 
 def give_course(uid, key):
@@ -1559,6 +1606,33 @@ def kabinet_kupyty():
         return "error", 500
     finally:
         store.session_end()
+    return "ok"
+
+
+@app.post("/kabinet-praktyka")
+def kabinet_praktyka():
+    """Кнопка «Отримати в Telegram» у кабінеті (11.10): шлемо покупцеві в чат матеріали для
+    практики з file_id курсу. Ключ KABINET_KEY (X-Kabinet-Key); без ключа мертвий. Відповідь
+    одразу, відправка у фоні (альбоми з паузами); не покупцеві не шлемо нічого."""
+    key = kabinet_mist.KEY
+    got = request.headers.get("X-Kabinet-Key", "")
+    if not key or not hmac.compare_digest(got, key):
+        return "forbidden", 403
+    try:
+        uid = int((request.get_json(silent=True) or {})["user_id"])
+    except Exception:
+        return "bad", 400
+
+    def work():
+        store.session_begin()
+        try:
+            log.info("kabinet-praktyka: %s, пішло %s", uid, send_practice(uid))
+        except Exception:
+            log.exception("kabinet-praktyka")
+        finally:
+            store.session_end()
+
+    threading.Thread(target=work, daemon=True).start()
     return "ok"
 
 
