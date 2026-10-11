@@ -14,7 +14,7 @@
 Правило: у боті лишається те, що працює само, а не те, що вимагає навчання.
 """
 
-import os, re, json, time, html, logging, threading, hmac
+import os, re, json, time, html, logging, threading, hmac, hashlib
 import requests
 from urllib.parse import urlencode
 from flask import Flask, request
@@ -475,14 +475,24 @@ def api_raw(method, **params):
     except Exception as e:
         return {"ok": False, "description": str(e)}
     finally:
-        _tm.tg_s = getattr(_tm, "tg_s", 0.0) + time.time() - t0
+        dt = time.time() - t0
+        _tm.tg_s = getattr(_tm, "tg_s", 0.0) + dt
         _tm.tg_n = getattr(_tm, "tg_n", 0) + 1
+        tr = getattr(_tm, "trace", None)
+        if tr is not None:
+            tr.append("%s %.2fс" % (method, dt))
+            log.info("TRACE upd=%s +%.2fс виклик %s %.2fс", getattr(_tm, "upd", "?"),
+                     time.time() - getattr(_tm, "t0", t0), method, dt)
 
 
 def bg(fn, *args, **kw):
     """Виконати в фоновому потоці, щоб перша відповідь людині не чекала на запис у
     базу і сповіщення персоналу. Потік має власне зʼєднання з базою."""
+    upd0, t00 = getattr(_tm, "upd", None), getattr(_tm, "t0", None)
+
     def run():
+        _tm.upd, _tm.t0, _tm.trace = upd0, t00 or time.time(), []
+        tb = time.time()
         store.session_begin()
         try:
             fn(*args, **kw)
@@ -490,6 +500,9 @@ def bg(fn, *args, **kw):
             log.warning("bg %s: %s", getattr(fn, "__name__", fn), e)
         finally:
             store.session_end()
+            log.info("TRACE upd=%s фон %s: старт +%.2fс, тривав %.2fс, виклики: %s", upd0,
+                     getattr(fn, "__name__", fn), tb - (t00 or tb), time.time() - tb,
+                     "; ".join(_tm.trace) or "-")
     t = threading.Thread(target=run, daemon=True)
     t.start()
     return t
@@ -544,6 +557,10 @@ def send_card_file(chat_id, path, text, markup=None):
     return send(chat_id, text, markup)
 
 
+def _pic_key(pic):
+    return "pic:url:" + hashlib.md5(pic.encode()).hexdigest()[:16]
+
+
 def send_card(chat_id, pic, text, markup=None):
     """
     Картка з підписом: фото + той самий текст і ті самі кнопки. Без картинки,
@@ -551,8 +568,18 @@ def send_card(chat_id, pic, text, markup=None):
     іде звичайний send(), тобто лійка не стає ніколи.
     """
     if pic and len(text) <= CAPTION_MAX:
-        r = api("sendPhoto", chat_id=chat_id, photo=pic, caption=text, reply_markup=markup)
+        # URL-картинку Telegram щоразу тягне сам (повільно); після першого разу шлемо кешований file_id
+        url = pic.startswith("http")
+        fid = store.kv_get(_pic_key(pic)) if url else None
+        r = api("sendPhoto", chat_id=chat_id, photo=fid or pic, caption=text, reply_markup=markup)
+        if not r and fid:
+            r = api("sendPhoto", chat_id=chat_id, photo=pic, caption=text, reply_markup=markup)
+            fid = None
         if r:
+            if url and not fid:
+                ph = r.get("photo") or []
+                if ph:
+                    bg(store.kv_set, _pic_key(pic), ph[-1]["file_id"])
             return r
     return send(chat_id, text, markup)
 
@@ -1546,9 +1573,16 @@ def setup():
 @app.get("/hookinfo/" + SECRET)
 def hookinfo():
     i = api("getWebhookInfo") or {}
-    return "<pre>url: %s\nу черзі: %s\nостання помилка: %s</pre>" % (
-        i.get("url") or "ПОРОЖНЬО", i.get("pending_update_count", "?"),
-        i.get("last_error_message") or "немає")
+    d = i.get("last_error_date")
+    rows = [
+        "url: %s" % (i.get("url") or "ПОРОЖНЬО"),
+        "у черзі: %s" % i.get("pending_update_count", "?"),
+        "остання помилка: %s" % (i.get("last_error_message") or "немає"),
+        "дата помилки (UTC): %s" % (time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(d)) if d else "немає"),
+        "max_connections: %s" % i.get("max_connections", "?"),
+        "ip: %s" % i.get("ip_address", "?"),
+    ]
+    return "<pre>" + "\n".join(rows) + "</pre>"
 
 
 STATS_TAGS_MAX = 30       # міток у відповіді, решта одним рядком
@@ -2001,6 +2035,13 @@ def hook():
     upd = request.get_json(silent=True) or {}
     t_hook = time.time()
     _tm.tg_s, _tm.tg_n = 0.0, 0
+    _tm.t0, _tm.upd, _tm.trace = t_hook, upd.get("update_id"), []
+    _mm = upd.get("message") or (upd.get("callback_query") or {}).get("message") or {}
+    log.info("TRACE upd=%s вхід %s лаг_доставки=%s",
+             upd.get("update_id"),
+             "cb:" + str((upd.get("callback_query") or {}).get("data"))[:20] if "callback_query" in upd
+             else "msg:" + str((upd.get("message") or {}).get("text") or "")[:20],
+             ("%.1fс" % (t_hook - _mm["date"])) if _mm.get("date") and "message" in upd else "н/д")
     store.timing_reset()
     store.session_begin()
     try:
@@ -2083,16 +2124,17 @@ def hook():
                 # Слово Yaro 08.10: людина з kurs/kurs10 це людина ретуші; явний вхід показує
                 # картку курсу, а простий /start і повернення після видалення чату дають магніт ретуші.
                 if src in TAGS_STICKY:
-                    store.kv_set("tag:" + str(uid), "retush" if src in ("kurs", "kurs10") else src)
+                    _stick = "retush" if src in ("kurs", "kurs10") else src
+                    bg(store.kv_set, "tag:" + str(uid), _stick)
                 elif not src:
                     src = store.kv_get("tag:" + str(uid)) or ""
                     if src in ("kurs", "kurs10"):   # старі записи до 08.10
                         src = "retush"
-                rec = store.touch_user(u, source_tag=src) or {}
-                # лог і сповіщення персоналу не затримують перший екран людини
-                def _start_after(uid=uid, u=u, src=src, new=rec.get("is_new", True)):
+                # запис людини, лог і сповіщення персоналу не затримують перший екран
+                def _start_after(uid=uid, u=u, src=src):
+                    rec = store.touch_user(u, source_tag=src) or {}
                     store.log_event(uid, "start", {"tag": src})
-                    if new:
+                    if rec.get("is_new", True):
                         notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"),
                                give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None)
                 bg(_start_after)
@@ -2278,6 +2320,8 @@ def hook():
     finally:
         store.session_end()
         total = time.time() - t_hook
+        if getattr(_tm, "trace", None):
+            log.info("TRACE upd=%s кінець %.2fс: %s", _tm.upd, total, "; ".join(_tm.trace))
         if total > 0.8:
             kind = ("cb:" + str((upd.get("callback_query") or {}).get("data"))[:20]
                     if "callback_query" in upd else
