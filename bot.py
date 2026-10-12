@@ -17,6 +17,7 @@
 import os, re, json, time, html, logging, threading, hmac, hashlib
 import requests
 from urllib.parse import urlencode
+from datetime import datetime, timezone
 from flask import Flask, request
 
 import store
@@ -864,8 +865,21 @@ RETUSH_MAGNET_HELLO = (
     "Привіт, це Ірина Руль ♥️\n\n"
     "Тут мій урок «Чистка шкіри без втрати текстури» з курсу ретуші, цілком, 12 хвилин.\n"
     "Прибираємо дефекти, шкіра лишається живою, без «пластику».\n\n"
-    "Тисніть кнопку, урок відкриється в моєму кабінеті курсів."
+    "Тисніть кнопку, урок відкриється в моєму кабінеті курсів.\n\n"
+    "А після уроку на вас чекає маленький подарунок від мене 🎁"
 )
+GIFT_DONE = (
+    "Ви додивились♥️ Як і обіцяла, маленький подарунок: «Три схеми світла з одного сетапу», "
+    "три різні картинки за одну зйомку без докупки обладнання. Файл нижче\n\n"
+    "Напишіть, як вам урок? Мені важливо♥️"
+)
+GIFT_LATE = (
+    "Урок чекає на вас♥️ 12 хвилин, коли буде зручно. А подарунок віддаю вже зараз: "
+    "«Три схеми світла з одного сетапу», файл нижче"
+)
+GIFT_FROM_H, GIFT_TO_H = 10, 20            # лише денні години за Києвом
+GIFT_AFTER_H = 24                           # через скільки годин після входу без done
+GIFT_SINCE = os.getenv("GIFT_SINCE", "2026-10-12T12:00:00+00:00")   # раніше зайшлі не чіпаємо
 RETUSH_LESSON_PART = "1.5"
 
 
@@ -968,6 +982,72 @@ def give_magnet(chat_id):
         return
     text = AFTER_NOPAY if not GUIDE_SALE else (AFTER if courses_sale() else AFTER_NOC)
     send_card(chat_id, CARD_MAGNIT, text, after_kb())
+
+
+def give_gift(uid, text):
+    """Подарунок людині ретуші: текст, той самий PDF магніту (з кнопкою каналу), позначка магніту.
+    Раз назавжди: заявка в kv (атомарна), другий виклик нічого не шле. True = віддали."""
+    if not store.kv_claim("gift:" + str(uid)):
+        return False
+    u = store.get_user(uid) or {}
+    if u.get("got_magnet_at"):
+        return False                      # схеми вже видані кнопкою
+    ref = magnet_ref()
+    if not ref:
+        log.warning("gift: нема файла магніту для %s", uid)
+        return False
+    send(uid, text)
+    kb = {"inline_keyboard": channel_rows()} if CHANNEL_URL else None
+    ok = bool(api("sendDocument", retry=True, chat_id=uid, document=ref, reply_markup=kb))
+    if ok:
+        store.mark_magnet(uid)
+        store.log_event(uid, "magnet", {"via": "gift"})
+        kabinet_mist.push_user(uid)
+    else:
+        log.warning("gift: PDF не пішов до %s", uid)
+    return ok
+
+
+def kyiv_hour(now=None):
+    now = now or datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        return now.astimezone(ZoneInfo("Europe/Kyiv")).hour
+    except Exception:
+        return (now.hour + 3) % 24      # жовтень до 25.10: UTC+3
+
+
+def gift_late_run(now=None):
+    """Раз на десять хвилин (лише 10:00-20:00 Київ): люди з міткою retush*, що зайшли 24+ год тому,
+    не додивились (нема done) і не мають схем чи покупок, отримують подарунок один раз."""
+    now = now or datetime.now(timezone.utc)
+    if not (GIFT_FROM_H <= kyiv_hour(now) < GIFT_TO_H):
+        return 0
+    skip = [i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i]
+    n = 0
+    for uid in store.gift_candidates(GIFT_SINCE, GIFT_AFTER_H, skip) or []:
+        if store.kv_get("kp:%s:%s:done" % (uid, RETUSH_LESSON_PART)):
+            continue                       # додивилась: подарунок уже пішов або піде з події
+        if owned_keys(uid, real=True):
+            continue
+        try:
+            if give_gift(uid, GIFT_LATE):
+                n += 1
+        except Exception:
+            log.exception("gift_late %s", uid)
+    return n
+
+
+def gift_loop():
+    STOP.wait(120)
+    while not STOP.wait(600):
+        store.session_begin()
+        try:
+            gift_late_run()
+        except Exception:
+            log.exception("gift_loop")
+        finally:
+            store.session_end()
 
 
 def give_guide(uid, tier):
@@ -1845,6 +1925,12 @@ def kabinet_podiia():
             extra = " (%s хв)" % int(mins) if isinstance(mins, (int, float)) and mins > 0 else ""
             text = "%s (%s, id %s) додивилась урок %s%s" % (name, tag, uid, lesson, extra)
         notify(text)
+        if kind == "done" and lesson == RETUSH_LESSON_PART and uid not in staff_ids():
+            try:
+                if give_gift(uid, GIFT_DONE):
+                    notify("Подарунок (три схеми світла) після уроку %s: %s" % (lesson, name))
+            except Exception:
+                log.exception("gift_done %s", uid)
     except Exception:
         log.exception("kabinet-podiia")
         return "error", 500
@@ -2972,6 +3058,7 @@ if os.getenv("NO_THREADS", "").strip() != "1":
     _hook_sigterm()
     threading.Thread(target=ensure_webhook, daemon=True).start()
     threading.Thread(target=mono_poll, daemon=True).start()
+    threading.Thread(target=gift_loop, daemon=True, name="gift").start()
     kabinet_mist.start()   # звірка з кабінетом раз на годину; без змінних нічого
 
 

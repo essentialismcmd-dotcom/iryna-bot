@@ -164,5 +164,57 @@ VYKLYKY.clear(); TOUCH.clear()
 msg("/start retush_", uid=882)
 ok("retush_ без імені не партнер", TOUCH == ["retush_"], str(TOUCH))
 
+# подарунок «Три схеми світла»
+os_key = bot.kabinet_mist.KEY
+CLAIMED = set()
+bot.store.kv_claim = lambda k: (k not in CLAIMED, CLAIMED.add(k))[0]
+MAG = {"got": {}}
+bot.store.get_user = lambda uid: {"user_id": uid, "got_magnet_at": MAG["got"].get(uid)}
+bot.store.mark_magnet = lambda uid: MAG["got"].__setitem__(uid, "now")
+bot.store.log_event = lambda uid, kind, data=None: None
+bot.magnet_ref = lambda: "MAGNETFILE"
+ok("Подарунок: у привітанні магніту ретуші рядок про подарунок",
+   bot.RETUSH_MAGNET_HELLO.rstrip().endswith("А після уроку на вас чекає маленький подарунок від мене 🎁"))
+def podiia(uid, kind, lesson):
+    return app.post("/kabinet-podiia", headers={"X-Kabinet-Key": "k"},
+                    json={"user_id": uid, "kind": kind, "lesson": lesson})
+bot.store.kv_get = lambda k, d=None: KV.get(k, d)
+VYKLYKY.clear()
+podiia(900, "start", "1.5")
+ok("Подарунок: start подія не шле подарунка", not sent("sendDocument", 900))
+podiia(900, "done", "1.4")
+ok("Подарунок: done іншого уроку не шле", not sent("sendDocument", 900))
+podiia(900, "done", "1.5")
+d = sent("sendDocument", 900)
+ok("Подарунок: done 1.5 шле PDF магніту з кнопкою каналу",
+   d and d[0]["document"] == "MAGNETFILE" and "t.me/test_kanal" in str(d[0].get("reply_markup")), str(d))
+ok("Подарунок: текст дослівно", any(p.get("text") == bot.GIFT_DONE for p in sent(chat=900)))
+ok("Подарунок: GIFT_DONE дослівно від Yaro",
+   bot.GIFT_DONE == "Ви додивились♥️ Як і обіцяла, маленький подарунок: «Три схеми світла з одного сетапу», три різні картинки за одну зйомку без докупки обладнання. Файл нижче" + chr(10) * 2 + "Напишіть, як вам урок? Мені важливо♥️")
+VYKLYKY.clear()
+KV.pop("kp:900:1.5:done", None)
+podiia(900, "done", "1.5")
+ok("Подарунок: вдруге не шлеться", not sent("sendDocument", 900))
+# людина, що вже взяла магніт
+MAG["got"][901] = "x"; VYKLYKY.clear()
+podiia(901, "done", "1.5")
+ok("Подарунок: тим, хто має магніт, не шлеться", not sent("sendDocument", 901))
+# підстраховка 24 год
+import datetime as _dt
+CAND = [910, 911, 912, 913]
+bot.store.gift_candidates = lambda since, h, skip: [c for c in CAND if c not in skip]
+KV["kp:911:1.5:done"] = "1"
+bot.owned_keys = (lambda orig: (lambda uid, real=False: {"t1"} if uid == 912 and real else orig(uid, real)))(bot.owned_keys)
+night = _dt.datetime(2026, 10, 12, 21, 30, tzinfo=_dt.timezone.utc)      # 00:30 Київ
+day = _dt.datetime(2026, 10, 12, 9, 0, tzinfo=_dt.timezone.utc)          # 12:00 Київ
+VYKLYKY.clear()
+ok("Підстраховка: вночі не шле", bot.gift_late_run(night) == 0 and not sent("sendDocument"))
+n = bot.gift_late_run(day)
+docs = [p["chat_id"] for p in sent("sendDocument") if p.get("document") == "MAGNETFILE"]
+ok("Підстраховка: вдень шле лише без done і без покупок (910, 913; 911 done, 912 купила)", n == 2 and docs == [910, 913], str(docs))
+ok("Підстраховка: текст", any(p.get("text") == bot.GIFT_LATE for p in sent(chat=910)))
+VYKLYKY.clear()
+ok("Підстраховка: вдруге не шле", bot.gift_late_run(day) == 0 and not sent("sendDocument"))
+
 print("\nПАДІННЯ: %d" % len(PADINNIA) if PADINNIA else "\nВсе зелене")
 sys.exit(1 if PADINNIA else 0)
