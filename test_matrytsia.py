@@ -162,11 +162,13 @@ for t in ("inst", "chat"):
 for tag in ("mk", "guide"):
     p = new(); r = p.say("/start " + tag); check_basic(tag, r)
     r2 = p.say("/start"); check_basic(tag + " простий", r2)
-    ok(tag + ": простий /start повторює мітку", store.kv_get("tag:" + str(p.uid)) == tag)
+    ok(tag + ": мітка лишається в аналітиці", store.kv_get("tag:" + str(p.uid)) == tag)
 p = new(); p.say("/start mk"); r = p.say("/start")
-ok("mk -> простий /start: картка МК, не магніт", r and "майстер-клас" in r[0]["text"].lower() and not any(b.get("callback_data") == "magnet" for b in r[0]["btns"]))
+ok("mk -> простий /start: стартовий екран з магнітом, не картка МК", r and any(b.get("callback_data") == "magnet" for b in r[0]["btns"]) and "майстер-клас" not in r[0]["text"].lower(), r and r[0]["text"][:60])
 p = new(); p.say("/start guide"); r = p.say("/start")
-ok("guide -> простий /start: нема магніта", not any(b.get("callback_data") == "magnet" for m in r for b in m["btns"]))
+ok("guide -> простий /start: стартовий екран з магнітом", any(b.get("callback_data") == "magnet" for m in r for b in m["btns"]))
+adm0 = P(1); adm0.say("/start mk"); r = adm0.say("/start")
+ok("адмін: mk -> простий /start теж стартовий екран", any(b.get("callback_data") == "magnet" for m in r for b in m["btns"]) and not any("майстер-клас" in m["text"].lower() for m in r), r and r[0]["text"][:60])
 
 p = new(); r = p.say("/kurs"); ok("/kurs нова: картка курсу 3300/2970", has_course_card(r)); check_basic("/kurs", r)
 p = new(); r = p.say("КУРС"); ok("слово КУРС нова: картка курсу", has_course_card(r) and not has_light(r), r and r[0]["text"][:60])

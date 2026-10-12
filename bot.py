@@ -106,6 +106,15 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("bot")
 
+
+def _thread_excepthook(args):
+    """Будь-який виняток у фоновому потоці потрапляє в лог (раніше йшов лише в stderr)."""
+    log.error("виняток у потоці %s", getattr(args.thread, "name", "?"),
+              exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+
+threading.excepthook = _thread_excepthook
+
 HELLO = (
     "Привіт, це Ірина Руль ♥️\n\n"
     "Тут моя добірка «Три схеми світла з одного сетапу».\n"
@@ -1180,8 +1189,14 @@ def send_practice(uid, block=None):
     Швидко: перше повідомлення одразу, без пауз, документи альбомами по 10, заголовок
     розділу це підпис першого файла альбому; на 429 api(retry=True) чекає retry_after."""
     keys = owned_keys(uid)
+    if uid == ADMIN_ID or uid in NOTIFY_IDS:
+        keys = set(keys) | {"t1", "k1", "k2"}      # адмін отримує будь-який блок
     items = block_items(block, keys) if block else practice_items(keys)
     if not items:
+        why = ("файлів цього блоку в курсі нема" if keys else "немає доступу до курсу")
+        log.warning("практика %s: блок %s нічого не шлемо (%s; ключі %s)", uid, block or "all", why, sorted(keys))
+        send(uid, ("Не знайшла файлів для цього блоку. Напишіть мені сюди, і я надішлю вручну ♥️" if keys
+                   else "Ці файли відкриваються після покупки курсу. Якщо ви вже купили, напишіть мені сюди ♥️"))
         return None
     total = sum(len(d) for _, d in items)
     t0 = time.time()
@@ -1204,6 +1219,9 @@ def send_practice(uid, block=None):
                     sent += _send_album(uid, kind, chunk, cap or "", pause=0)
                 cap = ""
     log.info("практика %s: %s з %s файлів за %.1fс", uid, sent, total, time.time() - t0)
+    if sent == 0:
+        log.warning("практика %s: жоден файл не пішов (блок %s)", uid, block or "all")
+        send(uid, "Не вдалося надіслати файли. Спробуйте ще раз за хвилину або напишіть мені сюди ♥️")
     store.log_event(uid, "practice", {"sent": sent, "block": block or "all"})
     return sent
 
@@ -1685,12 +1703,19 @@ def kabinet_praktyka():
     except Exception:
         return "bad", 400
 
+    log.info("kabinet-praktyka: запит uid=%s блок %s", uid, block or "all")
+
     def work():
         store.session_begin()
         try:
+            log.info("kabinet-praktyka: старт uid=%s", uid)
             log.info("kabinet-praktyka: %s блок %s, пішло %s", uid, block or "all", send_practice(uid, block))
-        except Exception:
-            log.exception("kabinet-praktyka")
+        except BaseException:
+            log.exception("kabinet-praktyka: збій uid=%s", uid)
+            try:
+                send(uid, "Не вдалося надіслати файли. Спробуйте ще раз за хвилину ♥️")
+            except Exception:
+                pass
         finally:
             store.session_end()
 
@@ -2224,6 +2249,7 @@ def hook():
              ("%.1fс" % (t_hook - _mm["date"])) if _mm.get("date") and "message" in upd else "н/д")
     store.timing_reset()
     store.session_begin()
+    _inflight[threading.get_ident()] = (upd.get("update_id"), t_hook, False)
     try:
         if "message" in upd:
             m = upd["message"]
@@ -2299,6 +2325,7 @@ def hook():
             if text.startswith("/start"):
                 parts = text.split(None, 1)
                 src = parts[1].strip()[:64] if len(parts) > 1 else ""
+                analytics_tag = None
                 # 08.10: людина з лінки (retush, kurs10...) тисне просто /start і
                 # отримувала світло. Повторюємо її останню мітку.
                 # Слово Yaro 08.10: людина з kurs/kurs10 це людина ретуші; явний вхід показує
@@ -2307,13 +2334,18 @@ def hook():
                     _stick = "retush" if src in ("kurs", "kurs10") else src
                     bg(store.kv_set, "tag:" + str(uid), _stick)
                 elif not src:
-                    src = store.kv_get("tag:" + str(uid)) or ""
-                    if src in ("kurs", "kurs10"):   # старі записи до 08.10
+                    # 11.10 (слово Yaro): голий /start дає стартовий екран. Збережена мітка
+                    # mk/guide лише в аналітику (раніше підставляла картку МК); людина ретуші
+                    # (08.10) лишає магніт ретуші.
+                    _saved = store.kv_get("tag:" + str(uid)) or ""
+                    if _saved in ("kurs", "kurs10", "retush"):
                         src = "retush"
+                    analytics_tag = _saved
                 # запис людини, лог і сповіщення персоналу не затримують перший екран
-                def _start_after(uid=uid, u=u, src=src):
-                    rec = store.touch_user(u, source_tag=src) or {}
-                    store.log_event(uid, "start", {"tag": src})
+                def _start_after(uid=uid, u=u, src=src, atag=analytics_tag):
+                    _t = src or atag or ""
+                    rec = store.touch_user(u, source_tag=_t) or {}
+                    store.log_event(uid, "start", {"tag": _t})
                     if rec.get("is_new", True):
                         notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"),
                                give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None)
@@ -2498,6 +2530,7 @@ def hook():
     except Exception as e:
         log.exception("update failed: %s", e)
     finally:
+        _inflight.pop(threading.get_ident(), None)
         store.session_end()
         total = time.time() - t_hook
         if getattr(_tm, "trace", None):
@@ -2558,52 +2591,125 @@ def set_descriptions():
 USE_POLLING = os.getenv("USE_POLLING", "1").strip() != "0"   # 11.10: webhook Telegram->Render зависав на ~60 с
 
 
-def poll_loop():
+_poll_beat = [time.time()]      # серцебиття polling: оновлюється після кожного getUpdates
+_poll_gen = [0]                 # покоління потоку: старий потік після перезапуску сам виходить
+_poll_offset = [None]           # підтверджений offset живе тут, щоб новий потік не губив і не повторював
+_seen_ids = []                  # останні оброблені update_id (дедуплікація при повторній видачі)
+_inflight = {}                  # tid -> (update_id, час старту, чи вже скинули стек): для діагностики зависань
+
+
+def _dump_stuck(limit=25):
+    """Стек потоків, що тримають апдейт довше за limit секунд (одноразово на апдейт)."""
+    import sys, traceback
+    now = time.time()
+    frames = sys._current_frames()
+    for tid, rec in list(_inflight.items()):
+        uid_, t0, dumped = rec
+        if dumped or now - t0 < limit:
+            continue
+        _inflight[tid] = (uid_, t0, True)
+        fr = frames.get(tid)
+        log.error("ЗАВИС апдейт %s вже %.0fс, стек:\n%s", uid_, now - t0,
+                  "".join(traceback.format_stack(fr)) if fr else "потоку нема")
+
+
+def poll_loop(gen=None):
     """
     Long polling замість вебхука: Telegram віддає апдейт одразу, без його таймаутів і пауз
     після помилок доставки (11.10 о 16:28 вебхук мовчав ~60 с: «Read timeout expired»).
     Апдейт передається тому самому обробнику hook() локальним запитом, логіка не змінена.
+    12.10: offset підтверджуємо лише ПІСЛЯ обробки пачки (раніше одразу після отримання, і
+    апдейти в черзі пулу гинули при рестарті); дубль update_id пропускаємо.
     """
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, wait
+    if gen is None:
+        _poll_gen[0] += 1
+        gen = _poll_gen[0]
     pool = ThreadPoolExecutor(max_workers=3)
     url = "http://127.0.0.1:" + os.getenv("PORT", "10000") + "/" + SECRET
 
     def deliver(upd):
+        uid_ = upd.get("update_id")
         try:
-            requests.post(url, json=upd, timeout=90)
+            requests.post(url, json=upd, timeout=60)
         except requests.exceptions.ConnectionError:
             # сервер уже закрив прийом (деплой): віддаємо апдейт обробнику напряму, не губимо
             try:
                 app.test_client().post("/" + SECRET, json=upd)
             except Exception as e:
-                log.warning("poll: апдейт %s не передано: %s", upd.get("update_id"), e)
+                log.warning("poll: апдейт %s не передано: %s", uid_, e)
         except Exception as e:
-            log.warning("poll: передача апдейту %s: %s", upd.get("update_id"), e)
+            log.warning("poll: передача апдейту %s: %s", uid_, e)
 
-    offset = None
-    while not STOP.is_set():
+    while not STOP.is_set() and gen == _poll_gen[0]:
         try:
             j = requests.post(API + "/getUpdates", timeout=65, json={
-                "offset": offset, "timeout": 50,
+                "offset": _poll_offset[0], "timeout": 50,
                 "allowed_updates": ["message", "callback_query"]}).json()
+            _poll_beat[0] = time.time()
             if not j.get("ok"):
-                log.warning("getUpdates: %s", j.get("description"))
-                STOP.wait(2)
+                if j.get("error_code") == 409 or "Conflict" in str(j.get("description")):
+                    log.warning("getUpdates 409 Conflict (другий інстанс на деплої?): %s", j.get("description"))
+                else:
+                    log.warning("getUpdates: %s", j.get("description"))
+                STOP.wait(3)
                 continue
-            for upd in j.get("result") or []:
-                offset = upd["update_id"] + 1
+            batch = [u for u in (j.get("result") or []) if u["update_id"] not in _seen_ids]
+            if j.get("result"):
+                log.info("getUpdates: %s апдейтів, id %s..%s, нових %s", len(j["result"]),
+                         j["result"][0]["update_id"], j["result"][-1]["update_id"], len(batch))
+            futs = []
+            for upd in batch:
                 m = upd.get("message") or {}
                 if m.get("date"):
                     log.info("TRACE upd=%s отримано polling, лаг від Telegram %.1fс",
                              upd["update_id"], time.time() - m["date"])
-                pool.submit(deliver, upd)
+                futs.append(pool.submit(deliver, upd))
+            done, not_done = wait(futs, timeout=70)
+            if not_done:
+                log.error("poll: %s апдейтів не оброблено за 70с, йдемо далі", len(not_done))
+            for upd in batch:
+                _seen_ids.append(upd["update_id"])
+            del _seen_ids[:-200]
+            if j.get("result"):
+                _poll_offset[0] = j["result"][-1]["update_id"] + 1    # підтвердження ПІСЛЯ обробки
         except Exception as e:
             log.warning("poll: %s", e)
             STOP.wait(2)
-    # SIGTERM: нового getUpdates не робимо (новий інстанс одразу бере polling без Conflict),
-    # а вже отримані апдейти дообробляємо; непідтверджені лишаються в Telegram для нового.
-    pool.shutdown(wait=True)
-    log.info("poll: зупинено (SIGTERM)")
+    if STOP.is_set():
+        # SIGTERM: нового getUpdates не робимо; вже взяті апдейти дообробляємо,
+        # непідтверджені лишаються в Telegram для нового інстансу.
+        pool.shutdown(wait=True)
+        log.info("poll: зупинено (SIGTERM)")
+    else:
+        pool.shutdown(wait=False)
+        log.info("poll: потік покоління %s завершено", gen)
+
+
+def poll_supervisor():
+    """Watchdog: polling без серцебиття 150 с (потік помер чи завис) запускаємо наново;
+    заодно скидає в лог стеки зависших обробників апдейтів."""
+    def runner(gen):
+        while not STOP.is_set() and gen == _poll_gen[0]:
+            try:
+                poll_loop(gen)
+            except BaseException:
+                log.exception("poll_loop впав, перезапуск")
+                STOP.wait(2)
+    _poll_gen[0] += 1
+    threading.Thread(target=runner, args=(_poll_gen[0],), daemon=True, name="poll").start()
+    _poll_beat[0] = time.time()
+    while not STOP.wait(15):
+        try:
+            _dump_stuck()
+            age = time.time() - _poll_beat[0]
+            if age > 150:
+                log.error("poll: немає серцебиття %.0fс, перезапускаю потік", age)
+                _poll_gen[0] += 1
+                _poll_beat[0] = time.time()
+                threading.Thread(target=runner, args=(_poll_gen[0],), daemon=True, name="poll").start()
+        except Exception:
+            log.exception("poll_supervisor")
 
 
 STOP = threading.Event()
@@ -2631,7 +2737,7 @@ def ensure_webhook():
         if USE_POLLING:
             r = api("deleteWebhook", drop_pending_updates=False)
             log.info("вебхук знято, працюємо через getUpdates: %s", r)
-            threading.Thread(target=poll_loop, daemon=True).start()
+            threading.Thread(target=poll_supervisor, daemon=True, name="poll-supervisor").start()
         else:
             r = api("setWebhook", url=BASE_URL + "/" + SECRET,
                     allowed_updates=["message", "callback_query"])
