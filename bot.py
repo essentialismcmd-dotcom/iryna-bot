@@ -130,7 +130,7 @@ GUIDE_HELLO = (
     "Привіт, це Ірина Руль ♥️\n\n"
     "Ви прийшли з мого гайда «Світло», отже всі тринадцять схем у вас уже є.\n\n"
     "Наступний крок: світло поставили, далі кадр треба довести в ретуші. "
-    "У мене два записані курси, підберу під ваш рівень."
+    "Покажу мій курс ретуші."
 )
 AFTER = (
     "Готово, файл вище ♥️\n\n"
@@ -187,19 +187,29 @@ COURSE_DELIVERED = (
     "з чату на компʼютер.\n\n"
     "Питання по уроках пишіть прямо сюди, відповідаю."
 )
-LESSON_DONE = ("Це весь урок ♥️ Відео можна дивитись прямо тут, практику відкривайте "
-               "у Photoshop через Camera Raw і повторюйте за мною. Питання пишіть сюди.")
+LESSON_DONE = ("Це весь урок ♥️ Відео дивіться в моєму кабінеті курсів (кнопка вище), "
+               "практику відкривайте у Photoshop через Camera Raw і повторюйте за мною. "
+               "Питання пишіть сюди.")
+LESSON_DONE_CHAT = ("Це весь урок ♥️ Практику відкривайте у Photoshop через Camera Raw "
+                    "і повторюйте за мною. Питання пишіть сюди.")
+LESSON_CAB = ("{title}\n\n"
+              "Відео цього уроку в моєму кабінеті курсів: там плеєр, прогрес "
+              "і зручно повертатись. Практику надішлю сюди. Тисніть кнопку.")
 MOI_TEXT = "Ваші матеріали ♥️ Тисніть, і надішлю ще раз."
-MOI_EMPTY = ("Поки нічого не куплено ♥️ Безкоштовні три схеми світла по кнопці нижче, "
-             "гайд і курс ретуші там само.")
+MOI_EMPTY = ("Поки нічого не куплено ♥️ Безкоштовні три схеми світла і курс ретуші "
+             "по кнопках нижче.")
+COURSE_OWNED = "Курс ретуші вже ваш ♥️ Усе куплене зібране тут, тисніть і дивіться."
 NEXT_AFTER_GUIDE = (
     "І ще одне ♥️ Світло поставили, далі кадр треба довести в ретуші.\n"
-    "У мене два записані курси, підберу під ваш рівень."
+    "Покажу мій курс ретуші."
 )
 BROKEN_FILE_TEXT = ("Щось пішло не так з файлом ♥️ "
                     "Уже розбираюсь, надішлю сюди за кілька хвилин.")
 CLIENT_TEXT = ("Прийняла ♥️ Якщо це про зйомку, напишіть в інстаграм, "
                "там відповідаю швидше: @iryna_rul_photographer")
+
+CLIENT_TEXT_BUYER = ("Прийняла ♥️ Ваші матеріали нижче, тисніть і дивіться. "
+                     "Якщо це про зйомку, напишіть в інстаграм: @iryna_rul_photographer")
 
 # Закріп каналу обіцяє: «напишіть боту слово СВІТЛО, МК або ЗЙОМКА». До 25.09
 # бот на ці слова відповідав «напишіть в інстаграм», тобто обіцянка не
@@ -474,9 +484,21 @@ def pname(key):
 _tm = threading.local()   # таймінг Telegram API в межах одного вебхука
 
 
+# Постійна кнопка «Мої матеріали» (12.10, правка Б): стоїть під полем вводу в приватному чаті
+# людини. Додаємо до повідомлень БЕЗ власної клавіатури, лише тому, хто зараз пише боту
+# (_tm.person), і не Ірі. Сповіщення персоналу (інший chat_id) її не отримують.
+PERSIST_KB = {"keyboard": [[{"text": "Мої матеріали"}]], "resize_keyboard": True,
+              "is_persistent": True}
+PERSIST_METHODS = ("sendMessage", "sendPhoto", "sendDocument", "sendVideo")
+
+
 def api_raw(method, **params):
     """Сира відповідь Telegram: {ok, result | description, error_code}."""
     params = {k: v for k, v in params.items() if v is not None}
+    if (method in PERSIST_METHODS and "reply_markup" not in params
+            and params.get("chat_id") is not None
+            and params.get("chat_id") == getattr(_tm, "person", None)):
+        params["reply_markup"] = PERSIST_KB
     t0 = time.time()
     try:
         r = requests.post(API + "/" + method, json=params, timeout=20)
@@ -498,9 +520,11 @@ def bg(fn, *args, **kw):
     """Виконати в фоновому потоці, щоб перша відповідь людині не чекала на запис у
     базу і сповіщення персоналу. Потік має власне зʼєднання з базою."""
     upd0, t00 = getattr(_tm, "upd", None), getattr(_tm, "t0", None)
+    person0 = getattr(_tm, "person", None)
 
     def run():
         _tm.upd, _tm.t0, _tm.trace = upd0, t00 or time.time(), []
+        _tm.person = person0
         tb = time.time()
         store.session_begin()
         try:
@@ -789,8 +813,9 @@ def pick_product(chat_id, uid, u, data):
                  if t["product"] == "course" else
                  "\n\nПісля оплати файл прийде сюди, зазвичай протягом кількох хвилин.")
     send(chat_id, body, pay_kb(data, uid))
-    notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
-           give_kb(uid, data))
+    if lead_once(uid, "zayavka:" + data):
+        notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
+               give_kb(uid, data))
 
 
 def mk_kb():
@@ -807,7 +832,9 @@ def empty_kb(uid=None):
     if course_person(uid):
         return {"inline_keyboard": [[{"text": "Курс ретуші", "callback_data": "retush"}]] + channel_rows()}
     rows = [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]
-    if not courses_sale():
+    if courses_sale():
+        rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
+    else:
         rows += guide_rows()
     return {"inline_keyboard": rows + channel_rows()}
 
@@ -1024,9 +1051,10 @@ def _send_album(uid, kind, items, caption, pause=1.0):
     return n
 
 
-def owned_keys(uid):
-    """Що людина купила: ключі продуктів з оплачених покупок. Адмін бачить усе."""
-    if uid in NOTIFY_IDS:
+def owned_keys(uid, real=False):
+    """Що людина купила: ключі продуктів з оплачених покупок. Адмін бачить усе
+    (real=True: лише справжні покупки, без привілею адміна)."""
+    if uid in NOTIFY_IDS and not real:
         return {"t1", "k1", "k2"}
     out = set()
     for p in (store.purchases_of(uid) or []):
@@ -1038,6 +1066,19 @@ def owned_keys(uid):
         elif t in ("k1", "k2"):
             out.add(t)
     return out
+
+
+def course_owner_reply(chat_id, uid):
+    """Покупцю курсу кнопка «Курс ретуші» / слово КУРС / /kurs не веде до оплати вже купленого
+    (12.10, правка Б): показуємо його матеріали. True = відповіли."""
+    if not ({"k1", "k2"} & owned_keys(uid, real=True)):
+        return False
+    kb = lessons_kb(uid)
+    if not kb:
+        return False
+    store.log_event(uid, "kurs_owned")
+    send(chat_id, COURSE_OWNED, kb)
+    return True
 
 
 def lessons_kb(uid, current=None):
@@ -1081,20 +1122,41 @@ def send_video_or_file(uid, kind, fid, caption):
     return bool(api(SEND_BY_KIND[kind], retry=True, **{"chat_id": uid, kind: fid, "caption": caption}))
 
 
+def lesson_cabinet_url(ckey, idx, title):
+    """Кабінет на першій частині уроку: номер уроку з заголовка («Урок 2 · ...»), частина N.1.
+    Номера нема чи курс другий: просто кабінет (кабінет сам відкриває курс)."""
+    if not kabinet_mist.URL:
+        return ""
+    m = re.match(r"\s*Урок\s*(\d+)", title or "")
+    if m and ckey == "k1":
+        return kabinet_mist.URL + "/?p=" + m.group(1) + ".1"
+    return kabinet_mist.URL + "/"
+
+
 def send_lesson(uid, ckey, idx):
-    """Один урок: заголовок, відео, практика альбомом, кнопка «Далі»."""
+    """Один урок: відео кнопкою в кабінет (без KABINET_URL файлом у чат), практика альбомом, кнопка «Далі»."""
     sections = COURSE_SECTIONS.get(ckey) or []
     if idx < 0 or idx >= len(sections):
         return False
     title, files = sections[idx]
     total = len(files)
     sent = 0
-    if title:
+    cab = lesson_cabinet_url(ckey, idx, title)
+    has_video = any(_is_video_item(ckey, idx, kind, fid) for kind, fid in files)
+    to_cab = bool(cab and has_video)     # 12.10 (Г): .mov на сотні МБ документом у чат не шлемо
+    if to_cab:
+        send(uid, LESSON_CAB.format(title=title or "Урок " + str(idx + 1)),
+             {"inline_keyboard": [[{"text": "Дивитись урок", "web_app": {"url": cab}}]]})
+        time.sleep(1.0)
+    elif title:
         send(uid, title)
         time.sleep(1.0)
     docs = []
     for kind, fid in files:
         if _is_video_item(ckey, idx, kind, fid):
+            if to_cab:
+                sent += 1     # відео віддано кабінетом
+                continue
             if send_video_or_file(uid, kind, fid, title or None):
                 sent += 1
             time.sleep(1.0)
@@ -1117,7 +1179,7 @@ def send_lesson(uid, ckey, idx):
         notify("Урок " + ckey + " №" + str(idx + 1) + " для id " + str(uid) + ": пішло "
                + str(sent) + " з " + str(total) + " файлів.")
     time.sleep(1.0)
-    send(uid, LESSON_DONE, next_kb(ckey, idx))
+    send(uid, LESSON_DONE if to_cab else LESSON_DONE_CHAT, next_kb(ckey, idx))
     store.log_event(uid, "lesson", {"course": ckey, "n": idx + 1, "sent": sent, "of": total})
     return sent > 0
 
@@ -1685,6 +1747,10 @@ def kabinet_kupyty():
     return "ok"
 
 
+_prak_busy = set()
+_prak_guard = threading.Lock()
+
+
 @app.post("/kabinet-praktyka")
 def kabinet_praktyka():
     """Кнопка «Отримати в Telegram» у кабінеті (11.10): шлемо покупцеві в чат матеріали для
@@ -1704,6 +1770,12 @@ def kabinet_praktyka():
         return "bad", 400
 
     log.info("kabinet-praktyka: запит uid=%s блок %s", uid, block or "all")
+    # правка А: той самий (людина, блок) не запускаємо вдруге, поки перший іде (повторне натискання в кабінеті)
+    with _prak_guard:
+        if (uid, block) in _prak_busy:
+            log.info("kabinet-praktyka: uid=%s блок %s вже йде, дубль пропущено", uid, block or "all")
+            return "ok"
+        _prak_busy.add((uid, block))
 
     def work():
         store.session_begin()
@@ -1717,6 +1789,8 @@ def kabinet_praktyka():
             except Exception:
                 pass
         finally:
+            with _prak_guard:
+                _prak_busy.discard((uid, block))
             store.session_end()
 
     threading.Thread(target=work, daemon=True).start()
@@ -2191,6 +2265,36 @@ def dm_lyudyna(kogo):
         store.session_end()
 
 
+# ---------- дублі (12.10, правка А) ----------
+_LOCKED_CB = ("les:", "my:guide", "moi", "magnet", "give:", "paid:", "lock:")
+_ulocks = {}
+_ulocks_guard = threading.Lock()
+
+
+def _user_lock(uid, data):
+    """Блокування на користувача для видач і меню: les:/moi/my:guide/magnet/give:/paid:.
+    Повертає Lock (його бере і знімає hook) або None для решти кнопок."""
+    if not uid or not any(data == p or data.startswith(p) for p in _LOCKED_CB):
+        return None
+    with _ulocks_guard:
+        return _ulocks.setdefault(uid, threading.Lock())
+
+
+def lead_once(uid, kind, hours=24):
+    """Заявка персоналу не частіше за раз на `hours` на (людина, тип): повтори кнопок не спамлять.
+    True = слати. Без бази (kv) завжди True."""
+    key = "lead:" + str(uid) + ":" + kind
+    try:
+        now = time.time()
+        prev = store.kv_get(key)
+        if prev and now - float(prev) < hours * 3600:
+            return False
+        store.kv_set(key, str(now))
+    except Exception as e:
+        log.warning("lead_once %s: %s", key, e)
+    return True
+
+
 @app.post("/" + SECRET)
 def hook():
     upd = request.get_json(silent=True) or {}
@@ -2206,6 +2310,10 @@ def hook():
     store.timing_reset()
     store.session_begin()
     _inflight[threading.get_ident()] = (upd.get("update_id"), t_hook, False)
+    _from = ((upd.get("message") or upd.get("callback_query") or {}).get("from") or {})
+    _tm.person = (_from.get("id") if _from.get("id") and not _from.get("is_bot")
+                  and not (IRA_ON and _from.get("id") == IRA_ID) else None)
+    _held = None
     try:
         if "message" in upd:
             m = upd["message"]
@@ -2318,6 +2426,8 @@ def hook():
                     # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
                     bg(store.log_event, uid, "mk_entry", {"tag": src})
                     send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
+                elif src in ("kurs", "kurs10") and course_owner_reply(chat_id, uid):
+                    bg(store.log_event, uid, "kurs_entry", {"tag": src})
                 elif src == "kurs10" and courses_sale():
                     # лід з діректу 08.10: курс зі знижкою 10 %, оплата на знижену суму
                     bg(store.log_event, uid, "kurs_entry", {"tag": src})
@@ -2334,7 +2444,9 @@ def hook():
             elif text.split("@")[0].strip() == "/kurs":
                 store.touch_user(u)
                 store.log_event(uid, "kurs_entry", {"tag": "cmd"})
-                if courses_sale() and COURSE_BUNDLE_ONLY:
+                if course_owner_reply(chat_id, uid):
+                    pass
+                elif courses_sale() and COURSE_BUNDLE_ONLY:
                     pick_product(chat_id, uid, u, "k12")
                 else:
                     send_retush(chat_id)
@@ -2348,12 +2460,14 @@ def hook():
                     kb = tiers_kb()
                     send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
                 elif k == "retush":
-                    send_retush(chat_id, uid, u)
+                    if not course_owner_reply(chat_id, uid):
+                        send_retush(chat_id, uid, u)
                 elif k == "mk":
                     send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
                 else:
                     send(chat_id, SHOOT_TEXT)
-                    notify_lead("Питають про ЗЙОМКУ: " + who(u))
+                    if lead_once(uid, "shoot"):
+                        notify_lead("Питають про ЗЙОМКУ: " + who(u))
             else:
                 store.touch_user(u)
                 store.log_event(uid, "message", {"text": text[:300]})
@@ -2379,7 +2493,9 @@ def hook():
                     else:
                         send(chat_id, OWNER_NONE, empty_kb(uid))
                 else:
-                    send(chat_id, CLIENT_TEXT, empty_kb(uid))
+                    # покупцю (курс чи гайд) під довільним текстом уроки, не «напишіть в інстаграм» (правка Б)
+                    kb = lessons_kb(uid) if owned_keys(uid, real=True) else None
+                    send(chat_id, CLIENT_TEXT_BUYER if kb else CLIENT_TEXT, kb or empty_kb(uid))
             return "ok"
 
         if "callback_query" in upd:
@@ -2388,7 +2504,11 @@ def hook():
             u = cq.get("from", {})
             uid = u.get("id")
             chat_id = cq["message"]["chat"]["id"]
-            api("answerCallbackQuery", callback_query_id=cq["id"])
+            if not upd.get("_acked"):     # poll_loop відповідає на натискання одразу, щоб кнопка не крутилась
+                api("answerCallbackQuery", callback_query_id=cq["id"])
+            _held = _user_lock(uid, data)     # один користувач: видачі та меню по черзі, не паралельно
+            if _held:
+                _held.acquire()
 
             if data == "magnet" or data in LEGACY_LOCK_DATA:
                 # Файл одразу, канал просимо після нього (AFTER з кнопкою каналу).
@@ -2410,14 +2530,16 @@ def hook():
                 send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
             elif data == "retush":
                 store.log_event(uid, "retush_open")
-                send_retush(chat_id, uid, u)
+                if not course_owner_reply(chat_id, uid):
+                    send_retush(chat_id, uid, u)
             elif data == "mk":
                 store.log_event(uid, "mk_open")
                 send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
             elif data == "mk:want":
                 store.log_event(uid, "mk_want")
                 send(chat_id, MK_THANKS, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
-                notify_lead("ЗАЯВКА НА МК: " + who(u) + "\nНаписати особисто.")
+                if lead_once(uid, "mk"):
+                    notify_lead("ЗАЯВКА НА МК: " + who(u) + "\nНаписати особисто.")
             elif not courses_sale() and (data in ("q:new", "q:pro") or data in COURSES):
                 # Стара кнопка курсу в чаті людини: продажу нема, кажемо «готую новий».
                 store.log_event(uid, "retush_off", {"data": data})
@@ -2445,8 +2567,9 @@ def hook():
                 code = order_code(uid, key)
                 send(chat_id, NOGET_TEXT)
                 store.log_event(uid, "noget", {"code": code})
-                notify("КАЖЕ, ЩО ОПЛАТИВ, А ФАЙЛУ НЕМАЄ\n" + pname(key) + "\n" + who(u)
-                       + "\nКод: " + code, give_kb(uid, key))
+                if lead_once(uid, "noget:" + key):
+                    notify("КАЖЕ, ЩО ОПЛАТИВ, А ФАЙЛУ НЕМАЄ\n" + pname(key) + "\n" + who(u)
+                           + "\nКод: " + code, give_kb(uid, key))
             elif data.startswith("paid:") and TEST_MODE and uid in NOTIFY_IDS:
                 key = data.split(":")[1]
                 code = order_code(uid, key)
@@ -2486,6 +2609,9 @@ def hook():
     except Exception as e:
         log.exception("update failed: %s", e)
     finally:
+        if _held:
+            _held.release()
+        _tm.person = None
         _inflight.pop(threading.get_ident(), None)
         store.session_end()
         total = time.time() - t_hook
@@ -2531,7 +2657,7 @@ _OPYS_RETUSH = ("Привіт, я Іра ❤️ Бʼюті і фешн фото�
                 "4 уроки, 18 відео: бʼюті-портрет, темний фон, фешн-колір, колір і мої пресети.\n\n"
                 "Увесь курс відкривається одразу після оплати і лишається з вами назавжди. "
                 "Дивіться у своєму темпі, надсилайте сюди свою ретуш, підкажу правки.\n\n"
-                "Тисніть «Почати», і я покажу курс.")
+                "Тисніть «Почати»: заберете безкоштовні три схеми світла, а курс ретуші покажу там само.")
 # 08.10: і типовий (українська та решта мов) теж про ретуш, поки йде перша
 # покупниця з ретуші; опис про світло: brend/TEKSTY-2026-09-25.md.
 DESCRIPTIONS = {"": _OPYS_RETUSH, "ru": _OPYS_RETUSH, "en": _OPYS_RETUSH}
@@ -2552,6 +2678,35 @@ _poll_gen = [0]                 # покоління потоку: старий 
 _poll_offset = [None]           # підтверджений offset живе тут, щоб новий потік не губив і не повторював
 _seen_ids = []                  # останні оброблені update_id (дедуплікація при повторній видачі)
 _inflight = {}                  # tid -> (update_id, час старту, чи вже скинули стек): для діагностики зависань
+_recent = {}                    # (uid, дія) -> час завершення (або inf поки йде): відсів повторних натискань (правка А)
+DEDUP_S = 10                    # вікно від завершення, секунд
+
+
+def _dedup_key(upd):
+    """Ключ повторюваної дії людини: кнопка (callback_data) або /start, /moi, /kurs, «Мої матеріали»,
+    слово-ключ. Довільний текст не відсіваємо (це можуть бути різні повідомлення)."""
+    cq = upd.get("callback_query")
+    if cq:
+        uid = (cq.get("from") or {}).get("id")
+        data = cq.get("data") or ""
+        return (uid, "cb:" + data) if uid and data else None
+    m = upd.get("message") or {}
+    uid = (m.get("from") or {}).get("id")
+    t = (m.get("text") or "").strip()
+    if not uid or not t or m.get("reply_to_message"):
+        return None
+    head = t.split("@")[0].lower() if t.startswith("/") else t.lower()
+    if t.startswith("/start") or t.startswith("/moi") or head == "/kurs" or head == "мої матеріали" or keyword(t):
+        return (uid, "msg:" + head[:64])
+    return None
+
+
+def _is_dup(key, now):
+    """True, якщо ту саму дію цієї людини ще виконують або закінчили менше DEDUP_S тому."""
+    if not key:
+        return False
+    t = _recent.get(key)
+    return t is not None and (t == float("inf") or now - t < DEDUP_S)
 
 
 def _dump_stuck(limit=25):
@@ -2582,6 +2737,7 @@ def poll_loop(gen=None):
         _poll_gen[0] += 1
         gen = _poll_gen[0]
     pool = ThreadPoolExecutor(max_workers=3)
+    pool_ack = ThreadPoolExecutor(max_workers=2)
     url = "http://127.0.0.1:" + os.getenv("PORT", "10000") + "/" + SECRET
 
     def deliver(upd):
@@ -2614,8 +2770,24 @@ def poll_loop(gen=None):
             if j.get("result"):
                 log.info("getUpdates: %s апдейтів, id %s..%s, нових %s", len(j["result"]),
                          j["result"][0]["update_id"], j["result"][-1]["update_id"], len(batch))
-            futs = []
+            for upd in batch:     # правка А: id запам'ятовуємо при отриманні, а не після обробки
+                _seen_ids.append(upd["update_id"])
+            del _seen_ids[:-200]
+            futs, keys = [], []
+            now = time.time()
             for upd in batch:
+                cq = upd.get("callback_query")
+                if cq and cq.get("id"):
+                    # кнопка перестає крутитись одразу, навіть якщо пул зайнятий довгим уроком
+                    upd["_acked"] = True
+                    pool_ack.submit(api, "answerCallbackQuery", callback_query_id=cq["id"])
+                key = _dedup_key(upd)
+                if _is_dup(key, now):
+                    log.info("дубль %s від людини відсіяно (update %s)", key, upd["update_id"])
+                    continue
+                if key:
+                    _recent[key] = float("inf")
+                    keys.append(key)
                 m = upd.get("message") or {}
                 if m.get("date"):
                     log.info("TRACE upd=%s отримано polling, лаг від Telegram %.1fс",
@@ -2624,9 +2796,11 @@ def poll_loop(gen=None):
             done, not_done = wait(futs, timeout=70)
             if not_done:
                 log.error("poll: %s апдейтів не оброблено за 70с, йдемо далі", len(not_done))
-            for upd in batch:
-                _seen_ids.append(upd["update_id"])
-            del _seen_ids[:-200]
+            end = time.time()
+            for key in keys:
+                _recent[key] = end
+            for k in [k for k, t in _recent.items() if t != float("inf") and end - t > 120]:
+                _recent.pop(k, None)
             if j.get("result"):
                 _poll_offset[0] = j["result"][-1]["update_id"] + 1    # підтвердження ПІСЛЯ обробки
         except Exception as e:
@@ -2636,9 +2810,18 @@ def poll_loop(gen=None):
         # SIGTERM: нового getUpdates не робимо; вже взяті апдейти дообробляємо,
         # непідтверджені лишаються в Telegram для нового інстансу.
         pool.shutdown(wait=True)
-        log.info("poll: зупинено (SIGTERM)")
+        # підтвердити offset у Telegram, щоб новий інстанс не отримав оброблене вдруге (правка А)
+        if _poll_offset[0]:
+            try:
+                requests.post(API + "/getUpdates", timeout=5, json={
+                    "offset": _poll_offset[0], "timeout": 0, "limit": 1,
+                    "allowed_updates": ["message", "callback_query"]})
+            except Exception as e:
+                log.warning("poll: підтвердження offset при зупинці: %s", e)
+        log.info("poll: зупинено (SIGTERM), offset %s", _poll_offset[0])
     else:
         pool.shutdown(wait=False)
+        pool_ack.shutdown(wait=False)
         log.info("poll: потік покоління %s завершено", gen)
 
 
