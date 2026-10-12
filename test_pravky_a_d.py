@@ -135,5 +135,14 @@ ok("Г відео не шлеться в чат", not sent("sendVideo", 790))
 ok("Г практика шлеться", len(sent("sendDocument", 790)) == 1)
 ok("Г текст завершення без «дивитись тут»", "Відео дивіться в моєму кабінеті" in msgs[-1]["text"])
 
+# /vydaty gaid
+VYKLYKY.clear()
+msg("/vydaty 9201 gaid", uid=1)
+ok("/vydaty gaid: людині документ-гайд", any(m == "sendDocument" and p.get("chat_id") == 9201 and p.get("document") == "GUIDE" for m, p in VYKLYKY))
+ok("/vydaty gaid: адмін отримав Видано", any("Видано" in p.get("text", "") for p in sent(chat=1)))
+VYKLYKY.clear()
+msg("/vydaty 9202", uid=1)
+ok("/vydaty без аргументу: курс, не гайд", not any(m == "sendDocument" and p.get("document") == "GUIDE" for m, p in VYKLYKY))
+
 print("\nПАДІННЯ: %d" % len(PADINNIA) if PADINNIA else "\nВсе зелене")
 sys.exit(1 if PADINNIA else 0)

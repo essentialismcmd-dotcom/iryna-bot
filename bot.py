@@ -2340,18 +2340,21 @@ def hook():
                 return "ok"
             # Подарунок: платить інша людина, заявки нема. /vydaty <id> видає курс.
             if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/vydaty":
-                arg = (text.split() + [""])[1]
+                _parts = text.split() + ["", ""]
+                arg = _parts[1]
+                # 12.10: другий аргумент «gaid» видає гайд «Світло» (ключ t1), без нього курс k12
+                vkey = "t1" if _parts[2].lower() in ("gaid", "guide", "гайд") else "k12"
                 if not arg.isdigit():
-                    send(chat_id, "Напишіть так: /vydaty 458676312 (id людини зі сповіщення «Новий у боті»)")
+                    send(chat_id, "Напишіть так: /vydaty 458676312 (курс) або /vydaty 458676312 gaid (гайд «Світло»); id людини зі сповіщення «Новий у боті»")
                     return "ok"
                 target = int(arg)
                 tu = store.get_user(target) or {}
                 name = who({"id": target, "username": tu.get("username"),
                             "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
-                if give_manual(uid, target, "k12"):
+                if give_manual(uid, target, vkey):
                     send(chat_id, "Видано: " + name)
                 else:
-                    send(chat_id, "Не вдалося видати " + name + ". " + pname("k12") + ": " + ready_text("k12"))
+                    send(chat_id, "Не вдалося видати " + name + ". " + pname(vkey) + ": " + ready_text(vkey))
                 return "ok"
             if uid == ADMIN_ID and text.startswith("/nova"):
                 store.wipe_user(uid)
