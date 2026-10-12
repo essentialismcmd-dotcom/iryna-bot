@@ -524,6 +524,28 @@ def kv_set(k, v):
                 on conflict (k) do update set v = excluded.v, updated_at = now()""", (k, str(v)))
 
 
+def kv_claim(k):
+    """Атомарна заявка ключа: True лише тому, хто вставив рядок першим (дедуп «раз назавжди»).
+    Без бази повертає False, щоб ніщо не слалось двічі навмання."""
+    r = q("insert into kv (k, v) values (%s, '1') on conflict (k) do nothing returning k", (k,), fetch="one")
+    return bool(r)
+
+
+def gift_candidates(since_iso, after_h, skip_ids):
+    """Люди з міткою retush*, що зайшли після since і більше after_h годин тому, без магніту й покупок."""
+    rows = q("""
+        select u.user_id from users u
+        where u.source_tag like 'retush%%' and u.role = 'client'
+          and u.created_at >= %s and u.created_at < now() - make_interval(hours => %s)
+          and u.got_magnet_at is null
+          and not (u.user_id = any(%s))
+          and not exists (select 1 from purchases p where p.user_id = u.user_id
+                          and p.status in ('paid', 'delivered'))
+        order by u.created_at limit 20
+    """, (since_iso, after_h, list(skip_ids)), fetch="all")
+    return [r["user_id"] for r in rows or []]
+
+
 def stats_day():
     """Цифри за добу, для рядка стану."""
     return {
