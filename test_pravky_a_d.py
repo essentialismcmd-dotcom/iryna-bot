@@ -144,5 +144,25 @@ VYKLYKY.clear()
 msg("/vydaty 9202", uid=1)
 ok("/vydaty без аргументу: курс, не гайд", not any(m == "sendDocument" and p.get("document") == "GUIDE" for m, p in VYKLYKY))
 
+# мітки партнерів retush_<імʼя>
+TOUCH, EV = [], []
+bot.store.touch_user = lambda u, role="client", source_tag=None: (TOUCH.append(source_tag), {"is_new": True})[1]
+bot.store.log_event = lambda uid, kind, data=None: EV.append((kind, data))
+for tag, podpys in (("retush_liza", "від Лізи (liza.khbchk)"), ("retush_Anna7", "від anna7")):
+    VYKLYKY.clear(); TOUCH.clear(); EV.clear(); KV.clear()
+    msg("/start " + tag, uid=880)
+    card = sent("sendPhoto", 880) or sent("sendMessage", 880)
+    ok(tag + ": людина бачить магніт уроку (як retush)", card and "Чистка шкіри" in (card[0].get("caption") or card[0].get("text") or ""))
+    ok(tag + ": source_tag у базі", TOUCH and TOUCH[0] == tag, str(TOUCH))
+    ok(tag + ": липка мітка retush", KV.get("tag:880") == "retush", str(KV.get("tag:880")))
+    ok(tag + ": подія start з міткою", ("start", {"tag": tag}) in EV, str(EV))
+    ok(tag + ": сповіщення з підписом", any(podpys in p.get("text", "") for p in sent(chat=1)), podpys)
+VYKLYKY.clear(); TOUCH.clear()
+msg("/start retush", uid=881)
+ok("звичайний retush без підпису партнера", TOUCH == ["retush"] and not any("(від" in p.get("text", "") for p in sent(chat=1)))
+VYKLYKY.clear(); TOUCH.clear()
+msg("/start retush_", uid=882)
+ok("retush_ без імені не партнер", TOUCH == ["retush_"], str(TOUCH))
+
 print("\nПАДІННЯ: %d" % len(PADINNIA) if PADINNIA else "\nВсе зелене")
 sys.exit(1 if PADINNIA else 0)

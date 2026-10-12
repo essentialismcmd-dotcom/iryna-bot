@@ -575,6 +575,11 @@ def send(chat_id, text, markup=None):
 
 
 TAGS_STICKY = ("retush", "kurs", "kurs10", "mk", "guide")
+# Персональні мітки партнерів (12.10): ?start=retush_<імʼя> дає той самий шлях, що ?start=retush,
+# а source_tag у базі лишається «retush_<імʼя>». Новий партнер працює без коду; підпис у сповіщенні
+# «від <імʼя>», для відомих імен нижче гарніший.
+PARTNER_TAG_RE = re.compile(r"retush_([A-Za-z0-9]{1,30})")
+PARTNERS = {"liza": "Лізи (liza.khbchk)"}
 
 
 def send_card_file(chat_id, path, text, markup=None):
@@ -2454,6 +2459,11 @@ def hook():
             if text.startswith("/start"):
                 parts = text.split(None, 1)
                 src = parts[1].strip()[:64] if len(parts) > 1 else ""
+                # 12.10: мітка партнера retush_<імʼя> = шлях retush, джерело <імʼя> лишається в базі
+                raw_src, partner = src, ""
+                _pm = PARTNER_TAG_RE.fullmatch(src)
+                if _pm:
+                    src, partner = "retush", _pm.group(1).lower()
                 analytics_tag = None
                 # 08.10: людина з лінки (retush, kurs10...) тисне просто /start і
                 # отримувала світло. Повторюємо її останню мітку.
@@ -2471,12 +2481,13 @@ def hook():
                         src = "retush"
                     analytics_tag = _saved
                 # запис людини, лог і сповіщення персоналу не затримують перший екран
-                def _start_after(uid=uid, u=u, src=src, atag=analytics_tag):
-                    _t = src or atag or ""
+                def _start_after(uid=uid, u=u, src=src, atag=analytics_tag, raw=raw_src, partner=partner):
+                    _t = raw or src or atag or ""
                     rec = store.touch_user(u, source_tag=_t) or {}
                     store.log_event(uid, "start", {"tag": _t})
                     if rec.get("is_new", True):
-                        notify("Новий у боті: " + who(u) + "\nМітка: " + (src or "без мітки"),
+                        notify("Новий у боті: " + who(u) + "\nМітка: " + (raw or "без мітки")
+                               + (" (від " + PARTNERS.get(partner, partner) + ")" if partner else ""),
                                give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None)
                 bg(_start_after)
                 if src == "guide":
