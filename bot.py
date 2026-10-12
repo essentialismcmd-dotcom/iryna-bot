@@ -39,6 +39,13 @@ ZAKRIP_CHAT   = os.getenv("ZAKRIP_CHAT", "").strip() or "-1004303013438"
 # Кнопка закріпу (TYZHDEN-2026-10-05 рядок 72, слово Yaro «Хочу на МК»): веде на ?start=mk.
 ZAKRIP_URL    = os.getenv("ZAKRIP_URL", "").strip() or "https://t.me/iryna_rul_bot?start=mk"
 ZAKRIP_BTN    = os.getenv("ZAKRIP_BTN", "").strip() or "Хочу на майстер-клас"
+# Колір кнопки закріпу (Bot API 9.4, поле style): danger червона, success зелена, primary синя.
+# Порожньо = колір за замовчуванням застосунку. Слово кольору першим після /zakrip
+# (червона|зелена|синя) перебиває змінну для одного посту. У червоної серце біле.
+ZAKRIP_COLORS = {"червона": "danger", "червоний": "danger", "зелена": "success", "зелений": "success",
+                 "синя": "primary", "синій": "primary"}
+ZAKRIP_STYLE  = (lambda v: ZAKRIP_COLORS.get(v, v) if ZAKRIP_COLORS.get(v, v) in
+                 ("danger", "success", "primary") else "")(os.getenv("ZAKRIP_STYLE", "").strip().lower())
 GUIDE_FILE_ID = os.getenv("GUIDE_FILE_ID", "").strip()
 # Чинні версії файлів (25.09): гайд v13 і магніт v3d. До цього бот віддавав
 # гайд v10 і магніт v2, бо file_id жили тільки в змінних Render і ніхто не
@@ -1817,10 +1824,20 @@ def zakrip(m):
     команди з тим самим форматуванням (entities зсунуті на довжину команди).
     Повертає відповідь адміну.
     """
-    kb = {"inline_keyboard": [[{"text": ZAKRIP_BTN, "url": ZAKRIP_URL}]]}
     raw = m.get("text") or ""
     parts = raw.split(None, 1)
     body = parts[1] if len(parts) > 1 else ""
+    style = ZAKRIP_STYLE
+    w = body.split(None, 1)
+    if w and w[0].lower().strip(".,:;!") in ZAKRIP_COLORS:
+        style = ZAKRIP_COLORS[w[0].lower().strip(".,:;!")]
+        body = w[1] if len(w) > 1 else ""
+    btn = {"text": ZAKRIP_BTN, "url": ZAKRIP_URL}
+    if style:
+        btn["style"] = style
+        if style == "danger":   # червона кнопка: серце біле
+            btn["text"] = re.sub("[\u2665\u2764]\ufe0f?", "\U0001F90D", ZAKRIP_BTN)
+    kb = {"inline_keyboard": [[btn]]}
     rep = m.get("reply_to_message")
     if not body.strip() and rep and (rep.get("text") or rep.get("caption") or rep.get("photo")):
         r = api_raw("copyMessage", chat_id=ZAKRIP_CHAT, from_chat_id=m["chat"]["id"],
@@ -1833,7 +1850,8 @@ def zakrip(m):
                     reply_markup=kb, disable_web_page_preview=True)
     else:
         return ("Надішли /zakrip і текст закріпу одним повідомленням, або відповідай "
-                "/zakrip на повідомлення з текстом. Кнопка «" + ZAKRIP_BTN + "» стане сама.")
+                "/zakrip на повідомлення з текстом. Кнопка «" + btn["text"] + "» стане сама. "
+                "Колір кнопки: слово червона, зелена чи синя першим після /zakrip.")
     if not r.get("ok"):
         return _zakrip_err(r.get("description"))
     mid = (r.get("result") or {}).get("message_id")
@@ -1841,7 +1859,7 @@ def zakrip(m):
     if not p.get("ok"):
         return ("Пост опубліковано (id " + str(mid) + "), але не закріплено. "
                 + _zakrip_err(p.get("description")))
-    return "Готово, id " + str(mid) + ": пост у " + ZAKRIP_CHAT + " з кнопкою «" + ZAKRIP_BTN + "», закріплено."
+    return "Готово, id " + str(mid) + ": пост у " + ZAKRIP_CHAT + " з кнопкою «" + btn["text"] + "»" + (" (" + style + ")" if style else "") + ", закріплено."
 
 
 def starts_text():
