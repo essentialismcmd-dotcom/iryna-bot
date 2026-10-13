@@ -371,8 +371,8 @@ def wipe_user(uid):
     Матеріали (assets) не чіпає: там заливки файлів гайда від адміна.
     """
     # мітка входу (липка) теж стирається, інакше після /nova простий /start повторює стару лінку;
-    # pkb: прапорець постійної кнопки «Мої матеріали» (13.10)
-    q("delete from kv where k = any(%s)", (["tag:" + str(uid), "pkb:" + str(uid)],))
+    # pkb: і pkb2: прапорці постійної клавіатури (13.10: стара лише «Мої матеріали», нова ще й канал)
+    q("delete from kv where k = any(%s)", (["tag:" + str(uid), "pkb:" + str(uid), "pkb2:" + str(uid)],))
     return q("""
         with e as (delete from events where user_id = %s returning 1),
              p as (delete from purchases where user_id = %s returning 1),
@@ -563,7 +563,7 @@ PUSH_SQL = """
 with ev as (
     select user_id,
            bool_or(kind = 'magnet') as ev_magnet,
-           bool_or(kind = 'retush_entry') as ev_lesson,
+           bool_or(kind in ('retush_entry', 'lesson_gift')) as ev_lesson,
            max(created_at) as last_event,
            string_agg(case when kind = 'message' then payload ->> 'text' end, E'\\n') as texts
       from events where user_id is not null group by user_id

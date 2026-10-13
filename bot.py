@@ -497,8 +497,16 @@ _tm = threading.local()   # таймінг Telegram API в межах одног
 # Постійна кнопка «Мої матеріали» (12.10, правка Б): стоїть під полем вводу в приватному чаті
 # людини. Додаємо до повідомлень БЕЗ власної клавіатури, лише тому, хто зараз пише боту
 # (_tm.person), і не Ірі. Сповіщення персоналу (інший chat_id) її не отримують.
-PERSIST_KB = {"keyboard": [[{"text": "Мої матеріали"}]], "resize_keyboard": True,
+# 13.10 (слово Yaro: «чи до кнопки «Мої матеріали» можна внизу ще додати кнопку каналу назавжди, щоб вона там
+# була»): поруч у тому ж ряду кнопка каналу. Кнопка клавіатури посилання не відкриває: на натискання бот
+# відповідає рядком Іри з інлайн-кнопкою в канал (kanal_btn_reply). Підпис «Канал «для своїх»» 17 знаків
+# влазить у половину ряду на екрані 360 dp: Roboto 16 dp дає 136 dp при ~152 dp місця (обріже лише на 320 dp).
+KANAL_BTN = "Канал «для своїх»"
+PERSIST_KB = {"keyboard": [[{"text": "Мої матеріали"}, {"text": KANAL_BTN}]], "resize_keyboard": True,
               "is_persistent": True}
+# Версія прапорця: pkb:<id> ставила стара клавіатура лише з «Мої матеріали». Нова має свій прапорець pkb2:<id>,
+# тож кожен зі старою отримає нову при наступному зверненні до бота (рядок-носій раз), без розсилки.
+PKB_KEY = "pkb2"
 PERSIST_METHODS = ("sendMessage", "sendPhoto", "sendDocument", "sendVideo")
 # 13.10 (слово Yaro: «для всіх завжди», «завжди на виду»): кнопка в кожного з першого /start.
 # Вітання має свою інлайн-кнопку, а повідомлення несе лише одну клавіатуру, тож тоді кнопку
@@ -608,11 +616,11 @@ def send(chat_id, text, markup=None):
 
 
 def pkb_has(uid):
-    """Чи людина вже отримала постійну кнопку: прапорець pkb:<id> у kv (з 13.10)."""
+    """Чи людина вже отримала постійну клавіатуру чинної версії: прапорець pkb2:<id> у kv (з 13.10)."""
     if uid in _pkb_done:
         return True
     try:
-        v = store.kv_get("pkb:" + str(uid))
+        v = store.kv_get(PKB_KEY + ":" + str(uid))
     except Exception:
         v = None
     if v:
@@ -625,9 +633,24 @@ def pkb_mark(uid):
         return
     _pkb_done.add(uid)      # і без бази в цьому процесі рядок не повториться
     try:
-        store.kv_set("pkb:" + str(uid), "1")
+        store.kv_set(PKB_KEY + ":" + str(uid), "1")
     except Exception as e:
         log.warning("pkb %s: %s", uid, e)
+
+
+# Відповідь на кнопку каналу: рядок з затвердженого push1 (рядок про канал вибрав Yaro 13.10), без «А також».
+# Змінна KANAL_BTN_TEXT на Render перебиває. Посилання: окреме запрошення knopka (рахує вступи з кнопки),
+# лише в змінній KANAL_KNOPKA_URL на Render; без неї CHANNEL_URL.
+KANAL_BTN_TEXT = (os.getenv("KANAL_BTN_TEXT", "").strip().replace("\\n", "\n")
+                  or "Підписуйтесь на мій тг канал, там розповідаю свою історію🫶🏻")
+KANAL_KNOPKA_URL = os.getenv("KANAL_KNOPKA_URL", "").strip()
+
+
+def kanal_btn_url():
+    for url in (KANAL_KNOPKA_URL, CHANNEL_URL):
+        if url.startswith("https://t.me/"):
+            return url
+    return "https://t.me/" + (CHANNEL_ID.lstrip("@") or "iryna_rul_photographer")
 
 
 def pkb_finish():
@@ -1661,24 +1684,36 @@ def ready_text(key):
 # ---------- розсилка push1 (13.10) ----------
 #
 # Слово Yaro 13.10 ~19:05 про тих, кому видали курси чи лід-магніти: «як ми їх будемо пушити?», «їх акуратно
-# запушити, і потім ще і в цьому пуші додати кнопку переходу на телеграм-канал ще». Разова розсилка лише з
-# рук персоналу (NOTIFY_IDS): /push1 це перегляд лише тому, хто питає; /push1 go шле людям раз на людину
-# (kv push1:<id>), одна людина на секунду, лише 10:00–20:00 за Києвом, звіт тому, хто запустив. Тексти й
-# підпис кнопки в push1.txt (змінні PUSH1_* перебивають файл), тож правка тексту не вимагає коду. Кнопка веде
-# на окреме запрошення push1 (рахує вступи), воно лише в змінній PUSH1_URL на Render.
+# запушити, і потім ще і в цьому пуші додати кнопку переходу на телеграм-канал ще». Рамка 13.10 19:4x: «нативно»,
+# подарунок першим, рядок про канал у кінці; кожному той безкоштовний подарунок, якого в нього ще нема.
+#   G1: брали урок 1.5, а PDF «3 схеми світла» не отримали (подарунок після уроку міг не дійти через зависання
+#       до d47a992): той самий PDF магніту, що дають GIFT_DONE і GIFT_LATE, текст G1 підписом під файлом,
+#       кнопка каналу.
+#   G2: брали схеми, а уроку 1.5 не мали (і курсу нема: урок у ньому): текст G2, кнопка уроку в кабінеті
+#       (retush_lesson_url) поруч із кнопкою каналу.
+#   Хто має і схеми, і урок (чи курс), поки нічого.
+# Лише з рук персоналу (NOTIFY_IDS): /push1 це перегляд тому, хто питає (числа й обидва повідомлення так, як їх
+# побачать люди); /push1 go шле раз на людину (kv push1:<id>), одна людина на секунду, лише 10:00–20:00 за
+# Києвом, звіт тому, хто запустив. Тексти й підписи кнопок у push1.txt (змінні PUSH1_* перебивають файл), тож
+# правка тексту не вимагає коду. Кнопка каналу веде на окреме запрошення push1 (рахує вступи), воно лише в
+# змінній PUSH1_URL на Render.
 
 PUSH_KEY = "push1"
 PUSH_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "push1.txt")
-PUSH_SECTIONS = ("A", "B", "G", "KNOPKA", "URL")
-PUSH_SEGS = ("A", "B", "G")
-PUSH_SEG_NAMES = {"A": "магніт чи урок 1.5, без покупок", "B": "мають курс", "G": "гайд без курсу"}
+PUSH_SECTIONS = ("G1", "G2", "KNOPKA", "UROK", "URL")
+PUSH_SEGS = ("G1", "G2")
+PUSH_SEG_NAMES = {"G1": "брали урок 1.5, схем нема: дарую 3 схеми (PDF)",
+                  "G2": "брали схеми, уроку 1.5 не мали: дарую урок"}
 PUSH_STUB = "ЗАГЛУШКА"                      # слово в тексті = текст не затверджений, go не шле
 PUSH_BTN = "Канал «для своїх»"
+PUSH_UROK_BTN = "Відкрити урок"             # як у retush_magnet_kb
 PUSH_CHANNEL = "https://t.me/iryna_rul_photographer"     # коли нема ні PUSH1_URL, ні CHANNEL_URL
 PUSH_FROM_H, PUSH_TO_H = 10, 20             # лише денні години за Києвом
 PUSH_PAUSE = 1.0                            # секунд між людьми
 PUSH_MAX = 4096                             # ліміт тексту повідомлення Telegram
+PUSH_CAPTION_MAX = 1024                     # ліміт підпису під файлом (G1)
 PUSH_NAMES_MAX = 15                         # імен на сегмент у перегляді в Telegram
+PUSH_GIFT_BUSY = timedelta(minutes=15)      # свіжа заявка gift:<id> = подарунок схем саме йде з іншого місця
 # Кого не чіпаємо, крім персоналу (тест-акаунти, свої, друзі): id через кому лише в змінній Render,
 # бо репозиторій публічний.
 PUSH_SKIP_IDS = _ids(os.getenv("PUSH_SKIP_IDS", ""))
@@ -1693,7 +1728,7 @@ _push_busy = threading.Lock()
 
 
 def push1_texts(path=None):
-    """Тексти розсилки: секції [A], [B], [G], [KNOPKA], [URL] з push1.txt; рядки до першої секції це
+    """Тексти розсилки: секції [G1], [G2], [KNOPKA], [UROK], [URL] з push1.txt; рядки до першої секції це
     коментар. Непорожня змінна Render PUSH1_<СЕКЦІЯ> перебиває файл («-» = порожньо, «\\n» = новий рядок)."""
     sec, cur = {}, None
     try:
@@ -1716,7 +1751,7 @@ def push1_texts(path=None):
 
 
 def push1_link(t):
-    """Посилання кнопки і звідки воно: інвайт push1 (PUSH1_URL), інакше CHANNEL_URL, інакше канал."""
+    """Посилання кнопки каналу і звідки воно: інвайт push1 (PUSH1_URL), інакше CHANNEL_URL, інакше канал."""
     for url, src in ((t.get("URL"), "інвайт push1"), (CHANNEL_URL, "CHANNEL_URL, не інвайт push1"),
                      (PUSH_CHANNEL, "запасне, не інвайт push1")):
         if url and url.startswith("https://t.me/"):
@@ -1724,8 +1759,13 @@ def push1_link(t):
     return PUSH_CHANNEL, "запасне, не інвайт push1"
 
 
-def push1_kb(t):
-    return {"inline_keyboard": [[{"text": t.get("KNOPKA") or PUSH_BTN, "url": push1_link(t)[0]}]]}
+def push1_kb(t, s):
+    """Кнопки повідомлення сегмента: G1 лише канал; G2 урок у кабінеті поруч із каналом (один ряд)."""
+    kanal = {"text": t.get("KNOPKA") or PUSH_BTN, "url": push1_link(t)[0]}
+    if s == "G2":
+        return {"inline_keyboard": [[{"text": t.get("UROK") or PUSH_UROK_BTN,
+                                      "web_app": {"url": retush_lesson_url()}}, kanal]]}
+    return {"inline_keyboard": [[kanal]]}
 
 
 def push1_problems(t):
@@ -1737,9 +1777,14 @@ def push1_problems(t):
     for s in active:
         if PUSH_STUB in t[s]:
             out.append("текст " + s + " ще " + PUSH_STUB)
-        if len(t[s]) > PUSH_MAX:
-            out.append("текст " + s + " довший за " + str(PUSH_MAX) + " знаків")
-    if PUSH_STUB in (t.get("KNOPKA") or ""):
+        lim = PUSH_CAPTION_MAX if s == "G1" else PUSH_MAX
+        if len(t[s]) > lim:
+            out.append("текст " + s + " довший за " + str(lim) + " знаків")
+    if "G1" in active and not magnet_ref():
+        out.append("нема PDF схем (магніту) для G1")
+    if "G2" in active and not retush_lesson_url():
+        out.append("нема посилання на урок у кабінеті (KABINET_URL) для G2")
+    if PUSH_STUB in (t.get("KNOPKA") or "") + (t.get("UROK") or ""):
         out.append("підпис кнопки ще " + PUSH_STUB)
     return out
 
@@ -1749,11 +1794,11 @@ def push1_window(now=None):
 
 
 def push1_segments(now=None):
-    """Хто що отримає, з живої бази: A узяли магніт (три схеми світла) чи урок 1.5 і нічого не купили,
-    B мають курс (оплата, /vydaty, посилання МК), G купили гайд без курсу. Не шлемо: персоналу,
-    PUSH_SKIP_IDS, кому push1 уже був, хто заблокував бота (403 пізніше за останній візит), хто писав
-    «стоп», кому бот писав за 24 год (будь-яка подія людини чи її візит за добу: кожна відповідь бота
-    йде з подією). None = бази нема або вона не відповіла."""
+    """Хто що отримає, з живої бази. G1: брали урок 1.5 (вхід за посиланням retush, урок у кабінеті чи подарунок
+    уроку), а схем нема (кнопка, подарунок, push1). G2: мають схеми, уроку 1.5 не брали і курсу нема. Обидва
+    (схеми й урок чи курс): поки нічого. Не шлемо: персоналу, PUSH_SKIP_IDS, кому push1 уже був, хто заблокував
+    бота (403 пізніше за останній візит), хто писав «стоп», кому бот писав за 24 год (будь-яка подія людини чи її
+    візит за добу: кожна відповідь бота йде з подією). None = бази нема або вона не відповіла."""
     rows = store.push_rows() if store.ON else None
     if rows is None:
         return None
@@ -1763,21 +1808,21 @@ def push1_segments(now=None):
     skip_ids = set(PUSH_SKIP_IDS)
     seg = {s: [] for s in PUSH_SEGS}
     skip = {w: [] for w in PUSH_SKIP_WHY}
-    rest = 0
+    both = none = 0
     for r in rows:
         uid = r.get("user_id")
         tiers = set(r.get("tiers") or [])
         magnet = bool(r.get("got_magnet_at") or r.get("ev_magnet"))
-        lesson = bool(r.get("ev_lesson") or r.get("kab_lesson")
-                      or str(r.get("source_tag") or "").startswith("retush"))
-        if tiers & PUSH_COURSE:
-            s = "B"
-        elif tiers & PUSH_GUIDE:
-            s = "G"
-        elif magnet or lesson:
-            s = "A"
+        lesson = bool(r.get("ev_lesson") or r.get("kab_lesson"))
+        if lesson and not magnet:
+            s = "G1"
+        elif magnet and not lesson and not tiers & PUSH_COURSE:
+            s = "G2"
+        elif magnet:
+            both += 1
+            continue
         else:
-            rest += 1
+            none += 1
             continue
         seen, blocked_at = r.get("last_seen_at"), r.get("blocked_at")
         last = [x for x in (r.get("last_event"), seen) if x]
@@ -1795,15 +1840,16 @@ def push1_segments(now=None):
             why = PUSH_SKIP_WHY[5]
         else:
             why = None
-        p = {"id": uid, "seg": s, "magnet": magnet, "lesson": lesson, "kab": bool(r.get("kab_lesson")),
+        buys = sorted(tiers & (PUSH_COURSE | PUSH_GUIDE))
+        p = {"id": uid, "seg": s, "buys": buys,
              "who": who({"id": uid, "username": r.get("username"), "first_name": r.get("first_name"),
-                         "last_name": r.get("last_name")})}
+                         "last_name": r.get("last_name")}) + (" (купила: " + ", ".join(buys) + ")" if buys else "")}
         (skip[why] if why else seg[s]).append(p)
-    return {"seg": seg, "skip": skip, "rest": rest}
+    return {"seg": seg, "skip": skip, "both": both, "none": none}
 
 
 def push1_summary(sg, t, full=False, now=None):
-    """Текст перегляду: числа, кнопка, стан текстів; full (сторінка /push1/<S>) поіменно всіх і тексти."""
+    """Текст перегляду: числа, кнопки, стан текстів; full (сторінка /push1/<S>) поіменно всіх і тексти."""
     active = [s for s in PUSH_SEGS if t.get(s)]
     lines = ["push1, перегляд: нікому з людей нічого не надіслано.",
              "Зараз " + kyiv_now(now).strftime("%d.%m %H:%M") + " за Києвом; /push1 go шле лише 10:00–20:00"
@@ -1812,18 +1858,20 @@ def push1_summary(sg, t, full=False, now=None):
         lines.append("База " + ("не відповіла" if store.ON else "вимкнена (нема DATABASE_URL)")
                      + ": людей не рахую, go не шле.")
     else:
-        seg, a = sg["seg"], sg["seg"]["A"]
-        lines.append("A, " + PUSH_SEG_NAMES["A"] + ": " + str(len(a)) + " (магніт у "
-                     + str(sum(p["magnet"] for p in a)) + ", урок 1.5 у " + str(sum(p["lesson"] for p in a))
-                     + ", з них відкрили урок у кабінеті " + str(sum(p["kab"] for p in a)) + ")")
-        lines.append("B, " + PUSH_SEG_NAMES["B"] + ": " + str(len(seg["B"])))
-        lines.append("G, " + PUSH_SEG_NAMES["G"] + ": " + str(len(seg["G"]))
-                     + ("" if t.get("G") else " (тексту G нема: їм не шлемо)"))
+        seg = sg["seg"]
+        for s in PUSH_SEGS:
+            nb = sum(1 for p in seg[s] if p["buys"])
+            lines.append(s + ", " + PUSH_SEG_NAMES[s] + ": " + str(len(seg[s]))
+                         + (" (з них з покупками " + str(nb) + ")" if nb else "")
+                         + ("" if t.get(s) else " (тексту " + s + " нема: їм не шлемо)"))
         lines.append("Разом піде: " + str(sum(len(seg[s]) for s in active)))
         lines.append("Не шлемо: " + ", ".join(w + " " + str(len(v)) for w, v in sg["skip"].items()))
-        lines.append("Решта в базі (лише /start, без магніту, уроку й покупок): " + str(sg["rest"]))
+        lines.append("Мають і схеми, і урок 1.5 (чи курс): " + str(sg["both"]) + ", їм поки нічого.")
+        lines.append("Ні схем, ні уроку 1.5 (лише /start чи лише покупки): " + str(sg["none"]) + ", не шлемо.")
     url, src = push1_link(t)
-    lines.append("Кнопка «" + (t.get("KNOPKA") or PUSH_BTN) + "»: " + url + " (" + src + ")")
+    lines.append("Кнопка «" + (t.get("KNOPKA") or PUSH_BTN) + "» у G1 і G2: " + url + " (" + src + ")")
+    lines.append("Кнопка «" + (t.get("UROK") or PUSH_UROK_BTN) + "» у G2: "
+                 + (retush_lesson_url() or "нема посилання (KABINET_URL)"))
     probs = push1_problems(t)
     lines.append("Тексти: " + ("готові, go шле їх дослівно." if not probs else "; ".join(probs) + ": go не шле."))
     if sg is not None:
@@ -1838,22 +1886,25 @@ def push1_summary(sg, t, full=False, now=None):
                 lines.append("  і ще " + str(len(ppl) - cap))
     if full:
         for s in active:
-            lines += ["", "Текст " + s + ":", t[s]]
+            lines += ["", "Текст " + s + (" (підпис під PDF схем):" if s == "G1" else ":"), t[s]]
         return "\n".join(lines)
     if active:
-        lines += ["", "Нижче тексти так, як їх побачать люди: " + ", потім ".join(active) + "."]
+        lines += ["", "Нижче повідомлення так, як їх побачать люди: "
+                  + ", потім ".join(s + (" (PDF схем з підписом)" if s == "G1" else " (кнопки уроку й каналу)")
+                                    for s in active) + "."]
     text = "\n".join(lines)
     return text if len(text) <= STATS_TEXT_MAX else text[:STATS_TEXT_MAX - 1] + "…"
 
 
 def push1_preview(to):
-    """/push1: підсумок і кожен текст з кнопкою рівно так, як їх побачать люди. Лише тому, хто питав."""
+    """/push1: підсумок і кожне повідомлення рівно так, як його побачать люди. Лише тому, хто питав."""
     t = push1_texts()
     send(to, push1_summary(push1_segments(), t))
-    kb = push1_kb(t)
     for s in PUSH_SEGS:
         if t.get(s):
-            api("sendMessage", chat_id=to, text=t[s][:PUSH_MAX], reply_markup=kb, disable_web_page_preview=True)
+            j = _push1_deliver(to, s, t)
+            if not j.get("ok"):
+                send(to, "Перегляд " + s + " не пішов: " + str(j.get("description"))[:200])
 
 
 def push1_spawn(fn):
@@ -1892,11 +1943,19 @@ def push1_go(by, now=None):
             + ", одна людина на секунду (~" + str(len(targets)) + " с). Звіт пришлю сюди.")
 
 
-def _push1_send(uid, text, kb):
-    """Одне повідомлення людині; на 429 чекаємо, скільки просить Telegram (до 60 с), до трьох разів."""
+def _push1_deliver(uid, s, t):
+    """Одне повідомлення сегмента s (людині, а в перегляді персоналу так само): G1 PDF схем з підписом G1 і
+    кнопкою каналу; G2 текст G2 з кнопками уроку й каналу. На 429 чекаємо, скільки просить Telegram (до 60 с),
+    до трьох разів. Повертає сиру відповідь Telegram."""
+    kb = push1_kb(t, s)
     j = {}
     for _ in range(4):
-        j = api_raw("sendMessage", chat_id=uid, text=text, reply_markup=kb, disable_web_page_preview=True)
+        if s == "G1":
+            j = api_raw("sendDocument", chat_id=uid, document=magnet_ref(), caption=t[s][:PUSH_CAPTION_MAX],
+                        reply_markup=kb)
+        else:
+            j = api_raw("sendMessage", chat_id=uid, text=t[s][:PUSH_MAX], reply_markup=kb,
+                        disable_web_page_preview=True)
         if j.get("error_code") != 429:
             return j
         wait = (j.get("parameters") or {}).get("retry_after") or 3
@@ -1906,13 +1965,29 @@ def _push1_send(uid, text, kb):
     return j
 
 
+def _push1_g1_busy(uid, now=None):
+    """Чому G1 зараз не дарувати схеми; порожньо = можна. Схеми вже є (подарунок після уроку дійшов) чи подарунок
+    саме йде з іншого місця (свіжа заявка gift:<id>). Стара заявка без схем = подарунок тоді не дійшов: даруємо.
+    Заявку gift:<id> ставимо самі, тож подарунок після уроку вже не продублює."""
+    u = store.get_user(uid) or {}
+    if u.get("got_magnet_at"):
+        return "уже мали схеми"
+    if store.kv_claim("gift:" + str(uid)):
+        return ""
+    row = store.q("select updated_at from kv where k = %s", ("gift:" + str(uid),), fetch="one") or {}
+    at = row.get("updated_at")
+    if at and at > (now or datetime.now(timezone.utc)) - PUSH_GIFT_BUSY:
+        return "подарунок схем саме йде"
+    return ""
+
+
 def _push1_worker(by, targets, t):
-    """Розсилка по черзі: заявка kv push1:<id> до відправки (вдруге та сама людина не отримає ніколи),
-    подія push1 на кожного, 403 = позначка blocked:<id> (ставить api_raw). Вікно закрилось чи сервер
-    зупиняють: решту не чіпаємо, наступний /push1 go їх дошле. Наприкінці звіт тому, хто запустив."""
-    kb = push1_kb(t)
+    """Розсилка по черзі: заявка kv push1:<id> до відправки (вдруге та сама людина не отримає ніколи), подія
+    push1 на кожного, G1 ставить схеми (got_magnet_at, подія magnet via push1), G2 подію lesson_gift; 403 =
+    позначка blocked:<id> (ставить api_raw). Вікно закрилось чи сервер зупиняють: решту не чіпаємо, наступний
+    /push1 go їх дошле. Наприкінці звіт тому, хто запустив."""
     sent = {s: 0 for s in PUSH_SEGS if t.get(s)}
-    blocked, errors = [], []
+    blocked, errors, had = [], [], []
     already = nodb = left = 0
     try:
         for i, (uid, s) in enumerate(targets):
@@ -1922,16 +1997,29 @@ def _push1_worker(by, targets, t):
             key = PUSH_KEY + ":" + str(uid)
             store.session_begin()
             try:
+                if s == "G1":
+                    why = _push1_g1_busy(uid)
+                    if why:
+                        had.append(str(uid) + " " + why)
+                        continue
                 if not store.kv_claim(key):
                     if store.kv_get(key):
                         already += 1
                     else:
                         nodb += 1
                     continue
-                j = _push1_send(uid, t[s], kb)
+                if s == "G2":
+                    kabinet_mist.push_user(uid)            # людина в базі кабінету до кнопки уроку
+                j = _push1_deliver(uid, s, t)
                 if j.get("ok"):
                     sent[s] += 1
                     store.kv_set(key, "ok " + s)
+                    if s == "G1":
+                        store.mark_magnet(uid)
+                        store.log_event(uid, "magnet", {"via": PUSH_KEY})
+                        kabinet_mist.push_user(uid)
+                    else:
+                        store.log_event(uid, "lesson_gift", {"via": PUSH_KEY})
                     store.log_event(uid, PUSH_KEY, {"seg": s, "ok": True})
                 elif j.get("error_code") == 403:
                     blocked.append(uid)
@@ -1952,6 +2040,8 @@ def _push1_worker(by, targets, t):
                          + "), позначені, розсилки їх більше не чіпають.")
         if errors:
             lines.append("Не пішло з іншої причини: " + str(len(errors)) + " (" + "; ".join(errors) + ").")
+        if had:
+            lines.append("G1 не надіслано, бо схеми вже є чи саме йдуть: " + str(len(had)) + " (" + "; ".join(had) + ").")
         if already:
             lines.append("Уже отримали раніше: " + str(already) + ".")
         if nodb:
@@ -1962,7 +2052,7 @@ def _push1_worker(by, targets, t):
         store.session_begin()
         try:
             store.log_event(by, "push1_run", {"sent": sent, "blocked": len(blocked), "err": len(errors),
-                                              "already": already, "nodb": nodb, "left": left})
+                                              "had": len(had), "already": already, "nodb": nodb, "left": left})
         finally:
             store.session_end()
         send(by, "\n".join(lines))
@@ -2006,7 +2096,8 @@ LYUDY_KINDS = {"start": "/start", "magnet": "3 схеми", "retush_entry": "в�
                "mk_grant": "видача МК", "mk_want": "заявка МК", "mk_open": "опис МК", "mk_entry": "опис МК",
                "kanal_btn": "кнопка каналу", "lesson": "урок курсу", "practice": "практика",
                "guide_open": "картка гайда", "retush_open": "картка курсу", "tier_pick": "вибір тарифу",
-               "keyword": "слово", "kurs_entry": "вхід курсу", "guide_entry": "вхід гайда", "mk_again": "МК вдруге"}
+               "keyword": "слово", "kurs_entry": "вхід курсу", "guide_entry": "вхід гайда", "mk_again": "МК вдруге",
+               "lesson_gift": "подарунок уроку 1.5"}
 KANAL_TTL = 600                                # секунд памʼятаємо відповідь getChatMember
 KANAL_MAX = 200                                # нових запитів getChatMember за одне відкриття сторінки
 _kanal_cache = {}                              # uid -> (коли, (True/False/None, пояснення))
@@ -2132,7 +2223,8 @@ def lyudy_rows(data, now=None):
                   else "кнопка «Забрати три схеми»" if mg_ev else "позначка в базі")
         l15 = (kp.get(uid) or {}).get("1.5") or {}
         l_entry = (e.get("retush_entry") or {}).get("first_at")
-        lesson = bool(l_entry or l15)
+        l_gift = (e.get("lesson_gift") or {}).get("first_at")     # урок подаровано (push1 G2)
+        lesson = bool(l_entry or l_gift or l15)
         guide_done, guide_s = _lyudy_buys(ps, e, TIERS)
         course_done, course_s = _lyudy_buys(ps, e, LYUDY_COURSE)
         mk = bool(e.get("mk_grant")) or any((p.get("order_code") or "").startswith("MK")
@@ -2158,7 +2250,8 @@ def lyudy_rows(data, now=None):
             "f": [x for x in [
                 ("прийшла", tag + ", " + _kt(came)),
                 ("3 схеми", (_kt(mg_at) + ", " + mg_via) if mg_at else "—"),
-                ("урок 1.5", ("вхід " + _kt(l_entry) + " · відкрила " + _kt(l15.get("start"))
+                ("урок 1.5", (("вхід " + _kt(l_entry) if l_entry or not l_gift else "подарунок " + _kt(l_gift))
+                              + " · відкрила " + _kt(l15.get("start"))
                               + " · додивилась " + _kt(l15.get("done"))) if lesson else "—"),
                 ("гайд", guide_s),
                 ("курс", course_s),
@@ -3330,11 +3423,12 @@ def hook():
             if u.get("is_bot"):
                 return "ok"
             text = (m.get("text") or m.get("caption") or "").strip()
-            # Постійна кнопка «Мої матеріали» (13.10): кожен приватний /start (з видаленим чатом
-            # зникає і кнопка) і перше повідомлення людини без прапорця pkb:<id> отримують її
-            # рівно раз, у кінці апдейту (pkb_finish). Натиснута кнопка = вона вже є. Не Ірі.
+            # Постійна клавіатура «Мої матеріали» + «Канал «для своїх»» (13.10): кожен приватний /start
+            # (з видаленим чатом зникає і клавіатура) і перше повідомлення людини без прапорця pkb2:<id>
+            # отримують її рівно раз, у кінці апдейту (pkb_finish). Натиснута кнопка каналу = нова клавіатура
+            # вже є; «Мої матеріали» є і в старій, тож її натискання нічого не доводить. Не Ірі.
             if (m.get("chat") or {}).get("type") == "private" and chat_id == uid and uid != IRA_ID:
-                if text == "Мої матеріали":
+                if text == KANAL_BTN:
                     pkb_has(uid) or pkb_mark(uid)
                 elif text.startswith("/start") or not pkb_has(uid):
                     _tm.pkb_need = chat_id
@@ -3418,6 +3512,14 @@ def hook():
                 store.touch_user(u)
                 kb = lessons_kb(uid)
                 send(chat_id, MOI_TEXT if kb else moi_empty(uid), kb or empty_kb(uid))
+                return "ok"
+
+            # Кнопка каналу з постійної клавіатури (13.10): рядок Іри й інлайн-кнопка в канал. Персоналу не
+            # пересилаємо (це не повідомлення людини), подія kanal_btn.
+            if text == KANAL_BTN and (m.get("chat") or {}).get("type") == "private":
+                store.touch_user(u)
+                store.log_event(uid, "kanal_btn")
+                send(chat_id, KANAL_BTN_TEXT, {"inline_keyboard": [[{"text": KANAL_BTN, "url": kanal_btn_url()}]]})
                 return "ok"
 
             if text.startswith("/start"):
