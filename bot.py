@@ -2231,6 +2231,21 @@ def perevirka_page():
     return _pre(perevirka_lines())
 
 
+@app.get("/stack/" + SECRET)
+def stack_page():
+    """Діагностика зависань (13.10, staging): стеки всіх потоків через faulthandler,
+    без linecache і замків logging (сторож _dump_stuck зависання не показав)."""
+    import faulthandler, tempfile
+    with tempfile.TemporaryFile("w+") as f:
+        faulthandler.dump_traceback(file=f, all_threads=True)
+        f.seek(0)
+        body = f.read()
+    names = {t.ident: t.name for t in threading.enumerate()}
+    infl = ["%s: апдейт %s, %.0fс" % (hex(tid), rec[0], time.time() - rec[1]) for tid, rec in list(_inflight.items())]
+    return _pre("потоки: " + ", ".join("%s=%s" % (hex(k), v) for k, v in names.items())
+                + "\n_inflight: " + ("; ".join(infl) or "порожньо") + "\n\n" + body)
+
+
 @app.get("/skyd/" + SECRET)
 def skyd():
     """
