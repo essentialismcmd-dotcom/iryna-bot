@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Постійна кнопка «Мої матеріали» в кожного з першого /start (13.10) БЕЗ мережі і бази.
-Кожен приватний /start і перше повідомлення людини без прапорця pkb:<id> отримують кнопку
-рівно раз: на відповіді без своєї клавіатури або рядком-носієм PERSIST_LINE у кінці апдейту.
-Натиснута кнопка = вона вже є (рядка нема). Не Ірі, не в групі, не в сповіщеннях персоналу,
-без розсилки (натискання інлайн-кнопок рядка не дають). Код МК тут вигаданий.
+Постійна клавіатура «Мої матеріали» + «Канал «для своїх»» в кожного з першого /start (13.10) БЕЗ мережі
+і бази. Кожен приватний /start і перше повідомлення людини без прапорця pkb2:<id> отримують її рівно раз:
+на відповіді без своєї клавіатури або рядком-носієм PERSIST_LINE у кінці апдейту. Стара клавіатура
+(прапорець pkb:<id>, лише «Мої матеріали») міняється на нову при наступному зверненні, без розсилки.
+Натиснута кнопка каналу = нова вже є; на неї рядок Іри з інлайн-кнопкою в канал (запрошення knopka),
+подія kanal_btn, персоналу нічого. Не Ірі, не в групі, не в сповіщеннях персоналу, без розсилки
+(натискання інлайн-кнопок рядка не дають). Код МК і запрошення тут вигадані.
 Запуск: python -B test_postiina_knopka.py
 """
 import os, sys, time, inspect
@@ -22,8 +24,8 @@ os.environ.update({"BOT_TOKEN": "test:token", "WEBHOOK_SECRET": "sekret", "ADMIN
                    "PAY_URL": "https://pay.test/jar", "COURSE_BUNDLE_ONLY": "1",
                    "COURSE1_FILES": "Урок 1 · основи > video:V1, document:D1 | Урок 2 · бʼюті > video:V2, document:D2",
                    "COURSE2_FILES": "", "KABINET_URL": "https://kab.test", "KABINET_KEY": "k",
-                   "MK_LINK": KOD + ",3,2099-12-31"})
-for _k in ("DATABASE_URL", "IRA_ON", "START_PIC"):
+                   "MK_LINK": KOD + ",3,2099-12-31", "KANAL_KNOPKA_URL": "https://t.me/+TESTknopka"})
+for _k in ("DATABASE_URL", "IRA_ON", "START_PIC", "KANAL_BTN_TEXT"):
     os.environ.pop(_k, None)
 
 import requests
@@ -111,11 +113,11 @@ def purchases_of(uid, only_paid=True):
             and (not only_paid or p["status"] in ("paid", "delivered"))]
 
 
-def wipe_user(uid):      # як store.wipe_user: рядки людини і її kv tag:/pkb:
+def wipe_user(uid):      # як store.wipe_user: рядки людини і її kv tag:/pkb:/pkb2:
     DB["users"].pop(uid, None)
     for oc in [oc for oc, p in DB["purchases"].items() if p["user_id"] == uid]:
         DB["purchases"].pop(oc)
-    for k in ("tag:" + str(uid), "pkb:" + str(uid)):
+    for k in ("tag:" + str(uid), "pkb:" + str(uid), "pkb2:" + str(uid)):
         DB["kv"].pop(k, None)
     return {"users": 1, "purchases": 0, "events": 0}
 
@@ -187,7 +189,10 @@ ok("новенька /start: вітання з інлайн-кнопкою ма�
 ok("новенька /start: рядок-носій останнім, з постійною кнопкою", t and t[-1].get("text") == bot.PERSIST_LINE
    and t[-1].get("reply_markup") == bot.PERSIST_KB)
 ok("новенька /start: кнопка рівно раз", len(z_knopkoyu(601)) == 1 and len(nosii(601)) == 1, str(len(z_knopkoyu(601))))
-ok("новенька /start: прапорець pkb у kv", DB["kv"].get("pkb:601") == "1")
+ok("новенька /start: прапорець pkb2 у kv", DB["kv"].get("pkb2:601") == "1" and bot.PKB_KEY == "pkb2")
+ok("клавіатура: «Мої матеріали» і «Канал «для своїх»» в одному ряду",
+   bot.PERSIST_KB["keyboard"] == [[{"text": "Мої матеріали"}, {"text": "Канал «для своїх»"}]]
+   and bot.PERSIST_KB.get("is_persistent") is True)
 ok("сповіщення «Новий у боті» персоналу є, кнопки в них нема",
    any((p.get("text") or "").startswith("Новий у боті") for p in to(1))
    and any((p.get("text") or "").startswith("Новий у боті") for p in to(7)) and staff_bez_knopky())
@@ -211,12 +216,48 @@ VYKLYKY.clear()
 msg("ще питання", 602)
 ok("стара людина: друге повідомлення без рядка", to(602) and not nosii(602))
 
-# 5. Стара людина тисне «Мої матеріали» знизу: кнопка вже є, рядка нема, прапорець ставимо
+# 5. Стара людина тисне «Мої матеріали» знизу: така кнопка є і в старій клавіатурі, тож нову везе рядок-носій раз
 DB["users"][603] = {"user_id": 603, "username": "u603", "first_name": "Стара2"}
 VYKLYKY.clear()
 msg("Мої матеріали", 603)
-ok("натиснула кнопку: відповідь «Мої матеріали» без рядка-носія", to(603) and not nosii(603))
-ok("натиснула кнопку: прапорець pkb у kv", DB["kv"].get("pkb:603") == "1")
+ok("натиснула «Мої матеріали»: відповідь і рядок-носій з новою клавіатурою раз", to(603) and len(nosii(603)) == 1
+   and nosii(603)[0].get("reply_markup") == bot.PERSIST_KB)
+ok("натиснула «Мої матеріали»: прапорець pkb2 у kv", DB["kv"].get("pkb2:603") == "1")
+VYKLYKY.clear()
+msg("Мої матеріали", 603)
+ok("натиснула вдруге: рядка-носія нема", to(603) and not nosii(603))
+
+# 5а. Стара клавіатура (прапорець pkb: до 13.10): наступне звернення міняє на нову рівно раз
+DB["users"][620] = {"user_id": 620, "username": "u620", "first_name": "Зі старою"}
+DB["kv"]["pkb:620"] = "1"
+VYKLYKY.clear()
+msg("добрий вечір", 620)
+ok("стара клавіатура: рядок-носій з новою раз", len(nosii(620)) == 1 and nosii(620)[0]["reply_markup"] == bot.PERSIST_KB
+   and DB["kv"].get("pkb2:620") == "1")
+VYKLYKY.clear()
+msg("ще одне", 620)
+ok("стара клавіатура: далі без рядка", to(620) and not nosii(620))
+
+# 5б. Кнопка каналу: рядок Іри з інлайн-кнопкою на запрошення knopka, подія, персоналу нічого
+DB["users"][621] = {"user_id": 621, "username": "u621", "first_name": "Тисне канал"}
+DB["events"].clear()
+VYKLYKY.clear()
+msg("Канал «для своїх»", 621)
+t = to(621)
+ok("кнопка каналу: одна відповідь, рядок Іри", len(t) == 1 and t[0].get("text") == bot.KANAL_BTN_TEXT
+   and bot.KANAL_BTN_TEXT == "Підписуйтесь на мій тг канал, там розповідаю свою історію🫶🏻", str(t)[:200])
+ok("кнопка каналу: інлайн-кнопка на запрошення knopka",
+   t and t[0].get("reply_markup") == {"inline_keyboard": [[{"text": "Канал «для своїх»", "url": "https://t.me/+TESTknopka"}]]})
+ok("кнопка каналу: подія kanal_btn", [e[1] for e in DB["events"] if e[0] == 621] == ["kanal_btn"], str(DB["events"]))
+ok("кнопка каналу: персоналу нічого (ні пересилки, ні сповіщення)", not to(1) and not to(7))
+ok("кнопка каналу: нова клавіатура вже є, прапорець pkb2 без рядка-носія", DB["kv"].get("pkb2:621") == "1" and not nosii(621))
+VYKLYKY.clear()
+msg("Канал «для своїх»", 7, name="Іра")
+ok("Іра той самий текст: без постійної клавіатури", not z_knopkoyu(7) and "pkb2:7" not in DB["kv"])
+_ku = bot.KANAL_KNOPKA_URL
+bot.KANAL_KNOPKA_URL = ""
+ok("без запрошення knopka: CHANNEL_URL", bot.kanal_btn_url() == "https://t.me/test_kanal")
+bot.KANAL_KNOPKA_URL = _ku
 
 # 6. Гостя МК: MK_HELLO без своєї клавіатури сам везе кнопку, рядка нема
 VYKLYKY.clear()
@@ -236,7 +277,7 @@ ok("Іра: про свій /start «Новий у боті» нікому не 
    not [p for m, p in VYKLYKY if (p.get("text") or "").startswith("Новий у боті")])
 VYKLYKY.clear()
 msg("як справи", 7, name="Іра")
-ok("Іра: текст без постійної кнопки", not z_knopkoyu(7) and "pkb:7" not in DB["kv"])
+ok("Іра: текст без постійної кнопки", not z_knopkoyu(7) and "pkb2:7" not in DB["kv"])
 
 # 8. Група: нічого
 VYKLYKY.clear()
@@ -247,7 +288,7 @@ ok("група: без рядка і кнопки", not nosii(-1005) and not z_k
 DB["users"][606] = {"user_id": 606, "username": "u606", "first_name": "Стара3"}
 VYKLYKY.clear()
 tisne("moi", 606)
-ok("натискання інлайн-кнопки: рядка-носія нема", to(606) and not nosii(606) and "pkb:606" not in DB["kv"])
+ok("натискання інлайн-кнопки: рядка-носія нема", to(606) and not nosii(606) and "pkb2:606" not in DB["kv"])
 
 # 10. Мітки з власними картками: retush, guide, kurs10, mk
 for uid, tag in ((607, "retush"), (608, "guide"), (611, "kurs10"), (612, "mk")):
@@ -293,14 +334,15 @@ bot.send_card = _sc
 
 # 14. /skyd стирає прапорець і памʼять процесу
 r = app.get("/skyd/sekret?uid=601")
-ok("/skyd: прапорець і памʼять стерто", r.status_code == 200 and "pkb:601" not in DB["kv"]
+ok("/skyd: прапорець і памʼять стерто", r.status_code == 200 and "pkb2:601" not in DB["kv"]
    and 601 not in bot._pkb_done)
 _calls = []
 _q = store_mod.q
 store_mod.q = lambda sql, args=(), fetch=None: _calls.append((sql, args)) or None
 ORIG_WIPE(601)
 store_mod.q = _q
-ok("store.wipe_user: kv tag: і pkb: одним запитом", any("delete from kv" in s and "pkb:601" in a[0] and "tag:601" in a[0]
+ok("store.wipe_user: kv tag:, pkb: і pkb2: одним запитом", any("delete from kv" in s and "pkb:601" in a[0]
+                                                                and "pkb2:601" in a[0] and "tag:601" in a[0]
                                                          for s, a in _calls), str(_calls[:1]))
 
 # 15. Текст рядка той самий, що в боті при видачі курсу
