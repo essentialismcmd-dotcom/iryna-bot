@@ -2793,7 +2793,9 @@ def hook():
                     _t = raw or src or atag or ""
                     rec = store.touch_user(u, source_tag=_t) or {}
                     store.log_event(uid, "start", {"tag": _t})
-                    if rec.get("is_new", True) and raw != MK_TAG:    # гість МК: своє сповіщення в mk_start
+                    # гість МК: своє сповіщення в mk_start; персонал про себе не сповіщає (13.10:
+                    # ритуал /nova + /start з акаунта Yaro будив Іру «Новий у боті: YR…»)
+                    if rec.get("is_new", True) and raw != MK_TAG and uid not in staff_ids():
                         notify("Новий у боті: " + who(u) + "\nМітка: " + (raw or "без мітки")
                                + (" (від " + PARTNERS.get(partner, partner) + ")" if partner else ""),
                                give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None)

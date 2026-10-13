@@ -232,6 +232,8 @@ ok("гостя МК: сповіщення «МК: видано» без кноп
 VYKLYKY.clear()
 msg("/start", 7, name="Іра")
 ok("Іра: /start без рядка і без постійної кнопки", to(7) and not nosii(7) and not z_knopkoyu(7))
+ok("Іра: про свій /start «Новий у боті» нікому не йде",
+   not [p for m, p in VYKLYKY if (p.get("text") or "").startswith("Новий у боті")])
 VYKLYKY.clear()
 msg("як справи", 7, name="Іра")
 ok("Іра: текст без постійної кнопки", not z_knopkoyu(7) and "pkb:7" not in DB["kv"])
@@ -258,9 +260,15 @@ for uid, tag in ((607, "retush"), (608, "guide"), (611, "kurs10"), (612, "mk")):
 # 11. Адмін пише сам: відповідь без клавіатури везе кнопку, сповіщення про себе без неї
 VYKLYKY.clear()
 msg("/start", 1, name="YR")
-ok("адмін /start: рядок-носій раз, «Новий у боті» собі без кнопки",
+ok("адмін /start: рядок-носій раз, інших повідомлень з кнопкою нема",
    len(nosii(1)) == 1 and not [p for p in to(1) if p.get("reply_markup") == bot.PERSIST_KB
                                and p.get("text") != bot.PERSIST_LINE])
+ok("адмін /start (він у NOTIFY_IDS): «Новий у боті» ні собі, ні Ірі",
+   not [p for m, p in VYKLYKY if (p.get("text") or "").startswith("Новий у боті")])
+VYKLYKY.clear()
+msg("/nova", 1, name="YR")
+msg("/start", 1, name="YR")
+ok("ритуал /nova + /start адміна: Іра (7) нічого не отримала", not to(7) and len(nosii(1)) == 1, str(to(7))[:120])
 VYKLYKY.clear()
 msg("/mk", 1, name="YR")
 ok("адмін /mk: відповідь без рядка-носія", to(1) and to(1)[-1]["text"].startswith("Посилання МК") and not nosii(1))
