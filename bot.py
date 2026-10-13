@@ -17,6 +17,7 @@
 import os, re, json, time, html, logging, threading, hmac, hashlib
 import requests
 from urllib.parse import urlencode
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from flask import Flask, request
@@ -1972,6 +1973,284 @@ def _push1_worker(by, targets, t):
         _push_busy.release()
 
 
+# ---------- люди (13.10): одна жива таблиця з бази, лише читання ----------
+#
+# Скарга Yaro 13.10 19:4x: обліку ніхто не веде, усе плутається, незрозуміло, хто в каналі і на якому етапі.
+# /lyudy/<S> (той самий секрет, що /db): угорі зведення (скільки людей на кожному етапі і скільки з них у каналі),
+# далі картка на людину: хто, звідки прийшла і коли, що отримала, коли і як (оплата, вручну /vydaty, МК), заявка
+# МК, чи в каналі (getChatMember: бот адмін каналу), останній дотик, етап одним словом. ?md=1 дає те саме
+# Markdown-текстом. Позначки людей поза персоналом (акаунти Yaro, друг, тест) лише в змінній LYUDY_MARKS на
+# Render («id:позначка,id:позначка»), бо репо публічний. Позначені й персонал у етапах не рахуються.
+
+def _marks(raw):
+    out = {}
+    for part in (raw or "").split(","):
+        i, _, mark = part.strip().partition(":")
+        try:
+            out[int(i)] = mark.strip() or "позначка"
+        except ValueError:
+            pass
+    return out
+
+
+LYUDY_MARKS = _marks(os.getenv("LYUDY_MARKS", ""))
+LYUDY_STAGES = ("МК", "курс", "гайд", "урок", "схеми", "старт")
+LYUDY_STAGE_NAMES = {"МК": "гайд і курс за посиланням МК", "курс": "курс (оплата чи вручну)",
+                     "гайд": "гайд без курсу", "урок": "безкоштовний урок 1.5, без покупок",
+                     "схеми": "лише 3 схеми світла, без покупок", "старт": "лише /start, нічого не отримали"}
+LYUDY_COURSE = ("k1", "k2", "k12", "k12z")
+LYUDY_CORE = ("прийшла", "3 схеми", "урок 1.5", "гайд", "курс", "останній дотик")   # решта рядків картки лише коли є що сказати
+LYUDY_MANUAL_WINDOW = timedelta(minutes=10)    # ручна видача і рядок покупки в межах цих хвилин = одна дія
+LYUDY_KINDS = {"start": "/start", "magnet": "3 схеми", "retush_entry": "вхід в урок 1.5", "message": "повідомлення",
+               "give_manual": "ручна видача", "pay_ok": "оплата", "push1": "push1", "staff_reply": "відповідь персоналу",
+               "mk_grant": "видача МК", "mk_want": "заявка МК", "mk_open": "опис МК", "mk_entry": "опис МК",
+               "kanal_btn": "кнопка каналу", "lesson": "урок курсу", "practice": "практика",
+               "guide_open": "картка гайда", "retush_open": "картка курсу", "tier_pick": "вибір тарифу",
+               "keyword": "слово", "kurs_entry": "вхід курсу", "guide_entry": "вхід гайда", "mk_again": "МК вдруге"}
+KANAL_TTL = 600                                # секунд памʼятаємо відповідь getChatMember
+KANAL_MAX = 200                                # нових запитів getChatMember за одне відкриття сторінки
+_kanal_cache = {}                              # uid -> (коли, (True/False/None, пояснення))
+KANAL_STATUS = {"creator": (True, "так (власник)"), "administrator": (True, "так (адмін)"),
+                "member": (True, "так"), "left": (False, "ні"), "kicked": (False, "ні (заблокована в каналі)")}
+LYUDY_CSS = ("body{font:15px/1.45 -apple-system,system-ui,Roboto,'Segoe UI',sans-serif;margin:0;padding:12px;"
+             "background:#fff;color:#111}h1{font-size:20px;margin:0 0 2px}h2{font-size:17px;margin:22px 0 6px}"
+             ".s{color:#666;font-size:13px}.p{border:1px solid #ddd;border-radius:10px;padding:8px 10px;margin:8px 0;"
+             "overflow-wrap:anywhere}.h{font-weight:600}.m{color:#a40000;font-weight:600}"
+             "table{border-collapse:collapse;margin:6px 0}td,th{padding:3px 12px 3px 0;text-align:left}"
+             "td.n{text-align:right}ul{margin:6px 0;padding-left:18px}")
+
+
+def _kt(dt):
+    """Час за Києвом коротко; нема = «—»."""
+    return kyiv_now(dt).strftime("%d.%m %H:%M") if dt else "—"
+
+
+def kanal_member(uid):
+    """Чи людина в каналі: getChatMember (бот адмін каналу). (True/False/None, пояснення); кеш KANAL_TTL."""
+    hit = _kanal_cache.get(uid)
+    if hit and time.time() - hit[0] < KANAL_TTL:
+        return hit[1]
+    if not CHANNEL_ID:
+        return (None, "невідомо: канал не заданий (CHANNEL_ID чи CHANNEL_URL)")
+    j = api_raw("getChatMember", chat_id=CHANNEL_ID, user_id=uid)
+    if j.get("ok"):
+        r = j.get("result") or {}
+        st = r.get("status")
+        if st == "restricted":
+            res = (True, "так (з обмеженнями)") if r.get("is_member") else (False, "ні")
+        else:
+            res = KANAL_STATUS.get(st, (None, "невідомо: статус " + str(st)))
+    else:
+        d = str(j.get("description") or "немає відповіді")
+        res = (None, "невідомо: " + ("бот не адмін каналу (" + d[:80] + ")"
+                                     if "inaccessible" in d or "not enough rights" in d else "Telegram: " + d[:120]))
+    _kanal_cache[uid] = (time.time(), res)
+    return res
+
+
+def kanal_many(uids):
+    """getChatMember для багатьох у 4 потоки, не більше KANAL_MAX нових за раз (решта з кешу чи «оновіть»)."""
+    fresh = time.time() - KANAL_TTL
+    need = [u for u in uids if not (_kanal_cache.get(u) and _kanal_cache[u][0] > fresh)][:KANAL_MAX]
+    if need:
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            list(ex.map(kanal_member, need))
+    return {u: (_kanal_cache.get(u) or (0, (None, "невідомо: ще не перевірено, оновіть сторінку")))[1]
+            for u in uids}
+
+
+def _lyudy_how(p, e):
+    """Як видано покупку: МК, оплата (подія pay_ok з тим самим кодом), вручну (/vydaty чи кнопка, ±10 хв), тест."""
+    oc = p.get("order_code") or ""
+    if oc.startswith("MK") or p.get("source_tag") == "mk":
+        return "МК"
+    pairs = lambda kind: list(zip((e.get(kind) or {}).get("all_at") or [], (e.get(kind) or {}).get("all_p") or []))
+    if any((pl or {}).get("code") == oc for _, pl in pairs("pay_ok")):
+        return "оплата"
+    when = p.get("paid_at") or p.get("delivered_at")
+    for kind, word in (("give_manual", "вручну"), ("pay_test", "тест оплати")):
+        for at, pl in pairs(kind):
+            if (pl or {}).get("ok") and when and at and abs(at - when) <= LYUDY_MANUAL_WINDOW:
+                return word
+    return "спосіб невідомий"
+
+
+def _lyudy_buys(ps, e, tiers):
+    """Рядок покупок одного виду: оплачені й видані з часом і способом; обрані без оплати окремо."""
+    done = [p for p in ps if p.get("tier") in tiers and p.get("status") in ("paid", "delivered")]
+    new = [p for p in ps if p.get("tier") in tiers and p.get("status") not in ("paid", "delivered")]
+    parts = []
+    for p in done:
+        how = _lyudy_how(p, e)
+        amt = p.get("amount_uah")
+        parts.append(pname(p["tier"]) + " (" + p["tier"] + "), " + _kt(p.get("delivered_at") or p.get("paid_at"))
+                     + ", " + how + (", " + str(amt) + " грн" if how == "оплата" and amt else "")
+                     + ("" if p.get("status") == "delivered" else ", оплачено, не видано"))
+    for p in new:
+        parts.append("обрала " + p["tier"] + " " + _kt(p.get("created_at")) + ", не оплачено")
+    return done, "; ".join(parts) or "—"
+
+
+def lyudy_rows(data, now=None):
+    """Картки людей зі store.people_data(): словник на людину з етапом, позначками й полями картки."""
+    now = now or datetime.now(timezone.utc)
+    users = {u["user_id"]: u for u in data.get("users") or []}
+    pur, ev, kv, kp = {}, {}, {}, {}
+    for p in data.get("purchases") or []:
+        pur.setdefault(p["user_id"], []).append(p)
+    for x in data.get("events") or []:
+        ev.setdefault(x["user_id"], {})[x["kind"]] = x
+    for r in data.get("kv") or []:
+        parts = (r.get("k") or "").split(":")
+        try:
+            uid = int(parts[1])
+        except (IndexError, ValueError):
+            continue
+        if parts[0] == "kp" and len(parts) == 4:
+            kp.setdefault(uid, {}).setdefault(parts[2], {})[parts[3]] = r.get("updated_at")
+        elif len(parts) == 2:
+            kv.setdefault(uid, {})[parts[0]] = (r.get("v"), r.get("updated_at"))
+    staff = set(staff_ids()) | set(LEAD_IDS) | ({ADMIN_ID} if ADMIN_ID else set())
+    rows = []
+    for uid in sorted(set(users) | set(pur) | set(ev)):
+        u, e, ps, k = users.get(uid) or {}, ev.get(uid) or {}, pur.get(uid) or [], kv.get(uid) or {}
+        marks = []
+        if uid in staff or (u.get("role") or "client") != "client":
+            marks.append("персонал")
+        if uid in LYUDY_MARKS:
+            marks.append(LYUDY_MARKS[uid])
+        name = " ".join(x for x in (u.get("first_name"), u.get("last_name")) if x) or "без імені"
+        who_s = name + ", " + ("@" + u["username"] if u.get("username") else "без юзернейма") + ", id " + str(uid)
+        firsts = [x["first_at"] for x in e.values() if x.get("first_at")]
+        tag = u.get("source_tag") or ((e.get("start") or {}).get("first_p") or {}).get("tag") or "без мітки"
+        came = u.get("created_at") or (min(firsts) if firsts else None)
+        mg_ev = e.get("magnet") or {}
+        mg_at = u.get("got_magnet_at") or mg_ev.get("first_at")
+        mg_p = mg_ev.get("first_p") or {}
+        mg_via = ("" if not mg_at else "подарунок після уроку" if mg_p.get("via") == "gift"
+                  else "push1" if mg_p.get("via") == "push1" else "стара кнопка" if mg_p.get("legacy")
+                  else "кнопка «Забрати три схеми»" if mg_ev else "позначка в базі")
+        l15 = (kp.get(uid) or {}).get("1.5") or {}
+        l_entry = (e.get("retush_entry") or {}).get("first_at")
+        lesson = bool(l_entry or l15)
+        guide_done, guide_s = _lyudy_buys(ps, e, TIERS)
+        course_done, course_s = _lyudy_buys(ps, e, LYUDY_COURSE)
+        mk = bool(e.get("mk_grant")) or any((p.get("order_code") or "").startswith("MK")
+                                            and p.get("status") in ("paid", "delivered") for p in ps)
+        stage = ("МК" if mk else "курс" if course_done else "гайд" if guide_done
+                 else "урок" if lesson else "схеми" if mg_at else "старт")
+        parts = {n: v for n, v in (kp.get(uid) or {}).items() if n != "1.5"}
+        want = e.get("mk_want") or {}
+        mk_seen = [x["first_at"] for x in (e.get("mk_open"), e.get("mk_entry")) if x]
+        touches = [(u.get("last_seen_at"), "писала чи тиснула в боті")] + [
+            (x.get("last_at"), LYUDY_KINDS.get(kd, kd)) for kd, x in e.items()]
+        touches = [t for t in touches if t[0]]
+        last = max(touches, key=lambda t: t[0]) if touches else (None, "")
+        bl = k.get("blocked")
+        seen = u.get("last_seen_at")
+        msg = e.get("message") or {}
+        rows.append({
+            "id": uid, "who": who_s, "marks": marks, "stage": stage, "kanal": (None, "невідомо: ще не перевірено"),
+            "schemes": bool(mg_at), "lesson": lesson, "guide": bool(guide_done), "course": bool(course_done),
+            "mk": mk, "want": bool(want), "last_at": last[0],
+            "blocked": bool(bl and bl[1] and (not seen or bl[1] > seen)),
+            "push1": (k.get("push1") or (None,))[0],
+            "f": [x for x in [
+                ("прийшла", tag + ", " + _kt(came)),
+                ("3 схеми", (_kt(mg_at) + ", " + mg_via) if mg_at else "—"),
+                ("урок 1.5", ("вхід " + _kt(l_entry) + " · відкрила " + _kt(l15.get("start"))
+                              + " · додивилась " + _kt(l15.get("done"))) if lesson else "—"),
+                ("гайд", guide_s),
+                ("курс", course_s),
+                ("кабінет, інші частини", ("почала " + str(sum(1 for v in parts.values() if v.get("start")))
+                                           + ", додивилась " + str(sum(1 for v in parts.values() if v.get("done")))
+                                           ) if parts else "—"),
+                ("МК", ("гість за посиланням МК, " + _kt((e.get("mk_grant") or {}).get("first_at"))) if mk else
+                 ("заявка " + _kt(want.get("first_at")) + (" (натискань: " + str(want["n"]) + ")"
+                                                          if want.get("n", 0) > 1 else "")) if want else
+                 ("дивилась опис " + _kt(min(mk_seen)) + ", заявки нема") if mk_seen else "—"),
+                ("писала боту", (str(msg["n"]) + ", останнє " + _kt(msg.get("last_at"))) if msg else "—"),
+                ("останній дотик", (_kt(last[0]) + " (" + last[1] + ")") if last[0] else "—"),
+            ] + ([("заблокувала бота", _kt(bl[1]))] if bl and bl[1] and (not seen or bl[1] > seen) else [])
+              + ([("push1", str(k["push1"][0]))] if k.get("push1") else []) if x[1] != "—" or x[0] in LYUDY_CORE],
+        })
+    return rows
+
+
+def lyudy_summary(rows):
+    """Зведення угорі: етапи (і скільки з них у каналі), безкоштовне без покупок, МК, блоки, push1."""
+    cnt = [r for r in rows if not r["marks"]]
+    by = {s: [r for r in cnt if r["stage"] == s] for s in LYUDY_STAGES}
+    free = by["урок"] + by["схеми"]
+    unk = [r for r in cnt if r["kanal"][0] is None]
+    why = sorted(set(r["kanal"][1].replace("невідомо: ", "", 1) for r in unk))
+    return {
+        "table": [(s, len(by[s]), sum(1 for r in by[s] if r["kanal"][0] is True)) for s in LYUDY_STAGES],
+        "lines": [
+            "Людей у базі: " + str(len(rows)) + "; у підрахунку " + str(len(cnt)) + " (персонал і позначені окремо: "
+            + str(len(rows) - len(cnt)) + ").",
+            "У каналі: " + str(sum(1 for r in cnt if r["kanal"][0] is True)) + " з " + str(len(cnt))
+            + ("; невідомо " + str(len(unk)) + " (" + "; ".join(why)[:300] + ")" if unk else "") + ".",
+            "Безкоштовне без покупок: лише схеми " + str(sum(1 for r in free if r["schemes"] and not r["lesson"]))
+            + ", лише урок 1.5 " + str(sum(1 for r in free if r["lesson"] and not r["schemes"]))
+            + ", обидва " + str(sum(1 for r in free if r["lesson"] and r["schemes"])) + ".",
+            "Заявок на МК (людей): " + str(sum(1 for r in cnt if r["want"])) + "; гостей МК: " + str(len(by["МК"])) + ".",
+            "Заблокували бота: " + str(sum(1 for r in cnt if r["blocked"])) + "; push1 отримали: "
+            + str(sum(1 for r in cnt if (r["push1"] or "").startswith("ok"))) + ".",
+        ],
+    }
+
+
+def _lyudy_groups(rows):
+    """Розділи сторінки: етапи по черзі (свіжий дотик згори), позначені й персонал наприкінці."""
+    key = lambda r: r["last_at"] or datetime.min.replace(tzinfo=timezone.utc)
+    out = [(s + ": " + LYUDY_STAGE_NAMES[s], sorted([r for r in rows if not r["marks"] and r["stage"] == s],
+                                                   key=key, reverse=True)) for s in LYUDY_STAGES]
+    out.append(("Персонал і позначені (в етапах не рахуються)", sorted([r for r in rows if r["marks"]],
+                                                                       key=key, reverse=True)))
+    return [(t, g) for t, g in out if g]
+
+
+def lyudy_md(rows, now=None):
+    sm = lyudy_summary(rows)
+    out = ["# Люди бота @iryna_rul_bot", "", "Знято " + kyiv_now(now).strftime("%d.%m.%Y %H:%M")
+           + " за Києвом зі сторінки /lyudy (лише читання). Час у картках київський.", "", "## Зведення", "",
+           "| етап | людей | у каналі |", "|---|---|---|"]
+    out += ["| " + s + " | " + str(n) + " | " + str(k) + " |" for s, n, k in sm["table"]]
+    out += [""] + ["- " + x for x in sm["lines"]]
+    for title, grp in _lyudy_groups(rows):
+        out += ["", "## " + title + " (" + str(len(grp)) + ")"]
+        for r in grp:
+            out += ["", "### " + r["who"],
+                    "- етап: " + r["stage"] + (" · позначка: " + ", ".join(r["marks"]) if r["marks"] else "")
+                    + " · канал: " + r["kanal"][1]]
+            out += ["- " + n + ": " + v for n, v in r["f"]]
+    return "\n".join(out) + "\n"
+
+
+def lyudy_html(rows, now=None):
+    esc = lambda s: html.escape(str(s), quote=True)
+    sm = lyudy_summary(rows)
+    out = ['<!doctype html><html lang="uk"><head><meta charset="utf-8">',
+           '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Люди бота</title>',
+           "<style>" + LYUDY_CSS + "</style></head><body>", "<h1>Люди бота</h1>",
+           '<div class="s">' + esc(kyiv_now(now).strftime("%d.%m.%Y %H:%M"))
+           + " за Києвом, лише читання; ?md=1 дає текст</div>",
+           "<table><tr><th>етап</th><th>людей</th><th>у каналі</th></tr>"]
+    out += ['<tr><td>' + esc(s) + '</td><td class="n">' + str(n) + '</td><td class="n">' + str(k) + "</td></tr>"
+            for s, n, k in sm["table"]]
+    out += ["</table><ul>"] + ["<li>" + esc(x) + "</li>" for x in sm["lines"]] + ["</ul>"]
+    for title, grp in _lyudy_groups(rows):
+        out.append("<h2>" + esc(title) + " (" + str(len(grp)) + ")</h2>")
+        for r in grp:
+            out.append('<div class="p"><div class="h">' + esc(r["who"]) + "</div><div>етап: <b>" + esc(r["stage"])
+                       + "</b>" + (' · <span class="m">' + esc(", ".join(r["marks"])) + "</span>" if r["marks"] else "")
+                       + " · канал: " + esc(r["kanal"][1]) + "</div>"
+                       + "".join("<div>" + esc(n) + ": " + esc(v) + "</div>" for n, v in r["f"]) + "</div>")
+    out.append("</body></html>")
+    return "\n".join(out)
+
+
 # ---------- матеріали від Іри ----------
 #
 # Вона кидає що завгодно з коротким підписом, рівно як кидала в особистий чат.
@@ -2645,6 +2924,28 @@ def push1_page():
         return _pre(push1_summary(push1_segments(), push1_texts(), full=True))
     finally:
         store.session_end()
+
+
+@app.get("/lyudy/" + SECRET)
+def lyudy_page():
+    """Люди з бази для очей (13.10), лише читання: зведення й картка на людину; ?md=1 те саме Markdown-текстом."""
+    now = datetime.now(timezone.utc)
+    store.session_begin()
+    try:
+        data = store.people_data()
+    finally:
+        store.session_end()
+    md = request.args.get("md") == "1"
+    if data is None:
+        msg = "База " + ("не відповіла" if store.ON else "вимкнена (нема DATABASE_URL)") + ": людей не показую."
+        return (msg, 200, {"Content-Type": "text/plain; charset=utf-8"}) if md else _pre(msg)
+    rows = lyudy_rows(data, now)
+    kan = kanal_many([r["id"] for r in rows])
+    for r in rows:
+        r["kanal"] = kan[r["id"]]
+    if md:
+        return lyudy_md(rows, now), 200, {"Content-Type": "text/markdown; charset=utf-8"}
+    return lyudy_html(rows, now)
 
 
 @app.get("/skyd/" + SECRET)

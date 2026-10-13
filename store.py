@@ -616,6 +616,49 @@ def push_rows():
         return None
 
 
+# Сторінка /lyudy (13.10): усе про людей з бази одним заходом, лише читання. Події згорнуті по (людина, вид):
+# скільки, перша й остання, перший і останній payload; для оплат, ручних видач і МК ще всі часи й payload
+# (з них видно спосіб видачі кожної покупки). kv лише людські ключі: прогрес кабінету kp, blocked, push1, gift,
+# прапорці постійної кнопки, липка мітка. Без % у тексті запитів (як PUSH_SQL).
+PEOPLE_EV_SQL = """
+select user_id, kind, count(*) as n, min(created_at) as first_at, max(created_at) as last_at,
+       (array_agg(payload order by id))[1] as first_p,
+       (array_agg(payload order by id desc))[1] as last_p,
+       case when kind in ('pay_ok', 'pay_undelivered', 'give_manual', 'pay_test', 'mk_grant')
+            then array_agg(created_at order by id) end as all_at,
+       case when kind in ('pay_ok', 'pay_undelivered', 'give_manual', 'pay_test', 'mk_grant')
+            then array_agg(payload order by id) end as all_p
+  from events where user_id is not null
+ group by user_id, kind
+"""
+PEOPLE_KV_SQL = """
+select k, v, updated_at from kv
+ where split_part(k, ':', 1) in ('kp', 'blocked', 'push1', 'gift', 'pkb', 'pkb2', 'tag')
+"""
+
+
+def people_data():
+    """Для /lyudy: users, purchases, згорнуті події, kv людей. None = бази нема або вона не відповіла."""
+    if not _ensure():
+        return None
+    try:
+        with _conn() as c:
+            return {"users": c.execute("select * from users order by created_at").fetchall(),
+                    "purchases": c.execute("select * from purchases order by id").fetchall(),
+                    "events": c.execute(PEOPLE_EV_SQL).fetchall(),
+                    "kv": c.execute(PEOPLE_KV_SQL).fetchall()}
+    except Exception as e:
+        log.warning("people_data: %s", e)
+        c = getattr(_local, "conn", None)
+        if c is not None:
+            _local.conn = None
+            try:
+                c.close()
+            except Exception:
+                pass
+        return None
+
+
 def stats_day():
     """Цифри за добу, для рядка стану."""
     return {
