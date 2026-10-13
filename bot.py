@@ -17,7 +17,8 @@
 import os, re, json, time, html, logging, threading, hmac, hashlib
 import requests
 from urllib.parse import urlencode
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from flask import Flask, request
 
 import store
@@ -582,6 +583,25 @@ TAGS_STICKY = ("retush", "kurs", "kurs10", "mk", "guide")
 PARTNER_TAG_RE = re.compile(r"retush_([A-Za-z0-9]{1,30})")
 PARTNERS = {"liza": "Лізи (liza.khbchk)"}
 
+# Посилання для тих, хто купує МК в Іри (слово Yaro 13.10: «щоб там всі доступи у неї відразу
+# безкоштовно були», «Гайд і курс», «курс для них має бути відкритий на завжди»):
+# ?start=mk_<код> одразу дає гайд «Світло» (t1) і курс ретуші (k12) без оплати, назавжди.
+# MK_LINK="код,місць,РРРР-ММ-ДД" лише на Render (репозиторій публічний, коду тут нема);
+# дата це останній день за Києвом. Погана змінна = посилання закрите.
+def mk_link(raw):
+    """«код,місць,РРРР-ММ-ДД» → (код, місць, дата); погане поле дає "" чи 0, тобто закрите."""
+    p = [x.strip() for x in (raw or "").split(",")] + ["", "", ""]
+    code = p[0].lower() if re.fullmatch(r"[a-z0-9]{6,40}", p[0].lower()) else ""
+    return code, _price(p[1], 0), (p[2] if re.fullmatch(r"\d{4}-\d\d-\d\d", p[2]) else "")
+
+
+MK_CODE, MK_SEATS, MK_UNTIL = mk_link(os.getenv("MK_LINK", ""))
+MK_TAG = "mk_link"        # мітка в базі й подіях замість коду
+MK_HELLO = ("Дякую, що обрали мій майстер-клас ♥️ Гайд «Світло» і курс ретуші тепер ваші назавжди, "
+            "платити нічого не треба. Нижче гайд і перший урок курсу, решта уроків у кабінеті.")
+MK_AGAIN = "Гайд і курс уже у вас ♥️ Уроки нижче і в кабінеті."
+MK_SHUT = "Посилання вже не діє, але я отримала ваш запит і відкрию доступ вручну ♥️"
+
 
 def send_card_file(chat_id, path, text, markup=None):
     """Картка з локального файла (Telegram не завжди тягне наш URL): перший раз
@@ -1008,13 +1028,16 @@ def give_gift(uid, text):
     return ok
 
 
-def kyiv_hour(now=None):
+def kyiv_now(now=None):
     now = now or datetime.now(timezone.utc)
     try:
-        from zoneinfo import ZoneInfo
-        return now.astimezone(ZoneInfo("Europe/Kyiv")).hour
+        return now.astimezone(ZoneInfo("Europe/Kyiv"))
     except Exception:
-        return (now.hour + 3) % 24      # жовтень до 25.10: UTC+3
+        return now.astimezone(timezone(timedelta(hours=3)))      # жовтень до 25.10: UTC+3
+
+
+def kyiv_hour(now=None):
+    return kyiv_now(now).hour
 
 
 def gift_late_run(now=None):
@@ -1437,6 +1460,115 @@ def give_manual(by, target, key):
     if ok:
         kabinet_mist.push_user(target)
     return ok
+
+
+# ---------- посилання МК (13.10) ----------
+
+def mk_code(uid, key):
+    """Код МК-видачі: MK, не IR, тож банкою його не оплатити, і в /db це не оплата."""
+    return "MK" + b36(uid) + "-" + PRODUCTS[key]["code"]
+
+
+def mk_guest(uid):
+    """Людина отримала гайд і курс за посиланням МК (є МК-рядок курсу)."""
+    try:
+        return bool(store.get_purchase(mk_code(uid, "k12")))
+    except Exception:
+        return False
+
+
+def mk_closed(now=None):
+    """Чому посилання МК зараз не дає доступ; порожньо = відкрите."""
+    if not MK_CODE:
+        return "посилання не задане"
+    if MK_SEATS < 1:
+        return "місць 0"
+    try:
+        until = datetime.strptime(MK_UNTIL, "%Y-%m-%d").date()
+    except ValueError:
+        return "дата погана"
+    if kyiv_now(now).date() > until:
+        return "дата минула"
+    if store.kv_get("mk_off:" + MK_CODE):
+        return "зупинено /mk stop"
+    return ""
+
+
+def _mk_rows(uid):
+    """Доступ раніше за повідомлення: ціна 0, source_tag «mk» явно (інакше покупка бере мітку
+    людини, і курс зарахувався б партнеру), delivered без paid_at. Повтор нічого не дублює."""
+    for k in ("t1", "k12"):
+        oc = mk_code(uid, k)
+        store.add_purchase(uid, PRODUCTS[k]["product"], tier=k, order_code=oc,
+                           amount_uah=0, source_tag="mk")
+        store.mark_delivered(oc)
+
+
+def mk_start(chat_id, uid, u, code):
+    """/start mk_<код>: гайд і курс одразу й без оплати, одне місце з MK_SEATS на людину."""
+    store.touch_user(u, source_tag=MK_TAG)       # людина в базі до покупок (міст кабінету)
+    row = store.get_purchase(mk_code(uid, "k12"))
+    if row:
+        t1 = store.get_purchase(mk_code(uid, "t1")) or {}
+        if row.get("status") != "delivered" or t1.get("status") != "delivered":
+            _mk_rows(uid)                         # попередня видача обірвалась: дописуємо без нового місця
+            kabinet_mist.push_user(uid)
+        store.log_event(uid, "mk_again")
+        send(chat_id, MK_AGAIN, lessons_kb(uid))
+        return
+    if not MK_CODE:
+        why = "посилання не задане"
+    elif not hmac.compare_digest((code or "").strip().lower().encode(), MK_CODE.encode()):
+        why = "код не той"
+    else:
+        why = mk_closed()
+    seat = None if why else store.kv_take("mkn:" + MK_CODE, MK_SEATS)
+    if not seat:
+        why = why or "місць/бази нема"
+        shut = "закрите: " + why if why != "місць/бази нема" else why
+        store.log_event(uid, "mk_shut", {"why": why})
+        send(chat_id, MK_SHUT)
+        if lead_once(uid, "mk_shut"):
+            notify("МК НЕ видано (" + shut + "): " + who(u),
+                   {"inline_keyboard": give_kb(uid, "k12", "Видати курс вручну")["inline_keyboard"]
+                    + give_kb(uid, "t1", "Видати гайд вручну")["inline_keyboard"]})
+        return
+    had = owned_keys(uid, real=True)
+    _mk_rows(uid)
+    kabinet_mist.push_user(uid)
+    ok_g = ok_c = True
+    try:
+        send(chat_id, MK_HELLO)
+        if "t1" not in had:     # не give_guide: там підводка до продажу курсу
+            ok_g = bool(guide_ref() and api("sendDocument", retry=True, chat_id=chat_id, document=guide_ref()))
+        ok_c = course_owner_reply(chat_id, uid) if {"k1", "k2"} <= had else give_course(uid, "k12")
+    except Exception:
+        log.exception("mk_start %s", uid)
+        ok_g = ok_c = False
+    store.log_event(uid, "mk_grant", {"seat": int(seat), "of": MK_SEATS, "had": sorted(had)})
+    old = (["гайд"] if "t1" in had else []) + (["курс"] if {"k1", "k2"} & had else [])
+    notify("МК: видано, місце " + seat + " з " + str(MK_SEATS) + ": " + who(u)
+           + (" (вже мала: " + ", ".join(old) + ")" if old else "")
+           + ("" if ok_g else "\nГайд у чат не пішов, доступ у «Мої матеріали» є.")
+           + ("" if ok_c else "\nКурс у чат не пішов (" + ready_text("k12") + "), доступ і кабінет є."))
+
+
+def mk_status():
+    """Відповідь /mk персоналу: скільки видано, до якого дня, відкрите чи ні."""
+    if not MK_CODE:
+        return "Посилання МК не задане: змінна MK_LINK на Render (код,місць,РРРР-ММ-ДД)."
+    try:
+        until = datetime.strptime(MK_UNTIL, "%Y-%m-%d").strftime("%d.%m.%Y")
+    except ValueError:
+        until = MK_UNTIL or "?"
+    why = mk_closed()
+    n = store.kv_get("mkn:" + MK_CODE) if store.ON else None
+    if not why and n and n.isdigit() and int(n) >= MK_SEATS:
+        why = "місця скінчились"
+    return ("Посилання МК: видано " + (n or "0") + " з " + str(MK_SEATS) + ", до " + until
+            + " включно (Київ), " + ("відкрите" if not why else "закрите: " + why) + "."
+            + ("" if store.ON else " Бази нема: лічильник і /mk stop не зберігаються.")
+            + "\n/mk stop закрити, /mk start відкрити знову.")
 
 
 def ready_text(key):
@@ -1924,8 +2056,10 @@ def kabinet_podiia():
             mins = j.get("min")
             extra = " (%s хв)" % int(mins) if isinstance(mins, (int, float)) and mins > 0 else ""
             text = "%s (%s, id %s) додивилась урок %s%s" % (name, tag, uid, lesson, extra)
-        notify(text)
-        if kind == "done" and lesson == RETUSH_LESSON_PART and uid not in staff_ids():
+        quiet = mk_guest(uid)       # гості МК (13.10): 18 частин на людину, персоналу і подарунка не шлемо
+        if not quiet:
+            notify(text)
+        if kind == "done" and lesson == RETUSH_LESSON_PART and uid not in staff_ids() and not quiet:
             try:
                 if give_gift(uid, GIFT_DONE):
                     notify("Подарунок (три схеми світла) після уроку %s: %s" % (lesson, name))
@@ -2509,6 +2643,13 @@ def hook():
                 else:
                     send(chat_id, "Не вдалося видати " + name + ". " + pname(vkey) + ": " + ready_text(vkey))
                 return "ok"
+            # Посилання МК (13.10): /mk скільки видано і чи відкрите, /mk stop закрити, /mk start відкрити.
+            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/mk":
+                _arg = (text.split() + [""])[1].lower()
+                if MK_CODE and _arg in ("stop", "start"):
+                    store.kv_set("mk_off:" + MK_CODE, "1" if _arg == "stop" else "")
+                send(chat_id, mk_status())
+                return "ok"
             if uid == ADMIN_ID and text.startswith("/nova"):
                 store.wipe_user(uid)
                 send(chat_id, "Чисто. Видали цей чат і зайди в бота заново, побачиш його як нова людина.")
@@ -2550,6 +2691,8 @@ def hook():
                 _pm = PARTNER_TAG_RE.fullmatch(src)
                 if _pm:
                     src, partner = "retush", _pm.group(1).lower()
+                if src.startswith("mk_"):
+                    raw_src = MK_TAG      # 13.10: код посилання МК не пишемо в базу й події
                 analytics_tag = None
                 # 08.10: людина з лінки (retush, kurs10...) тисне просто /start і
                 # отримувала світло. Повторюємо її останню мітку.
@@ -2571,7 +2714,7 @@ def hook():
                     _t = raw or src or atag or ""
                     rec = store.touch_user(u, source_tag=_t) or {}
                     store.log_event(uid, "start", {"tag": _t})
-                    if rec.get("is_new", True):
+                    if rec.get("is_new", True) and raw != MK_TAG:    # гість МК: своє сповіщення в mk_start
                         notify("Новий у боті: " + who(u) + "\nМітка: " + (raw or "без мітки")
                                + (" (від " + PARTNERS.get(partner, partner) + ")" if partner else ""),
                                give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None)
@@ -2588,6 +2731,8 @@ def hook():
                     # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
                     bg(store.log_event, uid, "mk_entry", {"tag": src})
                     send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
+                elif src.startswith("mk_"):
+                    mk_start(chat_id, uid, u, src[3:])
                 elif src in ("kurs", "kurs10") and course_owner_reply(chat_id, uid):
                     bg(store.log_event, uid, "kurs_entry", {"tag": src})
                 elif src == "kurs10" and courses_sale():
