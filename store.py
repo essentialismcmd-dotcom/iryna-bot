@@ -531,6 +531,15 @@ def kv_claim(k):
     return bool(r)
 
 
+def kv_take(k, limit):
+    """Атомарне місце з ліміту (посилання МК, 13.10): номер узятого місця рядком,
+    None = місць нема або бази нема. Лічильник лише росте."""
+    r = q("""insert into kv (k, v) values (%s, '1') on conflict (k) do update
+             set v = (kv.v::int + 1)::text, updated_at = now() where kv.v::int < %s
+             returning v""", (k, limit), fetch="one")
+    return r["v"] if r else None
+
+
 def gift_candidates(since_iso, after_h, skip_ids):
     """Люди з міткою retush*, що зайшли після since і більше after_h годин тому, без магніту й покупок."""
     rows = q("""
