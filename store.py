@@ -556,6 +556,66 @@ def gift_candidates(since_iso, after_h, skip_ids):
     return [r["user_id"] for r in rows or []]
 
 
+# Розсилка push1 (13.10): по рядку на кожного, хто є в базі (users, оплачені й видані покупки, події).
+# Сегменти й виключення рахує bot.push1_segments; тут лише сирі ознаки. Агрегати одним проходом по
+# кожній таблиці (без підзапиту на людину), без % у тексті запиту (psycopg без параметрів його не чіпає).
+PUSH_SQL = """
+with ev as (
+    select user_id,
+           bool_or(kind = 'magnet') as ev_magnet,
+           bool_or(kind = 'retush_entry') as ev_lesson,
+           max(created_at) as last_event,
+           string_agg(case when kind = 'message' then payload ->> 'text' end, E'\\n') as texts
+      from events where user_id is not null group by user_id
+),
+pu as (
+    select user_id, array_agg(distinct tier) as tiers
+      from purchases where status in ('paid', 'delivered') and tier is not null group by user_id
+),
+kvs as (
+    select split_part(k, ':', 2) as uid_s,
+           bool_or(split_part(k, ':', 1) = 'kp' and split_part(k, ':', 3) = '1.5') as kab_lesson,
+           max(case when split_part(k, ':', 1) = 'blocked' then updated_at end) as blocked_at,
+           max(case when split_part(k, ':', 1) = 'push1' then v end) as push1
+      from kv where split_part(k, ':', 1) in ('kp', 'blocked', 'push1') group by 1
+),
+ids as (
+    select user_id from users union select user_id from pu union select user_id from ev
+)
+select i.user_id, u.username, u.first_name, u.last_name, u.role, u.source_tag,
+       u.got_magnet_at, u.last_seen_at,
+       coalesce(ev.ev_magnet, false) as ev_magnet, coalesce(ev.ev_lesson, false) as ev_lesson,
+       coalesce(kvs.kab_lesson, false) as kab_lesson, coalesce(pu.tiers, '{}') as tiers,
+       ev.last_event, ev.texts, kvs.blocked_at, kvs.push1
+  from ids i
+  left join users u on u.user_id = i.user_id
+  left join ev on ev.user_id = i.user_id
+  left join pu on pu.user_id = i.user_id
+  left join kvs on kvs.uid_s = i.user_id::text
+ order by i.user_id
+"""
+
+
+def push_rows():
+    """Сирі ознаки людей для push1 (див. PUSH_SQL). None = бази нема або вона не відповіла
+    (на відміну від q(..., "all"), що на збої дає [] і виглядало б як «нікому слати»)."""
+    if not _ensure():
+        return None
+    try:
+        with _conn() as c:
+            return c.execute(PUSH_SQL).fetchall()
+    except Exception as e:
+        log.warning("push_rows: %s", e)
+        c = getattr(_local, "conn", None)
+        if c is not None:
+            _local.conn = None
+            try:
+                c.close()
+            except Exception:
+                pass
+        return None
+
+
 def stats_day():
     """Цифри за добу, для рядка стану."""
     return {
