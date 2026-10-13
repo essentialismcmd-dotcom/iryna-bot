@@ -3215,12 +3215,56 @@ def ensure_webhook():
         log.warning("ensure_webhook: %s", e)
 
 
+# 13.10: потоки лише ПІСЛЯ fork, у воркері. Render запускає gunicorn з --preload: bot.py імпортує
+# майстер, воркер народжується fork-ом. Потоки, запущені при імпорті, працювали в майстрі, і fork
+# посеред їхнього першого запиту (requests робить `from netrc import ...`) лишав воркеру замок
+# модуля без власника: кожен requests.post у воркері висів назавжди (стек /stack на staging 13.10:
+# _lock_unlock_module у requests/utils.py get_netrc_auth). Після кількох деплоїв 13.10 перший апдейт
+# висів, а сторож _dump_stuck у майстрі воркерських зависань не бачив. Тепер майстер потоків не
+# має зовсім, polling, mono, подарунки й міст кабінету запускає воркер одразу після fork; без
+# --preload (імпорт у воркері) і в python bot.py потоки стартують при імпорті, як було.
+# Воркер має бути один (--workers 1), інакше кожен тягнув би getUpdates.
+_BG = {"started": False}
+
+
+def _start_background():
+    if _BG["started"]:
+        return
+    _BG["started"] = True
+    try:
+        _hook_sigterm()
+        threading.Thread(target=ensure_webhook, daemon=True).start()
+        threading.Thread(target=mono_poll, daemon=True).start()
+        threading.Thread(target=gift_loop, daemon=True, name="gift").start()
+        kabinet_mist.start()   # звірка з кабінетом раз на годину; без змінних нічого
+        log.info("фонові потоки запущено в процесі %s", os.getpid())
+    except Exception:
+        log.exception("фонові потоки не стартували")
+
+
+def _bg_after_fork_child():
+    _BG["started"] = False
+    _start_background()
+
+
+def _gunicorn_role():
+    """«master»: bot.py імпортує майстер gunicorn з --preload (далі fork воркера);
+    «worker»: імпорт у воркері (без --preload); "" поза gunicorn."""
+    import inspect
+    files = [f.filename.replace("\\", "/") for f in inspect.stack(0)]
+    if any(p.endswith("gunicorn/workers/base.py") for p in files):
+        return "worker"
+    if any(p.endswith("gunicorn/arbiter.py") for p in files):
+        return "master"
+    return ""
+
+
 if os.getenv("NO_THREADS", "").strip() != "1":
-    _hook_sigterm()
-    threading.Thread(target=ensure_webhook, daemon=True).start()
-    threading.Thread(target=mono_poll, daemon=True).start()
-    threading.Thread(target=gift_loop, daemon=True, name="gift").start()
-    kabinet_mist.start()   # звірка з кабінетом раз на годину; без змінних нічого
+    if _gunicorn_role() == "master" and hasattr(os, "register_at_fork"):
+        os.register_at_fork(after_in_child=_bg_after_fork_child)
+        log.info("імпорт у майстрі gunicorn (--preload): фонові потоки стартують у воркері після fork")
+    else:
+        _start_background()
 
 
 if __name__ == "__main__":
