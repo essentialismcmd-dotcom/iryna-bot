@@ -506,6 +506,25 @@ PERSIST_METHODS = ("sendMessage", "sendPhoto", "sendDocument", "sendVideo")
 PERSIST_LINE = "Усе куплене завжди під рукою в меню «Мої матеріали»."
 _pkb_done = set()    # кому кнопку вже віддано (прапорець pkb:<id> у kv); у памʼяті, щоб не питати базу щоразу
 
+# 403 на відправку людині (заблокувала бота, видалила акаунт, ніколи не починала): kv blocked:<id>, час
+# у updated_at (13.10, push1). Розсилки її пропускають, доки вона знову не напише боту (last_seen_at пізніше).
+BLOCK_METHODS = ("sendMessage", "sendPhoto", "sendDocument", "sendVideo", "sendMediaGroup", "sendAudio",
+                 "sendVoice", "sendAnimation", "sendVideoNote", "copyMessage", "forwardMessage")
+
+
+def mark_blocked(chat_id, why=None):
+    """Позначка «заблокували бота» лише для людей (id > 0), не для каналів і груп."""
+    try:
+        cid = int(chat_id)
+    except (TypeError, ValueError):
+        return
+    if cid <= 0 or not store.ON:
+        return
+    try:
+        store.kv_set("blocked:" + str(cid), (why or "403")[:200])
+    except Exception as e:
+        log.warning("blocked %s: %s", cid, e)
+
 
 def api_raw(method, **params):
     """Сира відповідь Telegram: {ok, result | description, error_code}."""
@@ -518,6 +537,8 @@ def api_raw(method, **params):
     try:
         r = requests.post(API + "/" + method, json=params, timeout=20)
         j = r.json()
+        if j.get("error_code") == 403 and method in BLOCK_METHODS:
+            mark_blocked(params.get("chat_id"), j.get("description"))
         if params.get("reply_markup") is PERSIST_KB and j.get("ok"):
             _tm.pkb_sent = params.get("chat_id")     # кнопка в цьому апдейті вже доїхала
         return j
@@ -797,6 +818,9 @@ def staff_reply(m, chat_id):
                 message_id=m.get("message_id"))
     if not r.get("ok"):
         send(chat_id, "Не вдалось надіслати людині: " + str(r.get("description")))
+    else:
+        # 13.10: відповідь персоналу теж «бот писав людині» (push1 не шле тим, кому писали за 24 год)
+        store.log_event(target, "staff_reply", {"by": (m.get("from") or {}).get("id")})
     return True
 
 
@@ -1633,6 +1657,321 @@ def ready_text(key):
     return "на місці" if guide_ref() else "GUIDE_FILE_ID не заданий"
 
 
+# ---------- розсилка push1 (13.10) ----------
+#
+# Слово Yaro 13.10 ~19:05 про тих, кому видали курси чи лід-магніти: «як ми їх будемо пушити?», «їх акуратно
+# запушити, і потім ще і в цьому пуші додати кнопку переходу на телеграм-канал ще». Разова розсилка лише з
+# рук персоналу (NOTIFY_IDS): /push1 це перегляд лише тому, хто питає; /push1 go шле людям раз на людину
+# (kv push1:<id>), одна людина на секунду, лише 10:00–20:00 за Києвом, звіт тому, хто запустив. Тексти й
+# підпис кнопки в push1.txt (змінні PUSH1_* перебивають файл), тож правка тексту не вимагає коду. Кнопка веде
+# на окреме запрошення push1 (рахує вступи), воно лише в змінній PUSH1_URL на Render.
+
+PUSH_KEY = "push1"
+PUSH_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "push1.txt")
+PUSH_SECTIONS = ("A", "B", "G", "KNOPKA", "URL")
+PUSH_SEGS = ("A", "B", "G")
+PUSH_SEG_NAMES = {"A": "магніт чи урок 1.5, без покупок", "B": "мають курс", "G": "гайд без курсу"}
+PUSH_STUB = "ЗАГЛУШКА"                      # слово в тексті = текст не затверджений, go не шле
+PUSH_BTN = "Канал «для своїх»"
+PUSH_CHANNEL = "https://t.me/iryna_rul_photographer"     # коли нема ні PUSH1_URL, ні CHANNEL_URL
+PUSH_FROM_H, PUSH_TO_H = 10, 20             # лише денні години за Києвом
+PUSH_PAUSE = 1.0                            # секунд між людьми
+PUSH_MAX = 4096                             # ліміт тексту повідомлення Telegram
+PUSH_NAMES_MAX = 15                         # імен на сегмент у перегляді в Telegram
+# Кого не чіпаємо, крім персоналу (тест-акаунти, свої, друзі): id через кому лише в змінній Render,
+# бо репозиторій публічний.
+PUSH_SKIP_IDS = _ids(os.getenv("PUSH_SKIP_IDS", ""))
+PUSH_COURSE = {"k1", "k2", "k12", "k12z"}
+PUSH_GUIDE = {"t1", "t2", "t3"}
+# «Стоп», відписка чи «не пишіть» у будь-якому повідомленні людини боту: розсилок їй не шлемо.
+PUSH_STOP_RE = re.compile(r"(?<!\w)(?:стоп|stop|unsubscribe)(?!\w)|(?<!\w)(?:відпи[сш]|отпи[сш])|(?<!\w)не\s+пиш",
+                          re.I)
+PUSH_SKIP_WHY = ("персонал", "вручну (PUSH_SKIP_IDS)", "push1 уже був", "заблокували бота",
+                 "писали «стоп»", "бот писав за 24 год")
+_push_busy = threading.Lock()
+
+
+def push1_texts(path=None):
+    """Тексти розсилки: секції [A], [B], [G], [KNOPKA], [URL] з push1.txt; рядки до першої секції це
+    коментар. Непорожня змінна Render PUSH1_<СЕКЦІЯ> перебиває файл («-» = порожньо, «\\n» = новий рядок)."""
+    sec, cur = {}, None
+    try:
+        with open(path or PUSH_FILE, encoding="utf-8") as f:
+            for line in f.read().splitlines():
+                m = re.fullmatch(r"\[(\w+)\]", line.strip())
+                if m and m.group(1).upper() in PUSH_SECTIONS:
+                    cur = m.group(1).upper()
+                    sec[cur] = []
+                elif cur:
+                    sec[cur].append(line.rstrip())
+    except OSError as e:
+        log.warning("push1.txt: %s", e)
+    out = {k: "\n".join(sec.get(k) or []).strip() for k in PUSH_SECTIONS}
+    for k in PUSH_SECTIONS:
+        env = os.getenv("PUSH1_" + k, "").strip()
+        if env:
+            out[k] = "" if env == "-" else env.replace("\\n", "\n")
+    return out
+
+
+def push1_link(t):
+    """Посилання кнопки і звідки воно: інвайт push1 (PUSH1_URL), інакше CHANNEL_URL, інакше канал."""
+    for url, src in ((t.get("URL"), "інвайт push1"), (CHANNEL_URL, "CHANNEL_URL, не інвайт push1"),
+                     (PUSH_CHANNEL, "запасне, не інвайт push1")):
+        if url and url.startswith("https://t.me/"):
+            return url, src
+    return PUSH_CHANNEL, "запасне, не інвайт push1"
+
+
+def push1_kb(t):
+    return {"inline_keyboard": [[{"text": t.get("KNOPKA") or PUSH_BTN, "url": push1_link(t)[0]}]]}
+
+
+def push1_problems(t):
+    """Чому go не шле з такими текстами; порожньо = можна."""
+    out = []
+    active = [s for s in PUSH_SEGS if t.get(s)]
+    if not active:
+        out.append("текстів нема")
+    for s in active:
+        if PUSH_STUB in t[s]:
+            out.append("текст " + s + " ще " + PUSH_STUB)
+        if len(t[s]) > PUSH_MAX:
+            out.append("текст " + s + " довший за " + str(PUSH_MAX) + " знаків")
+    if PUSH_STUB in (t.get("KNOPKA") or ""):
+        out.append("підпис кнопки ще " + PUSH_STUB)
+    return out
+
+
+def push1_window(now=None):
+    return PUSH_FROM_H <= kyiv_hour(now) < PUSH_TO_H
+
+
+def push1_segments(now=None):
+    """Хто що отримає, з живої бази: A узяли магніт (три схеми світла) чи урок 1.5 і нічого не купили,
+    B мають курс (оплата, /vydaty, посилання МК), G купили гайд без курсу. Не шлемо: персоналу,
+    PUSH_SKIP_IDS, кому push1 уже був, хто заблокував бота (403 пізніше за останній візит), хто писав
+    «стоп», кому бот писав за 24 год (будь-яка подія людини чи її візит за добу: кожна відповідь бота
+    йде з подією). None = бази нема або вона не відповіла."""
+    rows = store.push_rows() if store.ON else None
+    if rows is None:
+        return None
+    now = now or datetime.now(timezone.utc)
+    day_ago = now - timedelta(hours=24)
+    staff = {i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i}
+    skip_ids = set(PUSH_SKIP_IDS)
+    seg = {s: [] for s in PUSH_SEGS}
+    skip = {w: [] for w in PUSH_SKIP_WHY}
+    rest = 0
+    for r in rows:
+        uid = r.get("user_id")
+        tiers = set(r.get("tiers") or [])
+        magnet = bool(r.get("got_magnet_at") or r.get("ev_magnet"))
+        lesson = bool(r.get("ev_lesson") or r.get("kab_lesson")
+                      or str(r.get("source_tag") or "").startswith("retush"))
+        if tiers & PUSH_COURSE:
+            s = "B"
+        elif tiers & PUSH_GUIDE:
+            s = "G"
+        elif magnet or lesson:
+            s = "A"
+        else:
+            rest += 1
+            continue
+        seen, blocked_at = r.get("last_seen_at"), r.get("blocked_at")
+        last = [x for x in (r.get("last_event"), seen) if x]
+        if uid in staff or (r.get("role") or "client") != "client":
+            why = PUSH_SKIP_WHY[0]
+        elif uid in skip_ids:
+            why = PUSH_SKIP_WHY[1]
+        elif r.get("push1"):
+            why = PUSH_SKIP_WHY[2]
+        elif blocked_at and not (seen and seen > blocked_at):
+            why = PUSH_SKIP_WHY[3]
+        elif PUSH_STOP_RE.search(r.get("texts") or ""):
+            why = PUSH_SKIP_WHY[4]
+        elif last and max(last) > day_ago:
+            why = PUSH_SKIP_WHY[5]
+        else:
+            why = None
+        p = {"id": uid, "seg": s, "magnet": magnet, "lesson": lesson, "kab": bool(r.get("kab_lesson")),
+             "who": who({"id": uid, "username": r.get("username"), "first_name": r.get("first_name"),
+                         "last_name": r.get("last_name")})}
+        (skip[why] if why else seg[s]).append(p)
+    return {"seg": seg, "skip": skip, "rest": rest}
+
+
+def push1_summary(sg, t, full=False, now=None):
+    """Текст перегляду: числа, кнопка, стан текстів; full (сторінка /push1/<S>) поіменно всіх і тексти."""
+    active = [s for s in PUSH_SEGS if t.get(s)]
+    lines = ["push1, перегляд: нікому з людей нічого не надіслано.",
+             "Зараз " + kyiv_now(now).strftime("%d.%m %H:%M") + " за Києвом; /push1 go шле лише 10:00–20:00"
+             + (" (зараз можна)." if push1_window(now) else " (зараз ні).")]
+    if sg is None:
+        lines.append("База " + ("не відповіла" if store.ON else "вимкнена (нема DATABASE_URL)")
+                     + ": людей не рахую, go не шле.")
+    else:
+        seg, a = sg["seg"], sg["seg"]["A"]
+        lines.append("A, " + PUSH_SEG_NAMES["A"] + ": " + str(len(a)) + " (магніт у "
+                     + str(sum(p["magnet"] for p in a)) + ", урок 1.5 у " + str(sum(p["lesson"] for p in a))
+                     + ", з них відкрили урок у кабінеті " + str(sum(p["kab"] for p in a)) + ")")
+        lines.append("B, " + PUSH_SEG_NAMES["B"] + ": " + str(len(seg["B"])))
+        lines.append("G, " + PUSH_SEG_NAMES["G"] + ": " + str(len(seg["G"]))
+                     + ("" if t.get("G") else " (тексту G нема: їм не шлемо)"))
+        lines.append("Разом піде: " + str(sum(len(seg[s]) for s in active)))
+        lines.append("Не шлемо: " + ", ".join(w + " " + str(len(v)) for w, v in sg["skip"].items()))
+        lines.append("Решта в базі (лише /start, без магніту, уроку й покупок): " + str(sg["rest"]))
+    url, src = push1_link(t)
+    lines.append("Кнопка «" + (t.get("KNOPKA") or PUSH_BTN) + "»: " + url + " (" + src + ")")
+    probs = push1_problems(t)
+    lines.append("Тексти: " + ("готові, go шле їх дослівно." if not probs else "; ".join(probs) + ": go не шле."))
+    if sg is not None:
+        groups = [("Хто " + s, sg["seg"][s]) for s in PUSH_SEGS]
+        groups += [("Не шлемо, " + w, v) for w, v in sg["skip"].items() if full or w == PUSH_SKIP_WHY[5]]
+        for title, ppl in groups:
+            if not ppl:
+                continue
+            cap = len(ppl) if full else PUSH_NAMES_MAX
+            lines += ["", title + ":"] + ["  " + p["seg"] + "  " + p["who"] for p in ppl[:cap]]
+            if len(ppl) > cap:
+                lines.append("  і ще " + str(len(ppl) - cap))
+    if full:
+        for s in active:
+            lines += ["", "Текст " + s + ":", t[s]]
+        return "\n".join(lines)
+    if active:
+        lines += ["", "Нижче тексти так, як їх побачать люди: " + ", потім ".join(active) + "."]
+    text = "\n".join(lines)
+    return text if len(text) <= STATS_TEXT_MAX else text[:STATS_TEXT_MAX - 1] + "…"
+
+
+def push1_preview(to):
+    """/push1: підсумок і кожен текст з кнопкою рівно так, як їх побачать люди. Лише тому, хто питав."""
+    t = push1_texts()
+    send(to, push1_summary(push1_segments(), t))
+    kb = push1_kb(t)
+    for s in PUSH_SEGS:
+        if t.get(s):
+            api("sendMessage", chat_id=to, text=t[s][:PUSH_MAX], reply_markup=kb, disable_web_page_preview=True)
+
+
+def push1_spawn(fn):
+    threading.Thread(target=fn, daemon=True, name="push1").start()
+
+
+def push1_go(by, now=None):
+    """/push1 go: перевірки, потім фоновий потік розсилки. Повертає відповідь тому, хто запустив."""
+    if not store.ON:
+        return "Бази нема: без неї не знаю, кому вже надіслано. push1 нікому не надіслано."
+    if not push1_window(now):
+        return ("Зараз " + kyiv_now(now).strftime("%H:%M") + " за Києвом. push1 шле лише 10:00–20:00, "
+                "нікому не надіслано.")
+    t = push1_texts()
+    probs = push1_problems(t)
+    if probs:
+        return "push1 нікому не надіслано: " + "; ".join(probs) + "."
+    if not _push_busy.acquire(blocking=False):
+        return "push1 уже йде, звіт прийде сюди."
+    try:
+        sg = push1_segments(now)
+        if sg is None:
+            _push_busy.release()
+            return "База не відповіла, push1 нікому не надіслано. Спробуй ще раз за хвилину."
+        targets = [(p["id"], s) for s in PUSH_SEGS if t.get(s) for p in sg["seg"][s]]
+        if not targets:
+            _push_busy.release()
+            return "push1: нікому слати (усі вже отримали або не підходять). /push1 покаже, хто де."
+        n = {s: len(sg["seg"][s]) for s in PUSH_SEGS if t.get(s)}
+        push1_spawn(lambda: _push1_worker(by, targets, t))
+    except BaseException:
+        if _push_busy.locked():
+            _push_busy.release()
+        raise
+    return ("Почала push1: " + ", ".join(s + " " + str(v) for s, v in n.items()) + ", разом " + str(len(targets))
+            + ", одна людина на секунду (~" + str(len(targets)) + " с). Звіт пришлю сюди.")
+
+
+def _push1_send(uid, text, kb):
+    """Одне повідомлення людині; на 429 чекаємо, скільки просить Telegram (до 60 с), до трьох разів."""
+    j = {}
+    for _ in range(4):
+        j = api_raw("sendMessage", chat_id=uid, text=text, reply_markup=kb, disable_web_page_preview=True)
+        if j.get("error_code") != 429:
+            return j
+        wait = (j.get("parameters") or {}).get("retry_after") or 3
+        if wait > 60:
+            return j
+        time.sleep(wait + 0.3)
+    return j
+
+
+def _push1_worker(by, targets, t):
+    """Розсилка по черзі: заявка kv push1:<id> до відправки (вдруге та сама людина не отримає ніколи),
+    подія push1 на кожного, 403 = позначка blocked:<id> (ставить api_raw). Вікно закрилось чи сервер
+    зупиняють: решту не чіпаємо, наступний /push1 go їх дошле. Наприкінці звіт тому, хто запустив."""
+    kb = push1_kb(t)
+    sent = {s: 0 for s in PUSH_SEGS if t.get(s)}
+    blocked, errors = [], []
+    already = nodb = left = 0
+    try:
+        for i, (uid, s) in enumerate(targets):
+            if STOP.is_set() or not push1_window():
+                left = len(targets) - i
+                break
+            key = PUSH_KEY + ":" + str(uid)
+            store.session_begin()
+            try:
+                if not store.kv_claim(key):
+                    if store.kv_get(key):
+                        already += 1
+                    else:
+                        nodb += 1
+                    continue
+                j = _push1_send(uid, t[s], kb)
+                if j.get("ok"):
+                    sent[s] += 1
+                    store.kv_set(key, "ok " + s)
+                    store.log_event(uid, PUSH_KEY, {"seg": s, "ok": True})
+                elif j.get("error_code") == 403:
+                    blocked.append(uid)
+                    store.kv_set(key, "403 " + s)
+                    store.log_event(uid, PUSH_KEY, {"seg": s, "ok": False, "err": str(j.get("description"))[:200]})
+                else:
+                    errors.append(str(uid) + ": " + str(j.get("description"))[:100])
+                    store.kv_set(key, "err " + s)
+                    store.log_event(uid, PUSH_KEY, {"seg": s, "ok": False, "err": str(j.get("description"))[:200]})
+            finally:
+                store.session_end()
+            if i + 1 < len(targets):
+                time.sleep(PUSH_PAUSE)
+        lines = ["push1 готово: надіслано " + str(sum(sent.values())) + " ("
+                 + ", ".join(s + " " + str(v) for s, v in sent.items()) + ")."]
+        if blocked:
+            lines.append("Заблокували бота: " + str(len(blocked)) + " (id " + ", ".join(map(str, blocked))
+                         + "), позначені, розсилки їх більше не чіпають.")
+        if errors:
+            lines.append("Не пішло з іншої причини: " + str(len(errors)) + " (" + "; ".join(errors) + ").")
+        if already:
+            lines.append("Уже отримали раніше: " + str(already) + ".")
+        if nodb:
+            lines.append("База не відповіла: " + str(nodb) + ", не надіслано; наступний /push1 go дошле.")
+        if left:
+            lines.append("Не встигла до 20:00 за Києвом" + (" (зупинка сервера)" if STOP.is_set() else "")
+                         + ": " + str(left) + "; наступний /push1 go дошле, повторів не буде.")
+        store.session_begin()
+        try:
+            store.log_event(by, "push1_run", {"sent": sent, "blocked": len(blocked), "err": len(errors),
+                                              "already": already, "nodb": nodb, "left": left})
+        finally:
+            store.session_end()
+        send(by, "\n".join(lines))
+    except Exception as e:
+        log.exception("push1")
+        send(by, "push1 зламався посередині: " + str(e)[:200] + ". Надіслане не повториться; /push1 покаже решту.")
+    finally:
+        _push_busy.release()
+
+
 # ---------- матеріали від Іри ----------
 #
 # Вона кидає що завгодно з коротким підписом, рівно як кидала в особистий чат.
@@ -2298,6 +2637,16 @@ def stack_page():
                 + "\n_inflight: " + ("; ".join(infl) or "порожньо") + "\n\n" + body)
 
 
+@app.get("/push1/" + SECRET)
+def push1_page():
+    """Розсилка push1 для очей, лише читання: ті самі числа, що /push1, поіменно хто куди і чому ні, тексти."""
+    store.session_begin()
+    try:
+        return _pre(push1_summary(push1_segments(), push1_texts(), full=True))
+    finally:
+        store.session_end()
+
+
 @app.get("/skyd/" + SECRET)
 def skyd():
     """
@@ -2727,6 +3076,14 @@ def hook():
                 if MK_CODE and _arg in ("stop", "start"):
                     store.kv_set("mk_off:" + MK_CODE, "1" if _arg == "stop" else "")
                 send(chat_id, mk_status())
+                return "ok"
+            # Розсилка push1 (13.10): /push1 перегляд лише тому, хто питає (не всім NOTIFY_IDS); /push1 go шле людям.
+            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/push1":
+                if (text.split() + [""])[1].lower() == "go":
+                    store.log_event(uid, "push1_go", {})
+                    send(uid, push1_go(uid))
+                else:
+                    push1_preview(uid)
                 return "ok"
             if uid == ADMIN_ID and text.startswith("/nova"):
                 store.wipe_user(uid)
