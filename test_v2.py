@@ -160,7 +160,7 @@ for d in ("magnet", "lock:check", "lock:free", "guide", "t1", "t2", "t3", "retus
 bot.give_magnet(555); bot.give_guide(555, "t1")
 _vse = " ".join(komu(555)).lower() + " " + " ".join(
     b["text"].lower() for m, p in VYKLYKY if p.get("chat_id") == 555 and p.get("reply_markup")
-    for r in p["reply_markup"]["inline_keyboard"] for b in r)
+    for r in p["reply_markup"].get("inline_keyboard", []) for b in r)
 _zle = [w for w in ("курс", "скоро", "записую", "варіант", "1200", "1900", "розбір кадр", "третю",
                    "ретуш", "другу кнопку") if w in _vse]
 ok("мітла: людина не бачить неіснуючого", not _zle, str(_zle))

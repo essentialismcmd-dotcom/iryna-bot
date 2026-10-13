@@ -88,10 +88,10 @@ def teksty(method="sendMessage"):
 
 
 def ostannia_klaviatura(chat_id=777):
-    """Остання клавіатура, надіслана саме людині, не адміну."""
+    """Остання інлайн-клавіатура, надіслана саме людині, не адміну (постійну «Мої матеріали» пропускаємо)."""
     for m, p in reversed(VYKLYKY):
-        if m == "sendMessage" and p.get("reply_markup") and p.get("chat_id") == chat_id:
-            return [b["text"] for row in p["reply_markup"]["inline_keyboard"] for b in row]
+        if m == "sendMessage" and (p.get("reply_markup") or {}).get("inline_keyboard") and p.get("chat_id") == chat_id:
+            return [b["text"] for row in p["reply_markup"].get("inline_keyboard", []) for b in row]
     return []
 
 
