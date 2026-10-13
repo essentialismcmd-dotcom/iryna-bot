@@ -2606,96 +2606,173 @@ PRYVATNIST = """<!doctype html>
       margin:0 auto;padding:32px 20px;color:#1c1e21;background:#fff}
  h1{font-size:26px;margin:0 0 4px} h2{font-size:18px;margin:28px 0 8px}
  .d{color:#65676b;font-size:14px;margin-bottom:24px}
- ul{padding-left:20px} hr{border:0;border-top:1px solid #dadde1;margin:36px 0}
- code{background:#f0f2f5;padding:1px 5px;border-radius:4px}
+ ul{padding-left:20px} li{margin:4px 0} hr{border:0;border-top:1px solid #dadde1;margin:36px 0}
+ code{background:#f0f2f5;padding:1px 5px;border-radius:4px} a{color:#0064d1}
 </style></head><body>
 
 <h1>Політика конфіденційності</h1>
-<div class="d">Застосунок <code>iryna-reklama</code> &middot; оновлено 4 вересня 2026</div>
+<div class="d">Telegram-бот <code>@iryna_rul_bot</code>, кабінет курсу і застосунок Meta
+<code>iryna-reklama</code> &middot; оновлено 13 жовтня 2026 &middot; <a href="#en">English</a></div>
 
-<h2>Хто оператор</h2>
-<p>Застосунком керує Ярослав Копчик приватно. Зв'язок:
-<a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>.</p>
+<h2>Чий це бот</h2>
+<p>Бот належить Ірині, бʼюті і фешн фотографу з Києва і Житомира (Instagram
+<a href="https://www.instagram.com/iryna_rul_photographer/">@iryna_rul_photographer</a>).
+Через нього вона видає свої матеріали з фотографії і ретуші: безкоштовні уроки, гайд і курс,
+і відповідає на питання. Бот, його сервер і застосунок Meta технічно обслуговує Ярослав Копчик.</p>
 
-<h2>Для чого застосунок</h2>
-<p>Застосунок обслуговує рекламний кабінет і професійний акаунт Instagram,
-якими оператор керує за дорученням власниці акаунта. Публічної реєстрації
-користувачів немає, стороннім людям він не доступний.</p>
-
-<h2>Які дані обробляються</h2>
+<h2>Контакти</h2>
 <ul>
- <li>Статистика реклами: витрати, покази, кліки, розмови.</li>
- <li>Повідомлення в Instagram Direct і коментарі акаунта, яким керує оператор,
-     разом з іменем співрозмовника, яке видно в самому листуванні.</li>
- <li>Службові ідентифікатори сторінки, акаунта Instagram і рекламного кабінету.</li>
+ <li>Ірина: Direct в Instagram
+     <a href="https://www.instagram.com/iryna_rul_photographer/">@iryna_rul_photographer</a>
+     або повідомлення в бот <a href="https://t.me/iryna_rul_bot">@iryna_rul_bot</a>.</li>
+ <li>Дані і технічні питання: <a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>
+     (Ярослав Копчик).</li>
+</ul>
+
+<h2>Які дані бере бот</h2>
+<ul>
+ <li>Профіль Telegram: числовий ID, імʼя, прізвище і @username так, як вони вказані у вашому Telegram.
+     Номера телефону бот не бачить і не просить.</li>
+ <li>Звідки ви прийшли: мітку посилання, яким ви відкрили бот (наприклад, з реклами чи з каналу).</li>
+ <li>Час першого візиту і останньої дії.</li>
+ <li>Що ви робите в боті і кабінеті курсу: натиснуті кнопки, отримані й відкриті матеріали, переглянуті уроки.</li>
+ <li>Ваші повідомлення боту (зберігаємо перші 300 знаків) і файли, які ви надсилаєте.
+     Їх бачать Ірина й адміністратор, щоб вам відповісти.</li>
+ <li>Покупки: що куплено, код замовлення, сума в гривнях, час оплати й видачі. Оплата проходить
+     через Monobank; бот бачить лише суму, час, коментар до платежу і підпис платника у виписці.
+     Даних картки бот не отримує.</li>
+ <li>Чи ви в Telegram-каналі Ірини і чи не заблокували бот.</li>
 </ul>
 
 <h2>Навіщо</h2>
-<p>Щоб відповідати на звернення клієнток цього акаунта і оцінювати
-результативність реклами. Інших цілей немає.</p>
+<ul>
+ <li>Видати матеріали і доступ до курсу, які ви отримали чи купили, і зберегти цей доступ.</li>
+ <li>Підтвердити оплату.</li>
+ <li>Відповісти на ваші питання і дати відгук на вашу ретуш.</li>
+ <li>Зрозуміти, які реклама й матеріали працюють: за мітками посилань і діями в боті.</li>
+ <li>Зрідка написати про нові матеріали тим, хто вже користувався ботом. Слово «стоп»
+     у будь-якому повідомленні боту вимикає такі розсилки.</li>
+</ul>
+<p>Дані не продаються і не передаються рекламним мережам чи іншим стороннім особам.</p>
 
-<h2>Кому передаються</h2>
-<p>Нікому. Дані не продаються, не передаються рекламним мережам і не
-використовуються для профілювання за межами цього акаунта.</p>
+<h2>Хто бачить і де зберігаються</h2>
+<p>Ірина й адміністратор бота. Сервер і база даних працюють у Render, дата-центр у Франкфурті (ЄС).
+Повідомлення доставляє Telegram, платежі обробляє Monobank, кожен за своїми правилами.</p>
 
-<h2>Де зберігаються і як довго</h2>
-<p>На робочому комп'ютері оператора та на сервері цього застосунку, доки
-триває робота з акаунтом. Після припинення роботи дані видаляються.</p>
+<h2>Скільки зберігаємо</h2>
+<p>Поки працює бот: куплене дає доступ назавжди, і запис про покупку цей доступ тримає.
+Якщо бот припинить роботу, дані видаляються. Раніше видаляємо на ваш запит.</p>
 
 <h2>Видалення даних</h2>
 <p>Напишіть на <a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>
-з темою <b>Видалення даних</b>. Дані видаляються протягом 30 днів,
-підтвердження надсилається у відповідь. Власниця акаунта може будь-коли
-відкликати доступ застосунку в налаштуваннях Meta, і обробка припиняється
-того ж дня.</p>
+з темою <b>Видалення даних</b> або напишіть боту «видаліть мої дані». Дані видаляються протягом
+30 днів, підтвердження надсилається у відповідь. Після видалення бот не памʼятає ваших покупок,
+тож доступ до них через бот зникає. Щоб бот просто більше не писав, досить його заблокувати.</p>
+
+<h2>Застосунок Meta «iryna-reklama»</h2>
+<p>Застосунок обслуговує рекламний кабінет і професійний акаунт Instagram
+@iryna_rul_photographer, якими оператор керує за дорученням власниці акаунта. Публічної
+реєстрації в ньому немає, стороннім людям він не доступний.</p>
+<ul>
+ <li>Які дані: статистика реклами (витрати, покази, кліки, розмови); повідомлення Instagram Direct
+     і коментарі цього акаунта разом з імʼям співрозмовника, яке видно в самому листуванні;
+     службові ідентифікатори сторінки, акаунта Instagram і рекламного кабінету.</li>
+ <li>Навіщо: відповідати на звернення клієнток цього акаунта й оцінювати результативність реклами.
+     Інших цілей немає.</li>
+ <li>Де і скільки: на робочому компʼютері оператора і на сервері в Render (Франкфурт), доки
+     триває робота з акаунтом; після її кінця дані видаляються. Видалення на запит так само,
+     як для бота вище. Власниця акаунта може будь-коли відкликати доступ застосунку
+     в налаштуваннях Meta, і обробка припиняється того ж дня.</li>
+</ul>
 
 <hr>
 
-<h1>Privacy Policy</h1>
-<div class="d">App <code>iryna-reklama</code> &middot; updated 4 September 2026</div>
+<h1 id="en">Privacy Policy</h1>
+<div class="d">Telegram bot <code>@iryna_rul_bot</code>, course cabinet and Meta app
+<code>iryna-reklama</code> &middot; updated 13 October 2026</div>
 
-<h2>Operator</h2>
-<p>This app is operated privately by Yaroslav Kopchyk.
-Contact: <a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>.</p>
+<h2>Whose bot this is</h2>
+<p>The bot belongs to Iryna, a beauty and fashion photographer based in Kyiv and Zhytomyr
+(Instagram <a href="https://www.instagram.com/iryna_rul_photographer/">@iryna_rul_photographer</a>).
+She uses it to deliver her photography and retouching materials (free lessons, a guide and a course)
+and to answer questions. The bot, its server and the Meta app are technically operated by
+Yaroslav Kopchyk.</p>
 
-<h2>Purpose</h2>
-<p>The app serves one advertising account and one Instagram professional account
-that the operator manages on behalf of the account owner. There is no public
-sign-up and no access for third parties.</p>
-
-<h2>Data processed</h2>
+<h2>Contacts</h2>
 <ul>
- <li>Advertising statistics: spend, impressions, clicks, conversations.</li>
- <li>Instagram Direct messages and comments of the managed account, including
-     the sender name visible in the conversation itself.</li>
- <li>Technical identifiers of the Page, Instagram account and ad account.</li>
+ <li>Iryna: Instagram Direct
+     <a href="https://www.instagram.com/iryna_rul_photographer/">@iryna_rul_photographer</a>
+     or a message to the bot <a href="https://t.me/iryna_rul_bot">@iryna_rul_bot</a>.</li>
+ <li>Data and technical questions: <a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>
+     (Yaroslav Kopchyk).</li>
+</ul>
+
+<h2>Data the bot collects</h2>
+<ul>
+ <li>Telegram profile: numeric ID, first name, last name and @username as set in your Telegram.
+     The bot does not see or ask for your phone number.</li>
+ <li>Where you came from: the label of the link you used to open the bot (for example, an ad or the channel).</li>
+ <li>Time of your first visit and of your last action.</li>
+ <li>What you do in the bot and the course cabinet: buttons pressed, materials received and opened,
+     lessons watched.</li>
+ <li>Messages you send to the bot (the first 300 characters are stored) and files you send.
+     Iryna and the administrator see them in order to reply.</li>
+ <li>Purchases: what was bought, order code, amount in UAH, time of payment and delivery. Payments go
+     through Monobank; the bot sees only the amount, time, payment comment and the payer label
+     in the statement. The bot never receives card details.</li>
+ <li>Whether you are in Iryna's Telegram channel and whether you have blocked the bot.</li>
 </ul>
 
 <h2>Why</h2>
-<p>To answer enquiries from this account's clients and to measure advertising
-performance. No other purpose.</p>
+<ul>
+ <li>To deliver the materials and course access you received or bought, and to keep that access.</li>
+ <li>To confirm payments.</li>
+ <li>To answer your questions and give feedback on your retouching.</li>
+ <li>To understand which ads and materials work, from link labels and actions in the bot.</li>
+ <li>To occasionally tell people who have used the bot about new materials. The word "stop"
+     in any message to the bot turns these messages off.</li>
+</ul>
+<p>Data is not sold and is not shared with ad networks or any other third parties.</p>
 
-<h2>Sharing</h2>
-<p>None. Data is not sold, not shared with ad networks, and not used for
-profiling beyond this account.</p>
+<h2>Who sees it and where it is stored</h2>
+<p>Iryna and the bot administrator. The server and database run on Render, data centre in
+Frankfurt (EU). Messages are delivered by Telegram and payments are processed by Monobank,
+each under its own terms.</p>
 
-<h2>Storage and retention</h2>
-<p>On the operator's working computer and on this app's server, for as long as
-the work on the account continues. Data is deleted when the work ends.</p>
+<h2>Retention</h2>
+<p>For as long as the bot operates: purchases give lifetime access, and the purchase record is
+what keeps that access. If the bot stops operating, the data is deleted. Earlier on request.</p>
 
 <h2>Data deletion</h2>
 <p>Email <a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a>
-with the subject <b>Data deletion</b>. Data is deleted within 30 days and a
-confirmation is sent in reply. The account owner can revoke the app's access in
-Meta settings at any time, which stops processing the same day.</p>
+with the subject <b>Data deletion</b>, or write "delete my data" to the bot. Data is deleted within
+30 days and a confirmation is sent in reply. After deletion the bot no longer knows your purchases,
+so access to them through the bot ends. To simply stop messages from the bot, block it.</p>
+
+<h2>Meta app "iryna-reklama"</h2>
+<p>The app serves one advertising account and the Instagram professional account
+@iryna_rul_photographer, which the operator manages on behalf of the account owner. There is
+no public sign-up and no access for third parties.</p>
+<ul>
+ <li>Data: advertising statistics (spend, impressions, clicks, conversations); Instagram Direct
+     messages and comments of this account, including the sender name visible in the conversation
+     itself; technical identifiers of the Page, Instagram account and ad account.</li>
+ <li>Why: to answer enquiries from this account's clients and to measure advertising performance.
+     No other purpose.</li>
+ <li>Where and how long: on the operator's working computer and on the server at Render (Frankfurt),
+     for as long as the work on the account continues; the data is deleted when it ends. Deletion on
+     request works as for the bot above. The account owner can revoke the app's access in Meta
+     settings at any time, which stops processing the same day.</li>
+</ul>
 
 </body></html>"""
 
 
 @app.get("/privacy")
 def privacy():
-    """Політика конфіденційності. Meta вимагає публічну адресу для публікації
-    застосунку, ця сторінка і є нею. Служить водночас інструкцією з видалення
+    """Політика конфіденційності бота, кабінету і застосунку Meta iryna-reklama
+    (українською й англійською, 13.10). Meta вимагає публічну адресу для
+    публікації застосунку, ця сторінка і є нею; водночас інструкція з видалення
     даних."""
     return PRYVATNIST, 200, {"Content-Type": "text/html; charset=utf-8"}
 
