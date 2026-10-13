@@ -492,6 +492,12 @@ _tm = threading.local()   # таймінг Telegram API в межах одног
 PERSIST_KB = {"keyboard": [[{"text": "Мої матеріали"}]], "resize_keyboard": True,
               "is_persistent": True}
 PERSIST_METHODS = ("sendMessage", "sendPhoto", "sendDocument", "sendVideo")
+# 13.10 (слово Yaro: «для всіх завжди», «завжди на виду»): кнопка в кожного з першого /start.
+# Вітання має свою інлайн-кнопку, а повідомлення несе лише одну клавіатуру, тож тоді кнопку
+# везе окремий рядок-носій (текст з видачі курсу). Коли якась відповідь апдейту і так без
+# своєї клавіатури, кнопка їде на ній, і рядка нема (pkb_finish).
+PERSIST_LINE = "Усе куплене завжди під рукою в меню «Мої матеріали»."
+_pkb_done = set()    # кому кнопку вже віддано (прапорець pkb:<id> у kv); у памʼяті, щоб не питати базу щоразу
 
 
 def api_raw(method, **params):
@@ -504,7 +510,10 @@ def api_raw(method, **params):
     t0 = time.time()
     try:
         r = requests.post(API + "/" + method, json=params, timeout=20)
-        return r.json()
+        j = r.json()
+        if params.get("reply_markup") is PERSIST_KB and j.get("ok"):
+            _tm.pkb_sent = params.get("chat_id")     # кнопка в цьому апдейті вже доїхала
+        return j
     except Exception as e:
         return {"ok": False, "description": str(e)}
     finally:
@@ -567,6 +576,40 @@ def api(method, retry=False, **params):
 def send(chat_id, text, markup=None):
     return api("sendMessage", chat_id=chat_id, text=text,
                reply_markup=markup, disable_web_page_preview=True)
+
+
+def pkb_has(uid):
+    """Чи людина вже отримала постійну кнопку: прапорець pkb:<id> у kv (з 13.10)."""
+    if uid in _pkb_done:
+        return True
+    try:
+        v = store.kv_get("pkb:" + str(uid))
+    except Exception:
+        v = None
+    if v:
+        _pkb_done.add(uid)
+    return bool(v)
+
+
+def pkb_mark(uid):
+    if uid in _pkb_done:
+        return
+    _pkb_done.add(uid)      # і без бази в цьому процесі рядок не повториться
+    try:
+        store.kv_set("pkb:" + str(uid), "1")
+    except Exception as e:
+        log.warning("pkb %s: %s", uid, e)
+
+
+def pkb_finish():
+    """Кінець апдейту людини, якій потрібна постійна кнопка: рівно один раз за апдейт.
+    Якщо кнопка вже доїхала на відповіді без своєї клавіатури, рядка-носія нема."""
+    cid, _tm.pkb_need = _tm.pkb_need, None
+    if getattr(_tm, "pkb_sent", None) != cid:
+        api("sendMessage", chat_id=cid, text=PERSIST_LINE, reply_markup=PERSIST_KB,
+            disable_web_page_preview=True)
+    if getattr(_tm, "pkb_sent", None) == cid:
+        pkb_mark(cid)
 
 
 TAGS_STICKY = ("retush", "kurs", "kurs10", "mk", "guide")
@@ -648,14 +691,22 @@ def send_card(chat_id, pic, text, markup=None):
     return send(chat_id, text, markup)
 
 
+def _staff_send(ids, text, markup=None):
+    """Сповіщення персоналу без постійної кнопки, навіть коли пише сам адмін (13.10)."""
+    person, _tm.person = getattr(_tm, "person", None), None
+    try:
+        for cid in ids:
+            send(cid, text, markup)
+    finally:
+        _tm.person = person
+
+
 def notify_lead(text):
-    for i in LEAD_IDS:
-        send(i, text)
+    _staff_send(LEAD_IDS, text)
 
 
 def notify(text, markup=None):
-    for cid in NOTIFY_IDS:
-        send(cid, text, markup)
+    _staff_send(NOTIFY_IDS, text, markup)
 
 
 def who(u):
@@ -2237,6 +2288,7 @@ def skyd():
         n = store.wipe_user(uid)
     finally:
         store.session_end()
+    _pkb_done.discard(uid)
     if n is None:
         return "база не відповіла, нічого не стерто", 503
     return ("<pre>стерто для " + str(uid) + ": користувач " + str(n.get("users", 0))
@@ -2571,6 +2623,7 @@ def hook():
     t_hook = time.time()
     _tm.tg_s, _tm.tg_n = 0.0, 0
     _tm.t0, _tm.upd, _tm.trace = t_hook, upd.get("update_id"), []
+    _tm.pkb_need = _tm.pkb_sent = None
     _mm = upd.get("message") or (upd.get("callback_query") or {}).get("message") or {}
     log.info("TRACE upd=%s вхід %s лаг_доставки=%s",
              upd.get("update_id"),
@@ -2581,8 +2634,9 @@ def hook():
     store.session_begin()
     _inflight[threading.get_ident()] = (upd.get("update_id"), t_hook, False)
     _from = ((upd.get("message") or upd.get("callback_query") or {}).get("from") or {})
+    # Іра постійної кнопки не отримує ніколи (13.10: і з вимкненим IRA_ON)
     _tm.person = (_from.get("id") if _from.get("id") and not _from.get("is_bot")
-                  and not (IRA_ON and _from.get("id") == IRA_ID) else None)
+                  and not (IRA_ID and _from.get("id") == IRA_ID) else None)
     _held = None
     try:
         if "message" in upd:
@@ -2593,6 +2647,14 @@ def hook():
             if u.get("is_bot"):
                 return "ok"
             text = (m.get("text") or m.get("caption") or "").strip()
+            # Постійна кнопка «Мої матеріали» (13.10): кожен приватний /start (з видаленим чатом
+            # зникає і кнопка) і перше повідомлення людини без прапорця pkb:<id> отримують її
+            # рівно раз, у кінці апдейту (pkb_finish). Натиснута кнопка = вона вже є. Не Ірі.
+            if (m.get("chat") or {}).get("type") == "private" and chat_id == uid and uid != IRA_ID:
+                if text == "Мої матеріали":
+                    pkb_has(uid) or pkb_mark(uid)
+                elif text.startswith("/start") or not pkb_has(uid):
+                    _tm.pkb_need = chat_id
 
             # Адмін бачить бот так само, як людина (слово Yaro 25.09): жодних
             # службових команд у Telegram, кошиків і збереження його тексту як
@@ -2635,6 +2697,7 @@ def hook():
                 return "ok"
             if uid == ADMIN_ID and text.startswith("/nova"):
                 store.wipe_user(uid)
+                _pkb_done.discard(uid)
                 send(chat_id, "Чисто. Видали цей чат і зайди в бота заново, побачиш його як нова людина.")
                 return "ok"
 
@@ -2897,10 +2960,16 @@ def hook():
                      else "Не вдалося. " + pname(key) + ": " + ready_text(key))
             return "ok"
     except Exception as e:
+        _tm.pkb_need = None          # відповідь зламалась: рядок-носій сам по собі не шлемо
         log.exception("update failed: %s", e)
     finally:
         if _held:
             _held.release()
+        if getattr(_tm, "pkb_need", None):
+            try:
+                pkb_finish()
+            except Exception as e:
+                log.warning("постійна кнопка: %s", e)
         _tm.person = None
         _inflight.pop(threading.get_ident(), None)
         store.session_end()
