@@ -737,11 +737,34 @@ def send_card(chat_id, pic, text, markup=None):
     return send(chat_id, text, markup)
 
 
+def yaro_account(uid):
+    """Акаунт Yaro (14.10): адмін або id з позначкою «акаунт Yaro» у LYUDY_MARKS (читається під час
+    виклику: змінну оголошено нижче). Його тести й клацання (ЗАЯВКА, «МК: видано», текст у боті)
+    не службові новини для Іри."""
+    if not uid:
+        return False
+    if ADMIN_ID and uid == ADMIN_ID:
+        return True
+    return "акаунт yaro" in str(LYUDY_MARKS.get(uid, "")).lower()
+
+
+def _without_ira(ids, target):
+    """Одержувачі сповіщення про `target`: про акаунт Yaro Ірі не йдемо (Yaro й далі отримує).
+    Бувало тричі за 14.10: тести з акаунта Yaro дійшли Ірі як «Повідомлення в боті від YR…» і ЗАЯВКА."""
+    if not (IRA_ID and yaro_account(target)):
+        return list(ids)
+    kept = [c for c in ids if c != IRA_ID]
+    if len(kept) != len(list(ids)):
+        log.info("акаунт Yaro %s: Ірі сповіщення не шлемо", target)
+    return kept
+
+
 def _staff_send(ids, text, markup=None, uid=None):
     """Сповіщення персоналу без постійної кнопки, навіть коли пише сам адмін (13.10). Сповіщення про
     одну людину (uid або єдиний «id N» у тексті) несе кнопки «Написати» і «🎁 Подарунок» (тим, хто
-    може /do), а reply на нього йде цій людині (14.10)."""
+    може /do), а reply на нього йде цій людині (14.10). Про акаунт Yaro Ірі не йде (14.10)."""
     target = uid or _one_person(text)
+    ids = _without_ira(ids, target)
     person, _tm.person = getattr(_tm, "person", None), None
     try:
         for cid in ids:
@@ -806,7 +829,7 @@ def forward_to_staff(m, chat_id, u):
     owned = owned_keys(uid)
     tag = "купила курс" if ({"k1", "k2"} & owned) else "курс не купувала"
     cap = (m.get("caption") or "").strip()
-    for cid in staff_ids():
+    for cid in _without_ira(staff_ids(), uid):
         if head:
             _fb_remember(cid, send(cid, "Від " + who(u) + " (" + tag + ")"
                                    + (":\n" + cap if cap else "")
