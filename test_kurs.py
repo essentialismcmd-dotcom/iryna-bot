@@ -359,7 +359,8 @@ perevirka("новий з міткою курсу: кнопка «Видати к
 VYKLYKY.clear()
 msg("/start guide", uid=9102)
 _n = [p for m, p in VYKLYKY if m == "sendMessage" and "Новий у боті" in (p.get("text") or "")]
-perevirka("мітка не курсу: без кнопки", _n and not _n[0].get("reply_markup"))
+perevirka("мітка не курсу: без кнопки give:", _n and not any((b.get("callback_data") or "").startswith("give:")
+          for row in (_n[0].get("reply_markup") or {}).get("inline_keyboard", []) for b in row))
 VYKLYKY.clear()
 cb("give:9101:k12", uid=1)
 perevirka("кнопка give:k12 відкриває курс", "Готово, курс ваш" in vse_teksty() and any(m == "sendVideo" for m, _ in VYKLYKY))

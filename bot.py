@@ -511,7 +511,8 @@ _pkb_done = set()    # кому кнопку вже віддано (прапор
 # 403 на відправку людині (заблокувала бота, видалила акаунт, ніколи не починала): kv blocked:<id>, час
 # у updated_at (13.10, push1). Розсилки її пропускають, доки вона знову не напише боту (last_seen_at пізніше).
 BLOCK_METHODS = ("sendMessage", "sendPhoto", "sendDocument", "sendVideo", "sendMediaGroup", "sendAudio",
-                 "sendVoice", "sendAnimation", "sendVideoNote", "copyMessage", "forwardMessage")
+                 "sendVoice", "sendAnimation", "sendVideoNote", "sendSticker", "copyMessage", "copyMessages",
+                 "forwardMessage")
 
 
 def mark_blocked(chat_id, why=None):
@@ -736,22 +737,29 @@ def send_card(chat_id, pic, text, markup=None):
     return send(chat_id, text, markup)
 
 
-def _staff_send(ids, text, markup=None):
-    """Сповіщення персоналу без постійної кнопки, навіть коли пише сам адмін (13.10)."""
+def _staff_send(ids, text, markup=None, uid=None):
+    """Сповіщення персоналу без постійної кнопки, навіть коли пише сам адмін (13.10). Сповіщення про
+    одну людину (uid або єдиний «id N» у тексті) несе кнопки «Написати» і «🎁 Подарунок» (тим, хто
+    може /do), а reply на нього йде цій людині (14.10)."""
+    target = uid or _one_person(text)
     person, _tm.person = getattr(_tm, "person", None), None
     try:
         for cid in ids:
-            send(cid, text, markup)
+            # про себе кнопок не треба (адмін як людина: «ТЕСТ оплати» про нього ж)
+            res = send(cid, text, _with_person(markup, target)
+                       if target and target != cid and staff_cmd(cid) else markup)
+            if target:
+                _fb_remember(cid, res, target)
     finally:
         _tm.person = person
 
 
-def notify_lead(text):
-    _staff_send(LEAD_IDS, text)
+def notify_lead(text, uid=None):
+    _staff_send(LEAD_IDS, text, uid=uid)
 
 
-def notify(text, markup=None):
-    _staff_send(NOTIFY_IDS, text, markup)
+def notify(text, markup=None, uid=None):
+    _staff_send(NOTIFY_IDS, text, markup, uid)
 
 
 def who(u):
@@ -802,43 +810,348 @@ def forward_to_staff(m, chat_id, u):
         if head:
             _fb_remember(cid, send(cid, "Від " + who(u) + " (" + tag + ")"
                                    + (":\n" + cap if cap else "")
-                                   + "\nВідповідь: reply на це або на файл нижче."), uid)
+                                   + "\nВідповідь: reply на це або на файл нижче.",
+                                   _with_person(None, uid) if staff_cmd(cid) else None), uid)
         _fb_remember(cid, api("forwardMessage", chat_id=cid, from_chat_id=chat_id,
                               message_id=m.get("message_id")), uid)
 
 
-def fb_target(rep):
-    """Кому адресована відповідь: з пам'яті, з forward_origin або з рядка «id N» у підписі."""
+def fb_target(rep, uid=None):
+    """Кому адресована відповідь: з пам'яті, з кнопки «Написати» (napys:<id>), з forward_origin або
+    з єдиного рядка «id N» у тексті. На власне повідомлення персоналу (не бота) лише з пам'яті:
+    чужий «id N» у своєму тексті чи переслане від друга людиною не вважаємо."""
     if not rep:
         return None
     t = _fb_map.get((rep.get("_chat"), rep.get("message_id")))
     if t:
         return t
+    if uid and (rep.get("from") or {}).get("id") == uid:
+        return None
+    for row in (rep.get("reply_markup") or {}).get("inline_keyboard") or []:
+        for b in row:
+            cd = b.get("callback_data") or ""
+            if cd.startswith("napys:") and cd[6:].isdigit():
+                return int(cd[6:])
     fo = rep.get("forward_origin") or {}
     su = fo.get("sender_user") or {}
     if su.get("id"):
         return su["id"]
-    mt = _ID_RE.search(rep.get("text") or rep.get("caption") or "")
-    return int(mt.group(1)) if mt else None
+    return _one_person(rep.get("text") or rep.get("caption") or "")
 
 
 def staff_reply(m, chat_id):
-    """Reply персоналу на переслане/сповіщення -> copyMessage людині. True, якщо оброблено."""
-    rep = m.get("reply_to_message")
-    if not rep:
+    """Reply персоналу на переслане/сповіщення -> людині (сумісна обгортка над staff_route).
+    True, якщо оброблено."""
+    if not m.get("reply_to_message"):
         return False
-    rep = dict(rep, _chat=chat_id)
-    target = fb_target(rep)
-    if not target or target in staff_ids():
-        return False
-    r = api_raw("copyMessage", chat_id=target, from_chat_id=chat_id,
-                message_id=m.get("message_id"))
-    if not r.get("ok"):
-        send(chat_id, "Не вдалось надіслати людині: " + str(r.get("description")))
+    return staff_route(m, chat_id, (m.get("from") or {}).get("id"))
+
+
+# ---------- відповідь людині будь-чим (14.10) ----------
+# Слово Yaro 14.10: «щоб можна було будь-що, будь-яке повідомлення легко людині надіслати без
+# переписування всього бота і передеплоювання». Три дороги, одна доставка і один журнал:
+#  1) reply персоналу на будь-яке сповіщення про людину (текст, фото, альбом, файл, голосове, кружок, стікер);
+#  2) /do <id> або кнопка «Написати» під сповіщенням: наступне повідомлення (будь-яке) піде цій людині;
+#  3) з ПК: POST /nadislaty/<секрет> (скрипт projects/iryna/bot/nadislaty.py у cowork).
+# Людина отримує копію без «переслано»; персонал коротке «Пішло: …» чи «Не пішло: …» reply-ем на своє.
+# Кожна відправка = подія staff_reply {by, via, type, text}: /events її показує, push1 рахує «бот писав».
+
+BOT_ID = int(TOKEN.split(":")[0]) if TOKEN.split(":")[0].isdigit() else 0
+DO_TTL = 3600             # секунд живе режим /do без повідомлення
+ALBUM_QUIET = 1.5         # секунд тиші, після яких альбом персоналу йде людині одним copyMessages
+ALBUM_LATE_S = 60         # пізні елементи вже відправленого альбому йдуть тій самій людині
+IRA_OWN = ("Прийняла ♥️",)     # reply Іри на ці відповіді бота = її матеріали, не «нема кому»
+_do = {}                  # хто з персоналу -> (кому, коли); None = перевірено, режиму нема
+_alb = {}                 # (чат, media_group_id) -> альбом персоналу, що збирається
+_alb_done = {}            # (чат, media_group_id) -> (кому, як, коли) для пізніх елементів
+_alb_lock = threading.Lock()
+_alb_tick = threading.Event()      # чекаємо Event.wait-ом: тести підміняють time.sleep
+_alb_spawn = [None]       # тести: свій запуск флашу замість bg
+
+
+def staff_cmd(uid):
+    """Хто може /do, /skasuvaty і кнопки «Написати»/«Подарунок»: NOTIFY_IDS і адмін."""
+    return bool(uid) and (uid in NOTIFY_IDS or uid == ADMIN_ID)
+
+
+def person_rows(uid):
+    return [[{"text": "Написати", "callback_data": "napys:%d" % uid},
+             {"text": "🎁 Подарунок", "callback_data": "podar:%d" % uid}]]
+
+
+def _one_person(text):
+    """Єдиний різний id у тексті; кілька різних = None (не вгадуємо, кому)."""
+    ids = {int(x) for x in _ID_RE.findall(text or "")}
+    return ids.pop() if len(ids) == 1 else None
+
+
+def _with_person(markup, uid):
+    """Рядок «Написати | 🎁 Подарунок» у кінець інлайн-клавіатури (перші кнопки лишаються на місці)."""
+    if markup and "inline_keyboard" not in markup:
+        return markup
+    return {"inline_keyboard": list((markup or {}).get("inline_keyboard") or []) + person_rows(uid)}
+
+
+def person_name(uid, ask=True):
+    """«Ім'я, @нік, id N» з бази; нема в базі і ask: getChat. Telegram людину не знає = None."""
+    u = None
+    try:
+        u = store.get_user(uid)
+    except Exception as e:
+        log.warning("person_name %s: %s", uid, e)
+    if not u and ask:
+        r = api_raw("getChat", chat_id=uid)
+        u = r.get("result") if r.get("ok") and isinstance(r.get("result"), dict) else None
+    if not u:
+        return None
+    return who({"id": uid, "username": u.get("username"),
+                "first_name": u.get("first_name"), "last_name": u.get("last_name")})
+
+
+def _staff_say(chat_id, text, reply_to=None, target=None):
+    """Коротка відповідь персоналу reply-ем на його повідомлення, без постійної кнопки;
+    з target reply на неї теж іде цій людині."""
+    person, _tm.person = getattr(_tm, "person", None), None
+    try:
+        res = api("sendMessage", chat_id=chat_id, text=text, disable_web_page_preview=True,
+                  reply_parameters={"message_id": reply_to, "allow_sending_without_reply": True}
+                  if reply_to else None)
+    finally:
+        _tm.person = person
+    if target:
+        _fb_remember(chat_id, res, target)
+    return res
+
+
+def _send_err(r):
+    d = str(r.get("description") or "")
+    if r.get("error_code") == 403:
+        return "людина заблокувала бота"
+    if "chat not found" in d.lower() or "can't initiate" in d.lower():
+        return "людина ще не писала боту"
+    return d or "Telegram не відповів"
+
+
+def msg_kind(m):
+    return extract_file(m)[0] or ("текст" if m.get("text") else "інше")
+
+
+def _log_sent(target, by, via, kind, text):
+    """13.10: відповідь персоналу теж «бот писав людині» (push1 не шле тим, кому писали за 24 год)."""
+    try:
+        store.log_event(target, "staff_reply", {"by": by, "via": via, "type": kind, "text": (text or "")[:300]})
+    except Exception as e:
+        log.warning("staff_reply подія %s: %s", target, e)
+
+
+def copy_to_person(chat_id, mids, target, by, via, kind, text, reply_to=None):
+    """Копія повідомлень персоналу людині (без «переслано»), подія і «Пішло»/«Не пішло». True = дійшло."""
+    mids = sorted(mids)
+    if len(mids) == 1:
+        r = api_raw("copyMessage", chat_id=target, from_chat_id=chat_id, message_id=mids[0])
     else:
-        # 13.10: відповідь персоналу теж «бот писав людині» (push1 не шле тим, кому писали за 24 год)
-        store.log_event(target, "staff_reply", {"by": (m.get("from") or {}).get("id")})
+        r = api_raw("copyMessages", chat_id=target, from_chat_id=chat_id, message_ids=mids)
+    name = person_name(target) or "id %s" % target
+    if not r.get("ok"):
+        log.warning("персонал -> %s (%s): %s", target, via, r.get("description"))
+        _staff_say(chat_id, "Не пішло: " + name + ": " + _send_err(r), reply_to)
+        return False
+    _log_sent(target, by, via, kind, text)
+    for mid in mids:
+        _fb_remember(chat_id, {"message_id": mid}, target)     # reply на своє відправлене = тій самій людині
+    _staff_say(chat_id, "Пішло: " + name, reply_to, target)
     return True
+
+
+def do_get(by):
+    """Режим /do цього персоналу: (кому або None, чи сплив). Сам режим не знімає."""
+    v = _do.get(by, False)
+    if v is False:
+        v = None
+        if store.ON:
+            try:
+                t, _, ts = (store.kv_get("do:%s" % by) or "").partition(":")
+                v = (int(t), float(ts)) if t.isdigit() else None
+            except Exception as e:
+                log.warning("do_get %s: %s", by, e)
+        _do[by] = v
+    if not v:
+        return None, False
+    if time.time() - v[1] > DO_TTL:
+        return None, True
+    return v[0], False
+
+
+def do_set(by, target):
+    now = time.time()
+    _do[by] = (target, now)
+    if store.ON:
+        try:
+            store.kv_set("do:%s" % by, "%s:%d" % (target, now))
+        except Exception as e:
+            log.warning("do_set %s: %s", by, e)
+
+
+def do_clear(by):
+    _do[by] = None
+    if store.ON:
+        try:
+            store.kv_set("do:%s" % by, "")
+        except Exception as e:
+            log.warning("do_clear %s: %s", by, e)
+
+
+def do_start(chat_id, by, target, reply_to=None):
+    """Режим /do: наступне повідомлення персоналу піде людині. Telegram її не знає = відмова."""
+    name = person_name(target)
+    if not name:
+        _staff_say(chat_id, "Не можу: id %s боту невідомий (людина ще не писала боту)." % target, reply_to)
+        return False
+    do_set(by, target)
+    _staff_say(chat_id, "Наступне ваше повідомлення піде: " + name
+               + "\nБудь-що: текст, фото, альбом, файл, голосове, кружок, стікер. Скасувати: /skasuvaty",
+               reply_to, target)
+    return True
+
+
+def podarunok_staff(chat_id, target, reply_to=None):
+    """/podarunok <id> і кнопка «🎁 Подарунок»: той самий give_gift з GIFT_HAND (раз назавжди, kv gift:<id>)."""
+    name = person_name(target, ask=False) or who({"id": target})
+    try:
+        ok = give_gift(target, GIFT_HAND)
+    except Exception:
+        log.exception("podarunok %s", target)
+        ok = False
+    if ok:
+        _staff_say(chat_id, "Подарунок (три схеми світла) пішов: " + name, reply_to)
+    else:
+        _staff_say(chat_id, "Не пішло: " + name + ". Схеми вже видані, подарунок уже йшов (заявка gift), "
+                   "або нема файла магніту / людина заблокувала бота. Дивись /lyudy.", reply_to)
+    return ok
+
+
+def _from_bot(rep):
+    f = rep.get("from") or {}
+    return bool(f.get("is_bot") or (BOT_ID and f.get("id") == BOT_ID))
+
+
+def _route(m, chat_id, uid):
+    """(кому, як: reply|do, чому ні). Усе None = повідомлення не людині (матеріали Іри, адмін як людина)."""
+    text = (m.get("text") or m.get("caption") or "").strip()
+    if text in ("Мої матеріали", KANAL_BTN):
+        return None, None, None            # кнопки постійної клавіатури адміна людям не шлемо
+    rep = m.get("reply_to_message")
+    if rep:
+        t = fb_target(dict(rep, _chat=chat_id), uid)
+        if t:
+            if t in staff_ids() and t != uid:
+                return None, None, None    # як до 14.10: відповідь про когось із персоналу не пересилаємо
+            return t, "reply", None
+        if _from_bot(rep) and (rep.get("text") or "") not in IRA_OWN + (IRA_HELLO,):
+            many = len(set(_ID_RE.findall(rep.get("text") or rep.get("caption") or ""))) > 1
+            return None, None, (("у цьому повідомленні кілька людей, не знаю кому" if many
+                                 else "не бачу, кому це") + ". Напишіть /do <id> і надішліть ще раз.")
+    if staff_cmd(uid):
+        t, expired = do_get(uid)
+        if t:
+            return t, "do", None
+        if expired:
+            return None, "do", "режим /do сплив (година без повідомлення). Напишіть /do <id> ще раз."
+    return None, None, None
+
+
+def staff_route(m, chat_id, uid):
+    """Повідомлення персоналу -> людині, якщо є адреса: reply на сповіщення про неї, на «Пішло» чи
+    картку /do, або режим /do. True = оброблено (пішло, не пішло чи пояснили чому);
+    False = це не людині, далі звичайна обробка."""
+    target, via, why = _route(m, chat_id, uid)
+    if m.get("media_group_id"):
+        return _album_add(m, chat_id, uid, target, via, why)
+    if via == "do":
+        do_clear(uid)                      # режим на одне повідомлення (і сплилий теж знімаємо)
+    if why:
+        _staff_say(chat_id, "Не пішло: " + why, m.get("message_id"))
+        return True
+    if not target:
+        return False
+    copy_to_person(chat_id, [m["message_id"]], target, uid, via, msg_kind(m),
+                   m.get("text") or m.get("caption"), m.get("message_id"))
+    return True
+
+
+def _album_add(m, chat_id, uid, target, via, why):
+    """Елемент альбому персоналу: збираємо (Telegram шле альбом окремими апдейтами, пул обробляє їх
+    паралельно), після ALBUM_QUIET тиші весь альбом іде людині одним copyMessages і одним «Пішло»."""
+    key = (chat_id, str(m.get("media_group_id")))
+    spawn, late = False, None
+    with _alb_lock:
+        a = _alb.get(key)
+        if a is None and key in _alb_done:
+            late = _alb_done[key]
+        elif a is None and not (target or why):
+            return False                   # альбом не людині
+        else:
+            if a is None:
+                a = _alb[key] = {"mids": [], "kinds": [], "text": "", "by": uid, "target": None,
+                                 "via": None, "why": None, "do": False, "t": 0.0}
+                spawn = True
+            a["mids"].append(m["message_id"])
+            a["kinds"].append(msg_kind(m))
+            a["text"] = a["text"] or m.get("caption") or ""
+            if target and not a["target"]:
+                a["target"], a["via"] = target, via
+            a["why"] = a["why"] or why
+            a["do"] = a["do"] or via == "do"
+            a["t"] = time.time()
+    if late is not None:
+        if late[0]:
+            copy_to_person(chat_id, [m["message_id"]], late[0], uid, late[1], msg_kind(m),
+                           m.get("caption"), m.get("message_id"))
+        return True
+    if spawn:
+        (_alb_spawn[0] or bg)(_album_wait, key)
+    return True
+
+
+def _album_wait(key):
+    while True:
+        with _alb_lock:
+            a = _alb.get(key)
+            if a is None:
+                return
+            left = a["t"] + ALBUM_QUIET - time.time()
+        if left <= 0:
+            break
+        _alb_tick.wait(min(left, 0.5))
+    album_flush(key)
+
+
+def album_flush(key):
+    now = time.time()
+    with _alb_lock:
+        a = _alb.pop(key, None)
+        if a is None:
+            return
+        for k in [k for k, v in _alb_done.items() if now - v[2] > ALBUM_LATE_S]:
+            _alb_done.pop(k, None)
+        _alb_done[key] = (a["target"], a["via"] or "reply", now)
+    chat_id, mids = key[0], sorted(a["mids"])
+    if a["do"]:
+        do_clear(a["by"])
+    if a["target"]:
+        counts = {}
+        for k in a["kinds"]:
+            counts[k] = counts.get(k, 0) + 1
+        kind = "альбом: " + ", ".join("%s×%d" % kv for kv in counts.items())
+        copy_to_person(chat_id, mids, a["target"], a["by"], a["via"], kind, a["text"], mids[0])
+    elif a["why"]:
+        _staff_say(chat_id, "Не пішло: " + a["why"], mids[0])
+
+
+def album_flush_all():
+    """Тести і зупинка: усі зібрані альбоми зараз."""
+    for key in list(_alb):
+        album_flush(key)
 
 
 # ---------- лійка ----------
@@ -941,7 +1254,7 @@ def pick_product(chat_id, uid, u, data):
     send(chat_id, body, pay_kb(data, uid))
     if lead_once(uid, "zayavka:" + data):
         notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
-               give_kb(uid, data))
+               give_kb(uid, data), uid=uid)
 
 
 def mk_kb():
@@ -1389,7 +1702,7 @@ def send_lesson(uid, ckey, idx):
     if sent < total:
         log.warning("урок %s/%s для %s: пішло %s з %s", ckey, idx, uid, sent, total)
         notify("Урок " + ckey + " №" + str(idx + 1) + " для id " + str(uid) + ": пішло "
-               + str(sent) + " з " + str(total) + " файлів.")
+               + str(sent) + " з " + str(total) + " файлів.", uid=uid)
     time.sleep(1.0)
     send(uid, LESSON_DONE if to_cab else LESSON_DONE_CHAT, next_kb(ckey, idx))
     store.log_event(uid, "lesson", {"course": ckey, "n": idx + 1, "sent": sent, "of": total})
@@ -1628,7 +1941,7 @@ def mk_start(chat_id, uid, u, code):
         if lead_once(uid, "mk_shut"):
             notify("МК НЕ видано (" + shut + "): " + who(u),
                    {"inline_keyboard": give_kb(uid, "k12", "Видати курс вручну")["inline_keyboard"]
-                    + give_kb(uid, "t1", "Видати гайд вручну")["inline_keyboard"]})
+                    + give_kb(uid, "t1", "Видати гайд вручну")["inline_keyboard"]}, uid=uid)
         return
     had = owned_keys(uid, real=True)
     _mk_rows(uid)
@@ -1647,7 +1960,7 @@ def mk_start(chat_id, uid, u, code):
     notify("МК: видано, місце " + seat + " з " + str(MK_SEATS) + ": " + who(u)
            + (" (вже мала: " + ", ".join(old) + ")" if old else "")
            + ("" if ok_g else "\nГайд у чат не пішов, доступ у «Мої матеріали» є.")
-           + ("" if ok_c else "\nКурс у чат не пішов (" + ready_text("k12") + "), доступ і кабінет є."))
+           + ("" if ok_c else "\nКурс у чат не пішов (" + ready_text("k12") + "), доступ і кабінет є."), uid=uid)
 
 
 def mk_status():
@@ -2419,7 +2732,7 @@ def handle_tx(tx):
     if amount < need * 0.9:
         store.log_event(uid, "pay_short", {"code": code, "uah": amount // 100})
         notify("Оплата " + str(amount // 100) + " грн за кодом " + code
-               + ", а треба " + str(need // 100) + " грн. " + pname(key) + ": не видано.")
+               + ", а треба " + str(need // 100) + " грн. " + pname(key) + ": не видано.", uid=uid)
         return
     if key in PRODUCTS:
         # Оплата з кодом без натиснутого тарифу: рядка покупки нема, mark_paid
@@ -2434,11 +2747,11 @@ def handle_tx(tx):
     kabinet_mist.push_user(uid)
     if ok:
         notify("Оплата " + str(amount // 100) + " грн, код " + code + ". "
-               + pname(key) + ": видано автоматично.")
+               + pname(key) + ": видано автоматично.", uid=uid)
     else:
         notify("Оплата " + str(amount // 100) + " грн, код " + code
                + ", але файл не пішов. " + pname(key) + ": " + ready_text(key),
-               give_kb(uid, key))
+               give_kb(uid, key), uid=uid)
 
 
 def mono_poll():
@@ -2895,11 +3208,11 @@ def kabinet_podiia():
             text = "%s (%s, id %s) додивилась урок %s%s" % (name, tag, uid, lesson, extra)
         quiet = mk_guest(uid)       # гості МК (13.10): 18 частин на людину, персоналу і подарунка не шлемо
         if not quiet:
-            notify(text)
+            notify(text, uid=uid)
         if kind == "done" and lesson == RETUSH_LESSON_PART and uid not in staff_ids() and not quiet:
             try:
                 if give_gift(uid, GIFT_DONE):
-                    notify("Подарунок (три схеми світла) після уроку %s: %s" % (lesson, name))
+                    notify("Подарунок (три схеми світла) після уроку %s: %s" % (lesson, name), uid=uid)
             except Exception:
                 log.exception("gift_done %s", uid)
     except Exception:
@@ -3167,8 +3480,12 @@ def events_page():
     out = []
     for r in reversed(rows):
         p = r.get("payload") or {}
+        s = str(p.get("text") or p) if isinstance(p, dict) else str(p)
+        if isinstance(p, dict) and r.get("kind") == "staff_reply" and ("via" in p or "type" in p):
+            # 14.10: відправка людині персоналом: [що, як, хто] текст
+            s = "[" + ", ".join(str(p[k]) for k in ("type", "via", "by") if p.get(k) is not None) + "] " + str(p.get("text") or "")
         out.append("#" + str(r.get("id")) + "  " + str(r.get("created_at"))[:19] + "  " + str(r.get("user_id")) + "  " + str(r.get("kind"))
-                   + "  " + (str(p.get("text") or p)[:300]).replace("\n", " / "))
+                   + "  " + html.escape(s[:300]).replace("\n", " / "))
     return "<pre>" + "\n".join(out) + "</pre>"
 
 
@@ -3217,6 +3534,113 @@ def zalyvka():
         _REF_CACHE.pop(rol, None)
         out += "роль " + rol + ": бот віддає цей файл\n"
     return out
+
+
+# Відправка людині з ПК (14.10): той самий журнал, що reply і /do, без токена бота в руках сесії.
+PC_KINDS = {"photo": ("sendPhoto", "фото"), "video": ("sendVideo", "відео"),
+            "document": ("sendDocument", "документ"), "voice": ("sendVoice", "голосове"),
+            "audio": ("sendAudio", "аудіо"), "animation": ("sendAnimation", "гіфка"),
+            "video_note": ("sendVideoNote", "кружечок"), "sticker": ("sendSticker", "стікер")}
+PC_EXT = {".jpg": "photo", ".jpeg": "photo", ".png": "photo", ".mp4": "video", ".mov": "video",
+          ".ogg": "voice", ".oga": "voice", ".opus": "voice", ".mp3": "audio", ".m4a": "audio",
+          ".wav": "audio", ".gif": "animation"}
+PC_NO_CAPTION = ("video_note", "sticker")
+
+
+def _upload(method, field, chat_id, name, blob, caption=None):
+    """Файл з диска ПК людині (multipart); 403 = позначка blocked, як в api_raw."""
+    data = {"chat_id": chat_id}
+    if caption:
+        data["caption"] = caption
+    try:
+        j = requests.post(API + "/" + method, data=data, files={field: (name, blob)}, timeout=120).json()
+    except Exception as e:
+        return {"ok": False, "description": str(e)}
+    if j.get("error_code") == 403:
+        mark_blocked(chat_id, j.get("description"))
+    return j
+
+
+def _result_fid(res, kind):
+    v = (res or {}).get(kind) if isinstance(res, dict) else None
+    if isinstance(v, list):
+        v = v[-1] if v else None
+    return (v or {}).get("file_id") if isinstance(v, dict) else None
+
+
+@app.post("/nadislaty/" + SECRET)
+def nadislaty():
+    """
+    Людині з ПК будь-що (слово Yaro 14.10: «будь-яке повідомлення легко людині надіслати без
+    переписування всього бота і передеплоювання»). Поля (JSON, форма чи ?query): id, text, file_id
+    або файл у полі file, kind (photo/video/document/voice/audio/animation/video_note/sticker; без нього
+    з розширення файла, file_id = document), by (хто), dry=1 (лише показати кому, нічого не слати).
+    Підпис під файлом, коли текст до 1024 і тип його має; інакше текст окремим повідомленням перед файлом.
+    Захищено секретом вебхука, як /zalyvka. Подія staff_reply via=pc. Відповідь JSON.
+    """
+    j = request.get_json(silent=True)
+    j = j if isinstance(j, dict) else {}
+
+    def arg(k):
+        v = j.get(k)
+        if v is None:
+            v = request.form.get(k)
+        if v is None:
+            v = request.args.get(k)
+        return str(v).strip() if v is not None else ""
+
+    def out(code, **kw):
+        return json.dumps(kw, ensure_ascii=False), code, {"Content-Type": "application/json; charset=utf-8"}
+
+    sid = arg("id")
+    if not sid.isdigit():
+        return out(400, ok=False, error="потрібен id людини (число)")
+    target = int(sid)
+    text, fid, up = arg("text"), arg("file_id"), request.files.get("file")
+    kind, by = arg("kind").lower(), arg("by") or "pc"
+    if kind and kind not in PC_KINDS:
+        return out(400, ok=False, error="kind: " + ", ".join(PC_KINDS))
+    _tm.person = None
+    store.session_begin()
+    try:
+        name = person_name(target)
+        if arg("dry").lower() in ("1", "true", "yes"):
+            return out(200, ok=bool(name), dry=True, to=name,
+                       error=None if name else "людина ще не писала боту (Telegram її не знає)")
+        if not (text or fid or up):
+            return out(400, ok=False, to=name, error="нема що слати: text, file_id чи file")
+        if up and not kind:
+            kind = PC_EXT.get(os.path.splitext(up.filename or "")[1].lower(), "document")
+        kind = kind or "document"
+        has_file = bool(up or fid)
+        cap = text if has_file and text and len(text) <= 1024 and kind not in PC_NO_CAPTION else None
+        sent, new_fid, err = [], None, None
+        if text and not cap:
+            r = api_raw("sendMessage", chat_id=target, text=text, disable_web_page_preview=True)
+            if r.get("ok"):
+                sent.append("текст")
+            else:
+                err = _send_err(r)
+        if has_file and not err:
+            if up:
+                blob, fname = up.read(), up.filename or "file"
+                r = _upload(PC_KINDS[kind][0], kind, target, fname, blob, cap)
+                if not r.get("ok") and kind == "photo" and r.get("error_code") == 400:
+                    kind = "document"      # фото не пройшло як фото (розмір, пропорції): шлемо файлом
+                    r = _upload("sendDocument", kind, target, fname, blob, cap)
+            else:
+                r = api_raw(PC_KINDS[kind][0], **{"chat_id": target, kind: fid, "caption": cap})
+            if r.get("ok"):
+                sent.append(PC_KINDS[kind][1] + (" з підписом" if cap else ""))
+                new_fid = _result_fid(r.get("result"), kind)
+            else:
+                err = _send_err(r)
+        if sent:
+            _log_sent(target, by, "pc", " + ".join(sent), text)
+        log.info("З ПК -> %s: %s%s", target, " + ".join(sent) or "нічого", (", помилка: " + err) if err else "")
+        return out(502 if err else 200, ok=not err, to=name, sent=sent, file_id=new_fid, error=err)
+    finally:
+        store.session_end()
 
 
 @app.get("/jars/" + SECRET)
@@ -3520,20 +3944,27 @@ def hook():
                 if not _arg.isdigit():
                     send(chat_id, "Напишіть так: /podarunok 2033627806 (id людини зі сповіщення «Новий у боті»)")
                     return "ok"
-                target = int(_arg)
-                tu = store.get_user(target) or {}
-                name = who({"id": target, "username": tu.get("username"),
-                            "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
-                try:
-                    ok = give_gift(target, GIFT_HAND)
-                except Exception:
-                    log.exception("podarunok %s", target)
-                    ok = False
-                if ok:
-                    send(chat_id, "Подарунок (три схеми світла) пішов: " + name)
+                podarunok_staff(chat_id, int(_arg))
+                return "ok"
+            # Відповідь людині будь-чим (14.10): /do <id> (чи /do reply-ем на сповіщення) = наступне
+            # повідомлення піде цій людині; /skasuvaty знімає режим. Лише NOTIFY_IDS і адмін; у людини
+            # /do лишається звичайним текстом (CLIENT_TEXT нижче).
+            _cmd = text.split()[0].split("@")[0] if text.split() else ""
+            if staff_cmd(uid) and _cmd == "/do":
+                _arg = (text.split() + [""])[1]
+                _rt = (fb_target(dict(m["reply_to_message"], _chat=chat_id), uid)
+                       if m.get("reply_to_message") and not _arg else None)
+                if _arg.isdigit() or _rt:
+                    do_start(chat_id, uid, int(_arg) if _arg.isdigit() else _rt, m.get("message_id"))
                 else:
-                    send(chat_id, "Не пішло: " + name + ". Схеми вже видані, подарунок уже йшов (заявка gift), "
-                         "або нема файла магніту / людина заблокувала бота. Дивись /lyudy.")
+                    _staff_say(chat_id, "Напишіть так: /do 458676312 (id людини зі сповіщення), "
+                               "або кнопка «Написати» під сповіщенням.", m.get("message_id"))
+                return "ok"
+            if staff_cmd(uid) and _cmd == "/skasuvaty":
+                _t, _exp = do_get(uid)
+                do_clear(uid)
+                _staff_say(chat_id, ("Скасовано: " + (person_name(_t) or "id %s" % _t) + " нічого не отримає.")
+                           if _t else "Режиму /do не було, нічого не скасовано.", m.get("message_id"))
                 return "ok"
             # Посилання МК (13.10): /mk скільки видано і чи відкрите, /mk stop закрити, /mk start відкрити.
             if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/mk":
@@ -3556,10 +3987,10 @@ def hook():
                 send(chat_id, "Чисто. Видали цей чат і зайди в бота заново, побачиш його як нова людина.")
                 return "ok"
 
-            # Відповідь Іри чи адміна reply-ем на переслане/сповіщення іде людині
-            # (раніше за матеріали Іри, щоб відповідь не потрапила в take_material).
-            if (uid in staff_ids() and m.get("reply_to_message")
-                    and not text.startswith("/") and staff_reply(m, chat_id)):
+            # Відповідь Іри чи адміна reply-ем на переслане/сповіщення (чи в режимі /do) іде людині
+            # будь-чим (14.10), раніше за матеріали Іри, щоб відповідь не потрапила в take_material.
+            if ((uid in staff_ids() or staff_cmd(uid)) and not text.startswith("/")
+                    and staff_route(m, chat_id, uid)):
                 return "ok"
 
             # Іра: кидає що завгодно, бот приймає і мовчить.
@@ -3628,7 +4059,8 @@ def hook():
                     if rec.get("is_new", True) and raw != MK_TAG and uid not in staff_ids():
                         notify("Новий у боті: " + who(u) + "\nМітка: " + (raw or "без мітки")
                                + (" (від " + PARTNERS.get(partner, partner) + ")" if partner else ""),
-                               give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None)
+                               give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None,
+                               uid=uid)
                 bg(_start_after)
                 if src == "guide":
                     bg(store.log_event, uid, "guide_entry", {"tag": src})
@@ -3685,15 +4117,15 @@ def hook():
                 else:
                     send(chat_id, SHOOT_TEXT)
                     if lead_once(uid, "shoot"):
-                        notify_lead("Питають про ЗЙОМКУ: " + who(u))
+                        notify_lead("Питають про ЗЙОМКУ: " + who(u), uid=uid)
             else:
                 store.touch_user(u)
                 store.log_event(uid, "message", {"text": text[:300]})
                 if not is_file:
                     ntext = "Повідомлення в боті від " + who(u) + ":\n" + (text or "[не текст]")
-                    notify(ntext)
+                    notify(ntext, uid=uid)
                     if IRA_ID and IRA_ID not in NOTIFY_IDS:
-                        _fb_remember(IRA_ID, send(IRA_ID, ntext), uid)
+                        _staff_send([IRA_ID], ntext, uid=uid)
                 low = text.lower()
                 if "курс" in low and OWNER_RE.search(low):
                     # Людина каже, що вже має курс: не шаблон, а відповідь по суті.
@@ -3757,7 +4189,7 @@ def hook():
                 store.log_event(uid, "mk_want")
                 send(chat_id, MK_THANKS, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
                 if lead_once(uid, "mk"):
-                    notify_lead("ЗАЯВКА НА МК: " + who(u) + "\nНаписати особисто.")
+                    notify_lead("ЗАЯВКА НА МК: " + who(u) + "\nНаписати особисто.", uid=uid)
             elif not courses_sale() and (data in ("q:new", "q:pro") or data in COURSES):
                 # Стара кнопка курсу в чаті людини: продажу нема, кажемо «готую новий».
                 store.log_event(uid, "retush_off", {"data": data})
@@ -3787,7 +4219,7 @@ def hook():
                 store.log_event(uid, "noget", {"code": code})
                 if lead_once(uid, "noget:" + key):
                     notify("КАЖЕ, ЩО ОПЛАТИВ, А ФАЙЛУ НЕМАЄ\n" + pname(key) + "\n" + who(u)
-                           + "\nКод: " + code, give_kb(uid, key))
+                           + "\nКод: " + code, give_kb(uid, key), uid=uid)
             elif data.startswith("paid:") and TEST_MODE and uid in NOTIFY_IDS:
                 key = data.split(":")[1]
                 code = order_code(uid, key)
@@ -3795,13 +4227,13 @@ def hook():
                 if not ok:
                     send(chat_id, BROKEN_FILE_TEXT)
                     notify("ФАЙЛ НЕ ВИДАВСЯ. " + pname(key) + ": " + ready_text(key)
-                           + "\n" + who(u))
+                           + "\n" + who(u), uid=uid)
                 store.mark_paid(code)
                 if ok:
                     store.mark_delivered(code)
                 store.log_event(uid, "pay_test", {"tier": key, "ok": ok})
                 kabinet_mist.push_user(uid)
-                notify("ТЕСТ оплати: " + pname(key) + "\n" + who(u))
+                notify("ТЕСТ оплати: " + pname(key) + "\n" + who(u), uid=uid)
             elif data == "moi":
                 kb = lessons_kb(uid)
                 send(chat_id, MOI_TEXT if kb else moi_empty(uid), kb or empty_kb(uid))
@@ -3816,6 +4248,12 @@ def hook():
                     send_lesson(chat_id, ckey, int(n or 0))
                 else:
                     send(chat_id, moi_empty(uid), empty_kb(uid))
+            elif data.startswith("napys:") and staff_cmd(uid) and data[6:].isdigit():
+                # кнопка «Написати» під сповіщенням: той самий режим, що /do <id>
+                do_start(chat_id, uid, int(data[6:]), cq["message"].get("message_id"))
+            elif data.startswith("podar:") and staff_cmd(uid) and data[6:].isdigit():
+                # кнопка «🎁 Подарунок»: той самий give_gift, що /podarunok (раз назавжди)
+                podarunok_staff(chat_id, int(data[6:]), cq["message"].get("message_id"))
             elif data.startswith("give:") and uid in NOTIFY_IDS:
                 parts = (data.split(":") + ["", ""])[:3]
                 target = int(parts[1])
@@ -4034,6 +4472,10 @@ def poll_loop(gen=None):
         # SIGTERM: нового getUpdates не робимо; вже взяті апдейти дообробляємо,
         # непідтверджені лишаються в Telegram для нового інстансу.
         pool.shutdown(wait=True)
+        try:
+            album_flush_all()          # зібраний альбом персоналу людині не губимо (14.10)
+        except Exception as e:
+            log.warning("poll: альбоми при зупинці: %s", e)
         # підтвердити offset у Telegram, щоб новий інстанс не отримав оброблене вдруге (правка А)
         if _poll_offset[0]:
             try:
