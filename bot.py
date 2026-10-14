@@ -3568,6 +3568,30 @@ def _result_fid(res, kind):
     return (v or {}).get("file_id") if isinstance(v, dict) else None
 
 
+PC_KB = {"kanal": "кнопка каналу", "urok_kanal": "кнопки «Відкрити урок» і каналу"}
+
+
+def pc_kb(name):
+    """Кнопки для /nadislaty за назвою (15.10): ті самі, що в push1: канал веде на інвайт push1 (PUSH1_URL),
+    урок на урок 1.5 у кабінеті. None = такої назви нема чи нема KABINET_URL для урока."""
+    t = push1_texts()
+    if name == "kanal":
+        return push1_kb(t, "")
+    if name == "urok_kanal" and retush_lesson_url():
+        return push1_kb(t, "G2")
+    return None
+
+
+def pc_kb_view(kb):
+    """Кнопки словами для dry: підпис, куди веде (url чи web_app)."""
+    out = []
+    for row in (kb or {}).get("inline_keyboard") or []:
+        for b in row:
+            out.append({"text": b.get("text"), "url": b.get("url") or (b.get("web_app") or {}).get("url"),
+                        "web_app": bool(b.get("web_app"))})
+    return out
+
+
 @app.post("/nadislaty/" + SECRET)
 def nadislaty():
     """
@@ -3576,6 +3600,9 @@ def nadislaty():
     або файл у полі file, kind (photo/video/document/voice/audio/animation/video_note/sticker; без нього
     з розширення файла, file_id = document), by (хто), dry=1 (лише показати кому, нічого не слати).
     Підпис під файлом, коли текст до 1024 і тип його має; інакше текст окремим повідомленням перед файлом.
+    15.10: kb=kanal | urok_kanal додає під текст кнопки push1 (лише текст, без файлу); mark=push1 (лише з kb)
+    ставить людині push1 так, ніби вона його отримала (kv push1:<id>, події push1 і для урока lesson_gift), щоб
+    /push1 go їй не дублював; вдруге mark=push1 цій людині не шле. dry повертає кнопки з посиланнями.
     Захищено секретом вебхука, як /zalyvka. Подія staff_reply via=pc. Відповідь JSON.
     """
     j = request.get_json(silent=True)
@@ -3600,13 +3627,32 @@ def nadislaty():
     kind, by = arg("kind").lower(), arg("by") or "pc"
     if kind and kind not in PC_KINDS:
         return out(400, ok=False, error="kind: " + ", ".join(PC_KINDS))
+    kbname, mark = arg("kb").lower(), arg("mark").lower()
+    kb = None
+    if kbname:
+        kb = pc_kb(kbname)
+        if not kb:
+            return out(400, ok=False, error="kb: " + ", ".join(PC_KB) + " (урок потребує KABINET_URL)")
+        if fid or up or kind:
+            return out(400, ok=False, error="kb лише з текстом, без файлу")
+    if mark and (mark != "push1" or not kb):
+        return out(400, ok=False, error="mark: лише push1 і лише разом з kb")
+    if mark and not store.ON:
+        return out(503, ok=False, error="бази нема: без неї не знаю, кому push1 уже надіслано")
     _tm.person = None
     store.session_begin()
     try:
         name = person_name(target)
+        pkey = PUSH_KEY + ":" + str(target)
         if arg("dry").lower() in ("1", "true", "yes"):
-            return out(200, ok=bool(name), dry=True, to=name,
-                       error=None if name else "людина ще не писала боту (Telegram її не знає)")
+            err = None if name else "людина ще не писала боту (Telegram її не знає)"
+            if not err and mark and store.kv_get(pkey):
+                err = "push1 цій людині вже був (kv " + pkey + ": " + str(store.kv_get(pkey)) + ")"
+            extra = {"kb": pc_kb_view(kb), "mark": mark or None} if kb else {}
+            return out(200, ok=not err, dry=True, to=name, error=err, **extra)
+        if mark and store.kv_get(pkey):
+            return out(409, ok=False, to=name, error="push1 цій людині вже був (kv " + pkey + ": "
+                       + str(store.kv_get(pkey)) + "), вдруге не шлю")
         if not (text or fid or up):
             return out(400, ok=False, to=name, error="нема що слати: text, file_id чи file")
         if up and not kind:
@@ -3616,9 +3662,11 @@ def nadislaty():
         cap = text if has_file and text and len(text) <= 1024 and kind not in PC_NO_CAPTION else None
         sent, new_fid, err = [], None, None
         if text and not cap:
-            r = api_raw("sendMessage", chat_id=target, text=text, disable_web_page_preview=True)
+            if kbname == "urok_kanal":
+                kabinet_mist.push_user(target)         # людина в базі кабінету до кнопки уроку, як у push1 G2
+            r = api_raw("sendMessage", chat_id=target, text=text, reply_markup=kb, disable_web_page_preview=True)
             if r.get("ok"):
-                sent.append("текст")
+                sent.append("текст + " + PC_KB[kbname] if kb else "текст")
             else:
                 err = _send_err(r)
         if has_file and not err:
@@ -3637,6 +3685,15 @@ def nadislaty():
                 err = _send_err(r)
         if sent:
             _log_sent(target, by, "pc", " + ".join(sent), text)
+            if mark:
+                seg = "G2" if kbname == "urok_kanal" else "INV"
+                try:
+                    store.kv_set(pkey, "ok " + seg)
+                    if seg == "G2":
+                        store.log_event(target, "lesson_gift", {"via": PUSH_KEY})
+                    store.log_event(target, PUSH_KEY, {"seg": seg, "ok": True, "via": "pc"})
+                except Exception as e:
+                    log.warning("mark push1 %s: %s", target, e)
         log.info("З ПК -> %s: %s%s", target, " + ".join(sent) or "нічого", (", помилка: " + err) if err else "")
         return out(502 if err else 200, ok=not err, to=name, sent=sent, file_id=new_fid, error=err)
     finally:
