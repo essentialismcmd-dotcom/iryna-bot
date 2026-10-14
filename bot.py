@@ -990,6 +990,10 @@ GIFT_LATE = (
     "Урок чекає на вас♥️ 12 хвилин, коли буде зручно. А подарунок віддаю вже зараз: "
     "«Три схеми світла з одного сетапу», файл нижче"
 )
+GIFT_HAND = (
+    "Маленький подарунок від мене♥️\n"
+    "«Три схеми світла з одного сетапу», файл нижче"
+)                                           # ручна видача /podarunok (слово Yaro 14.10, Альона)
 GIFT_FROM_H, GIFT_TO_H = 10, 20            # лише денні години за Києвом
 GIFT_AFTER_H = 24                           # через скільки годин після входу без done
 GIFT_SINCE = os.getenv("GIFT_SINCE", "2026-10-12T12:00:00+00:00")   # раніше зайшлі не чіпаємо
@@ -3508,6 +3512,28 @@ def hook():
                     send(chat_id, "Видано: " + name)
                 else:
                     send(chat_id, "Не вдалося видати " + name + ". " + pname(vkey) + ": " + ready_text(vkey))
+                return "ok"
+            # Подарунок схем вручну (14.10): /podarunok <id> шле тим самим give_gift текст GIFT_HAND і PDF магніту
+            # з кнопкою каналу; раз назавжди (kv gift:<id>), схеми вже видані чи заявка зайнята = нічого не шле.
+            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/podarunok":
+                _arg = (text.split() + [""])[1]
+                if not _arg.isdigit():
+                    send(chat_id, "Напишіть так: /podarunok 2033627806 (id людини зі сповіщення «Новий у боті»)")
+                    return "ok"
+                target = int(_arg)
+                tu = store.get_user(target) or {}
+                name = who({"id": target, "username": tu.get("username"),
+                            "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
+                try:
+                    ok = give_gift(target, GIFT_HAND)
+                except Exception:
+                    log.exception("podarunok %s", target)
+                    ok = False
+                if ok:
+                    send(chat_id, "Подарунок (три схеми світла) пішов: " + name)
+                else:
+                    send(chat_id, "Не пішло: " + name + ". Схеми вже видані, подарунок уже йшов (заявка gift), "
+                         "або нема файла магніту / людина заблокувала бота. Дивись /lyudy.")
                 return "ok"
             # Посилання МК (13.10): /mk скільки видано і чи відкрите, /mk stop закрити, /mk start відкрити.
             if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/mk":
