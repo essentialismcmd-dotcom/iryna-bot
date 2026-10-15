@@ -79,6 +79,11 @@ COURSE2_FILES = os.getenv("COURSE2_FILES", "").strip()
 # і код тримає таблицю з projects/iryna/TSINY-2026-09-14.md.
 COURSE_PRICES = os.getenv("COURSE_PRICES", "").strip()
 GUIDE_PRICE   = os.getenv("GUIDE_PRICE", "").strip()
+# Воронка після реклами (коворк projects/iryna/VORONKA-2026-10.md, гілка voronka 16.10).
+# Обидва прапорці вимикаються на Render без деплою: =0 повертає стару поведінку.
+GIFT_FOR_SUB  = os.getenv("GIFT_FOR_SUB", "1").strip().lower() not in ("0", "false", "no", "off")   # п.1: подарунок лише за підписку на канал
+PRICE_GATE    = os.getenv("PRICE_GATE", "1").strip().lower() not in ("0", "false", "no", "off")     # п.4-6: холодна бачить ціну курсу лише після «Розкажіть про курс»
+CHANNEL_URL_RETUSH = os.getenv("CHANNEL_URL_RETUSH", "").strip()   # п.10: окреме запрошення в канал для людей ретуші (рахує вступи з бота)
 # Які тарифи гайда показувати. t2 і t3 продають час Іри на розбір кадрів,
 # а з нею це не домовлено, тому за замовчуванням тільки сам гайд.
 GUIDE_TIERS   = [t for t in os.getenv("GUIDE_TIERS", "t1").replace(" ", "").split(",") if t]
@@ -346,6 +351,11 @@ def _price(raw, default):
 
 # Ціна гайда: 20 $ його словом 13.09, за курсом 44.6 це 890, округлено до 900.
 _G = _price(GUIDE_PRICE, 900)
+# Ідея Yaro 15.10: гайд 199 як перший платний крок. GUIDE_PRICE=199 на Render міняє ціну
+# всім без деплою (кнопка, картка, звірка суми в банці); GUIDE_OLD_PRICE=900 додає в картку
+# «замість 900», лише коли стара ціна більша за чинну.
+_G_OLD = _price(os.getenv("GUIDE_OLD_PRICE", ""), 0)
+_G_LINE = "Гайд «Світло», " + str(_G) + " грн" + (" замість " + str(_G_OLD) if _G_OLD > _G else "")
 
 
 def _tier_prices(raw, g):
@@ -368,7 +378,7 @@ _T2, _T3 = _tier_prices(os.getenv("GUIDE_TIER_PRICES", ""), _G)
 
 TIERS = {
     "t1": {"name": "Гайд «Світло»", "uah": _G, "btn": "Гайд, " + str(_G) + " грн",
-           "text": ("Гайд «Світло», " + str(_G) + " грн\n\n"
+           "text": (_G_LINE + "\n\n"
                     "42 сторінки, тринадцять моїх робочих схем: розстановка, "
                     "налаштування і кадр зі зйомки до кожної. Доступ залишається назавжди."),
            "extra": ""},
@@ -1259,12 +1269,17 @@ def send_retush(chat_id, uid=None, u=None):
         send(chat_id, RETUSH_INTRO, retush_kb())
 
 
-def pick_product(chat_id, uid, u, data):
-    """Картка товару з кодом платежу і кнопкою оплати (кнопка тарифу і /start kurs)."""
+def pick_product(chat_id, uid, u, data, gate=True):
+    """Картка товару з кодом платежу і кнопкою оплати (кнопка тарифу і /start kurs).
+    gate: ворота ціни (п.4-6): холодній людині ретуші замість картки курсу йде запрошення Т9;
+    явні теплі входи (/start kurs, kurs10, /kurs, кнопка «Розкажіть про курс») кличуть з gate=False."""
     # 08.10, слово Yaro: знижка 10 % поки для всіх, кожен бачить її як особисту.
     if data == "k12" and COURSE_BUNDLE_ONLY:
         data = "k12z"
     t = PRODUCTS[data]
+    if gate and t["product"] == "course" and cold(uid):
+        send_zapr(chat_id, uid)
+        return
     code = order_code(uid, data)
     store.add_purchase(uid, t["product"], tier=data, order_code=code,
                        amount_uah=t["uah"])
@@ -1310,14 +1325,14 @@ def retush_kb_one():
 
 
 # Лід-магніт ретуші (MAGNIT-RETUSH-2026-10-08.md, тексти дослівно): без ціни, лише урок 1.5.
-RETUSH_MAGNET_HELLO = (
+_HELLO_AUTO = (
     "Привіт, це Ірина Руль ♥️\n\n"
     "Тут мій урок «Чистка шкіри без втрати текстури» з курсу ретуші, цілком, 12 хвилин.\n"
     "Прибираємо дефекти, шкіра лишається живою, без «пластику».\n\n"
     "Тисніть кнопку, урок відкриється в моєму кабінеті курсів.\n\n"
     "А після уроку на вас чекає маленький подарунок від мене 🎁"
 )
-GIFT_DONE = (
+_GIFT_DONE_AUTO = (
     "Ви додивились♥️ Як і обіцяла, маленький подарунок: «Три схеми світла з одного сетапу», "
     "три різні картинки за одну зйомку без докупки обладнання. Файл нижче\n\n"
     "Напишіть, як вам урок? Мені важливо♥️"
@@ -1325,6 +1340,41 @@ GIFT_DONE = (
 GIFT_LATE = (
     "Урок чекає на вас♥️ 12 хвилин, коли буде зручно. А подарунок віддаю вже зараз: "
     "«Три схеми світла з одного сетапу», файл нижче"
+)
+# Подарунок лише за підписку (GIFT_FOR_SUB, п.1): тексти Т1-Т5 з VORONKA-2026-10.md дослівно, чернетка для Іри.
+_HELLO_SUB = (
+    "Привіт, це Ірина Руль ♥️\n\n"
+    "Тут мій урок «Чистка шкіри без втрати текстури» з курсу ретуші, цілком, 12 хвилин. "
+    "Прибираємо дефекти, шкіра лишається живою, без «пластику».\n\n"
+    "Тисніть «Відкрити урок», він відкриється в моєму кабінеті.\n\n"
+    "А ще для вас подарунок: «Три схеми світла з одного сетапу». Підпишіться на мій канал "
+    "«для своїх», де я показую зйомки й бекстейдж, і натисніть «Я підписалась». Файл прийде сюди."
+)
+SUB_NO = (                                  # Т2: натиснула, а в каналі її нема
+    "Поки не бачу вас у каналі ♥️ Натисніть «Канал «для своїх»», підпишіться і поверніться сюди, "
+    "ще раз «Я підписалась». Файл прийде одразу."
+)
+GIFT_SUB = (                                # Т3: підписка підтверджена, файл нижче
+    "Дякую, що ви з нами ♥️ Тримайте подарунок: «Три схеми світла з одного сетапу». "
+    "Три різні картинки за одну зйомку, без докупки обладнання. Спробуйте на найближчій зйомці."
+)
+SUB_ALREADY = "Подарунок уже у вас ♥️ Файл надсилала вище в цьому чаті."
+SUB_UNKNOWN = "Не можу зараз перевірити підписку ♥️ Подивлюсь сама і надішлю файл."   # ризик (а): бот не адмін каналу
+GIFT_DONE_ASK = "Ви додивились ♥️ Напишіть, як вам урок? Мені важливо."              # Т4, подарунок уже був
+_GIFT_DONE_SUB = GIFT_DONE_ASK + "\n\nПодарунок, як обіцяла: «Три схеми світла з одного сетапу», файл нижче"
+GIFT_DONE_NOSUB = GIFT_DONE_ASK + "\n\nПодарунок чекає на вас: підпишіться на канал «для своїх» і натисніть «Я підписалась»."
+GIFT_REMIND = (                             # Т5: день 1, непідписаній, один раз
+    "Доброго дня ♥️ Подарунок досі чекає: «Три схеми світла з одного сетапу». Підпишіться на канал "
+    "«для своїх» і натисніть «Я підписалась», файл прийде сюди.\n\n"
+    "А урок про шкіру, якщо ще не дивились, чекає за кнопкою. Це 12 хвилин, коли буде зручно."
+)
+RETUSH_MAGNET_HELLO = _HELLO_SUB if GIFT_FOR_SUB else _HELLO_AUTO
+GIFT_DONE = _GIFT_DONE_SUB if GIFT_FOR_SUB else _GIFT_DONE_AUTO
+# Ворота ціни (п.4-6): Т9, запрошення без ціни; ціна лише після кнопки «Розкажіть про курс».
+ZAPR_TEXT = (
+    "Хочу розповісти про свій курс ретуші ♥️ Він для тих, кого лякає Photoshop, а гарні кадри хочеться. "
+    "18 відео, близько 135 хвилин, і файли для практики з моїми пресетами. "
+    "Якщо цікаво, натисніть «Розкажіть про курс»."
 )
 GIFT_HAND = (
     "Маленький подарунок від мене♥️\n"
@@ -1341,12 +1391,100 @@ def retush_lesson_url():
     return kabinet_mist.URL + "/?p=" + RETUSH_LESSON_PART if kabinet_mist.URL else ""
 
 
+def retush_channel_rows():
+    """Кнопка каналу для людей ретуші: окреме запрошення CHANNEL_URL_RETUSH (п.10), інакше CHANNEL_URL."""
+    url = CHANNEL_URL_RETUSH or CHANNEL_URL
+    return [[{"text": "Канал «для своїх»", "url": url}]] if url else []
+
+
+def sub_kb(lesson=False):
+    """«Канал» і «Я підписалась» (п.1); lesson=True додає зверху «Відкрити урок» (Т5 тим, хто без done)."""
+    url = retush_lesson_url()
+    rows = [[{"text": "Відкрити урок", "web_app": {"url": url}}]] if lesson and url else []
+    return {"inline_keyboard": rows + retush_channel_rows()
+            + [[{"text": "Я підписалась", "callback_data": "sub:check"}]]}
+
+
 def retush_magnet_kb():
     """Mini App кнопка: Telegram сам передає підписаний initData, вхід без паролів.
-    Без KABINET_URL кнопки нема (тоді лише канал), щоб не слати в нікуди."""
+    Без KABINET_URL кнопки нема (тоді лише канал), щоб не слати в нікуди.
+    З GIFT_FOR_SUB під уроком «Канал» і «Я підписалась»."""
     url = retush_lesson_url()
     rows = [[{"text": "Відкрити урок", "web_app": {"url": url}}]] if url else []
+    if GIFT_FOR_SUB:
+        return {"inline_keyboard": rows + retush_channel_rows()
+                + [[{"text": "Я підписалась", "callback_data": "sub:check"}]]}
     return {"inline_keyboard": rows + channel_rows()}
+
+
+def zapr_kb():
+    return {"inline_keyboard": [[{"text": "Розкажіть про курс", "callback_data": "zapr:open"}]]
+            + retush_channel_rows()}
+
+
+def cold(uid):
+    """Холодна людина ретуші (п.4): прийшла за міткою retush* (реклама, партнери), ще не тиснула
+    «Розкажіть про курс» (kv zapr:<id>) і нічого не купила. Їй ціну курсу не показуємо.
+    Персонал не виняток: Yaro після /nova бачить те саме, що людина з реклами."""
+    if not PRICE_GATE or not uid:
+        return False
+    try:
+        if store.kv_get("zapr:" + str(uid)):
+            return False
+        tag = (store.get_user(uid) or {}).get("source_tag") or ""
+        if not tag.startswith("retush"):
+            return False
+        return not owned_keys(uid, real=True)
+    except Exception:
+        log.exception("cold %s", uid)
+        return False
+
+
+def send_zapr(chat_id, uid):
+    """Т9 замість картки з ціною; подія gate, щоб бачити, скільки холодних просили курс самі."""
+    store.log_event(uid, "gate")
+    send(chat_id, ZAPR_TEXT, zapr_kb())
+
+
+def kanal_member_fresh(uid):
+    """getChatMember без кешу: щойно підписана не має отримати вчорашнє «ні»."""
+    _kanal_cache.pop(uid, None)
+    return kanal_member(uid)
+
+
+def sub_check(chat_id, uid, u):
+    """Кнопка «Я підписалась» (п.1). В каналі: подарунок раз назавжди (give_gift) і подія sub_ok.
+    Нема: Т2 з тими самими кнопками. Невідомо (бот не адмін каналу, Telegram мовчить): людині
+    «подивлюсь сама», персоналу сповіщення з кнопкою «🎁 Подарунок» (ризик (а) у VORONKA)."""
+    inn, why = kanal_member_fresh(uid)
+    store.log_event(uid, "sub_check", {"in": inn, "why": why})
+    if inn:
+        if store.kv_claim("sub_ok:" + str(uid)):
+            store.log_event(uid, "sub_ok")
+        if not give_gift(uid, GIFT_SUB):
+            send(chat_id, SUB_ALREADY)
+        return
+    if inn is False:
+        send(chat_id, SUB_NO, sub_kb())
+        return
+    send(chat_id, SUB_UNKNOWN, sub_kb())
+    if lead_once(uid, "sub_unknown"):
+        notify("Підписку не перевірити (" + why + "): " + who(u),
+               {"inline_keyboard": [[{"text": "🎁 Подарунок", "callback_data": "podar:%d" % uid}]]}, uid=uid)
+
+
+def lesson_done_gift(uid, name):
+    """done уроку 1.5 з GIFT_FOR_SUB (п.1): Т4 усім; файл лише підписаній без подарунка;
+    непідписаній рядок про підписку і кнопки; хто вже має файл, лише питання про урок."""
+    if store.kv_get("gift:" + str(uid)) or (store.get_user(uid) or {}).get("got_magnet_at"):
+        send(uid, GIFT_DONE_ASK)
+        return
+    inn, _why = kanal_member(uid)
+    if inn:
+        if give_gift(uid, GIFT_DONE):
+            notify("Подарунок (три схеми світла) після уроку %s: %s" % (RETUSH_LESSON_PART, name), uid=uid)
+    else:
+        send(uid, GIFT_DONE_NOSUB, sub_kb())
 
 
 def pay_url(uid, key):
@@ -1481,6 +1619,26 @@ def gift_late_run(now=None):
         return 0
     skip = [i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i]
     n = 0
+    if GIFT_FOR_SUB:
+        # п.1, Т5: 24+ год без подарунка. В каналі (підписалась, кнопку не тисла): файл.
+        # Ні: одне нагадування Т5 (kv gift_remind:<id>, далі людину не чіпаємо; день 3 і далі окремо).
+        for uid in store.gift_candidates(GIFT_SINCE, GIFT_AFTER_H, skip, skip_kv="gift_remind:") or []:
+            if owned_keys(uid, real=True):
+                continue
+            try:
+                if not store.kv_claim("gift_remind:" + str(uid)):
+                    continue
+                if kanal_member(uid)[0]:
+                    if give_gift(uid, GIFT_SUB):
+                        n += 1
+                    continue
+                done = store.kv_get("kp:%s:%s:done" % (uid, RETUSH_LESSON_PART))
+                if send(uid, GIFT_REMIND, sub_kb(lesson=not done)):
+                    n += 1
+                store.log_event(uid, "touch", {"step": "d1"})
+            except Exception:
+                log.exception("gift_remind %s", uid)
+        return n
     for uid in store.gift_candidates(GIFT_SINCE, GIFT_AFTER_H, skip) or []:
         if store.kv_get("kp:%s:%s:done" % (uid, RETUSH_LESSON_PART)):
             continue                       # додивилась: подарунок уже пішов або піде з події
@@ -2430,7 +2588,9 @@ LYUDY_KINDS = {"start": "/start", "magnet": "3 схеми", "retush_entry": "в�
                "kanal_btn": "кнопка каналу", "lesson": "урок курсу", "practice": "практика",
                "guide_open": "картка гайда", "retush_open": "картка курсу", "tier_pick": "вибір тарифу",
                "keyword": "слово", "kurs_entry": "вхід курсу", "guide_entry": "вхід гайда", "mk_again": "МК вдруге",
-               "lesson_gift": "подарунок уроку 1.5"}
+               "lesson_gift": "подарунок уроку 1.5", "sub_check": "натиск «Я підписалась»",
+               "sub_ok": "підписка підтверджена", "gate": "ворота ціни (Т9)", "zapr_open": "«Розкажіть про курс»",
+               "touch": "дотик воронки"}
 KANAL_TTL = 600                                # секунд памʼятаємо відповідь getChatMember
 KANAL_MAX = 200                                # нових запитів getChatMember за одне відкриття сторінки
 _kanal_cache = {}                              # uid -> (коли, (True/False/None, пояснення))
@@ -3234,7 +3394,9 @@ def kabinet_podiia():
             notify(text, uid=uid)
         if kind == "done" and lesson == RETUSH_LESSON_PART and uid not in staff_ids() and not quiet:
             try:
-                if give_gift(uid, GIFT_DONE):
+                if GIFT_FOR_SUB:
+                    lesson_done_gift(uid, name)
+                elif give_gift(uid, GIFT_DONE):
                     notify("Подарунок (три схеми світла) після уроку %s: %s" % (lesson, name), uid=uid)
             except Exception:
                 log.exception("gift_done %s", uid)
@@ -3916,7 +4078,7 @@ def dm_lyudyna(kogo):
 
 
 # ---------- дублі (12.10, правка А) ----------
-_LOCKED_CB = ("les:", "my:guide", "moi", "magnet", "give:", "paid:", "lock:")
+_LOCKED_CB = ("les:", "my:guide", "moi", "magnet", "give:", "paid:", "lock:", "sub:check", "zapr:open")
 _ulocks = {}
 _ulocks_guard = threading.Lock()
 
@@ -4161,12 +4323,12 @@ def hook():
                 elif src == "kurs10" and courses_sale():
                     # лід з діректу 08.10: курс зі знижкою 10 %, оплата на знижену суму
                     bg(store.log_event, uid, "kurs_entry", {"tag": src})
-                    pick_product(chat_id, uid, u, "k12z")
+                    pick_product(chat_id, uid, u, "k12z", gate=False)
                 elif src == "kurs" and courses_sale():
                     # мітка з кабінету: одразу пропозиція курсу, без вітання з магнітом
                     bg(store.log_event, uid, "kurs_entry", {"tag": src})
                     if COURSE_BUNDLE_ONLY:
-                        pick_product(chat_id, uid, u, "k12")
+                        pick_product(chat_id, uid, u, "k12", gate=False)
                     else:
                         send_retush(chat_id)
                 else:
@@ -4177,7 +4339,7 @@ def hook():
                 if course_owner_reply(chat_id, uid):
                     pass
                 elif courses_sale() and COURSE_BUNDLE_ONLY:
-                    pick_product(chat_id, uid, u, "k12")
+                    pick_product(chat_id, uid, u, "k12", gate=False)
                 else:
                     send_retush(chat_id)
             elif keyword(text):
@@ -4262,6 +4424,14 @@ def hook():
                 store.log_event(uid, "retush_open")
                 if not course_owner_reply(chat_id, uid):
                     send_retush(chat_id, uid, u)
+            elif data == "sub:check":
+                sub_check(chat_id, uid, u)
+            elif data == "zapr:open":
+                # п.6: людина сама попросила про курс, з цього моменту бачить картку з ціною
+                if store.kv_claim("zapr:" + str(uid)):
+                    store.log_event(uid, "zapr_open")
+                if not course_owner_reply(chat_id, uid):
+                    pick_product(chat_id, uid, u, "k12", gate=False)
             elif data == "mk":
                 store.log_event(uid, "mk_open")
                 send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
