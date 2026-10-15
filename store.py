@@ -541,8 +541,14 @@ def kv_take(k, limit):
     return r["v"] if r else None
 
 
-def gift_candidates(since_iso, after_h, skip_ids):
-    """Люди з міткою retush*, що зайшли після since і більше after_h годин тому, без магніту й покупок."""
+def gift_candidates(since_iso, after_h, skip_ids, skip_kv=None):
+    """Люди з міткою retush*, що зайшли після since і більше after_h годин тому, без магніту й покупок.
+    skip_kv: префікс ключа kv (напр. 'gift_remind:'), з яким людину вже чіпали; таких пропускаємо,
+    інакше ліміт 20 забивають уже нагадані і нові не доходять."""
+    extra, args = "", [since_iso, after_h, list(skip_ids)]
+    if skip_kv:
+        extra = "and not exists (select 1 from kv where kv.k = %s || u.user_id::text)"
+        args.append(skip_kv)
     rows = q("""
         select u.user_id from users u
         where u.source_tag like 'retush%%' and u.role = 'client'
@@ -551,8 +557,9 @@ def gift_candidates(since_iso, after_h, skip_ids):
           and not (u.user_id = any(%s))
           and not exists (select 1 from purchases p where p.user_id = u.user_id
                           and p.status in ('paid', 'delivered'))
+          """ + extra + """
         order by u.created_at limit 20
-    """, (since_iso, after_h, list(skip_ids)), fetch="all")
+    """, tuple(args), fetch="all")
     return [r["user_id"] for r in rows or []]
 
 
