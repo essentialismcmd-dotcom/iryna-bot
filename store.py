@@ -373,7 +373,7 @@ def wipe_user(uid):
     # мітка входу (липка) теж стирається, інакше після /nova простий /start повторює стару лінку;
     # pkb: і pkb2: прапорці постійної клавіатури (13.10: стара лише «Мої матеріали», нова ще й канал)
     # 16.10: і подарунок, і дотики, і сліди воронки світла, інакше /nova + /start не показує видачу файла
-    q("delete from kv where k = any(%s)", [[p + str(uid) for p in
+    q("delete from kv where k = any(%s)", ([p + str(uid) for p in
         ("tag:", "pkb:", "pkb2:", "gift:", "sub_ok:", "touch_d1:", "touch_d2:", "hajd199:", "do:", "zapr:", "kp:")],))
     return q("""
         with e as (delete from events where user_id = %s returning 1),
