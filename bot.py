@@ -1391,6 +1391,48 @@ GIFT_AFTER_H = 24                           # через скільки годи
 GIFT_SINCE = os.getenv("GIFT_SINCE", "2026-10-12T12:00:00+00:00")   # раніше зайшлі не чіпаємо
 RETUSH_LESSON_PART = "1.5"
 
+# 16.10: два входи на один шлях, ?start=svitlo (реклама) і ?start=profil (шапка Instagram):
+# привіт про три схеми світла, «Канал» + «Я підписалась», файл після живого sub:check (без уроку ретуші і ціни).
+SVITLO_TAGS = ("svitlo", "profil")
+# Тексти з projects/iryna/kontent/2026-10-16-svitlo-statyka/TEKST.md п.5 дослівно (копірайтер, Іра пише «це Іра»).
+SVITLO_HELLO = (
+    "Привіт, це Іра ♥️\n"
+    "Час на студії обмежений, а картинки потрібні різні, тому тут моя добірка «Три схеми світла з одного сетапу»: "
+    "три різні картинки за одну зйомку.\n"
+    "Віддаю її підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
+)
+PROFIL_HELLO = (
+    "Привіт, це Іра ♥️\n"
+    "Ви прийшли з мого профілю, тут добірка «Три схеми світла з одного сетапу»: три різні картинки за одну зйомку.\n"
+    "Віддаю її підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
+)
+SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO}
+SVITLO_REMIND = (                           # Д1 для svitlo/profil без файла: без уроку
+    "Доброго дня ♥️ Три схеми світла чекають: підпишіться на канал «для своїх» і натисніть "
+    "«Я підписалась», файл прийде сюди."
+)
+
+
+def svitlo_tag(uid):
+    """Мітка svitlo/profil з бази (source_tag), інакше ''."""
+    try:
+        t = ((store.get_user(uid) or {}).get("source_tag") or "").strip().lower()
+    except Exception:
+        return ""
+    return t if t in SVITLO_TAGS else ""
+
+
+def svitlo_channel_url(tag):
+    """Окреме запрошення на мітку (CHANNEL_URL_SVITLO / CHANNEL_URL_PROFIL, щоб бачити в каналі, звідки прийшли),
+    інакше CHANNEL_URL."""
+    return os.getenv("CHANNEL_URL_" + tag.upper(), "").strip() or CHANNEL_URL
+
+
+def svitlo_kb(tag="svitlo"):
+    url = svitlo_channel_url(tag)
+    rows = [[{"text": "Канал «для своїх»", "url": url}]] if url else []
+    return {"inline_keyboard": rows + [[{"text": "Я підписалась", "callback_data": "sub:check"}]]}
+
 
 def retush_lesson_url():
     """Кабінет одразу на уроці 1.5 (кабінет читає ?p= і відкриває частину за номером)."""
@@ -1457,6 +1499,12 @@ def kanal_member_fresh(uid):
     return kanal_member(uid)
 
 
+def _sub_kb_for(uid):
+    """Клавіатура «Канал» + «Я підписалась»: для svitlo/profil звичайний канал, для решти sub_kb()."""
+    t = svitlo_tag(uid)
+    return svitlo_kb(t) if t else sub_kb()
+
+
 def sub_check(chat_id, uid, u):
     """Кнопка «Я підписалась» (п.1). В каналі: подарунок раз назавжди (give_gift) і подія sub_ok.
     Нема: Т2 з тими самими кнопками. Невідомо (бот не адмін каналу, Telegram мовчить): людині
@@ -1470,9 +1518,9 @@ def sub_check(chat_id, uid, u):
             send(chat_id, SUB_ALREADY)
         return
     if inn is False:
-        send(chat_id, SUB_NO, sub_kb())
+        send(chat_id, SUB_NO, _sub_kb_for(uid))
         return
-    send(chat_id, SUB_UNKNOWN, sub_kb())
+    send(chat_id, SUB_UNKNOWN, _sub_kb_for(uid))
     if lead_once(uid, "sub_unknown"):
         notify("Підписку не перевірити (" + why + "): " + who(u),
                {"inline_keyboard": [[{"text": "🎁 Подарунок", "callback_data": "podar:%d" % uid}]]}, uid=uid)
@@ -1662,6 +1710,14 @@ def touch_run(now=None):
     for uid, got in store.touch_candidates(GIFT_SINCE, TOUCH_D1[0], TOUCH_D1[1], skip, "touch_d1:") or []:
         try:
             if owned_keys(uid, real=True) or not _touch_ok(uid):
+                continue
+            stag = svitlo_tag(uid)
+            if stag:                                       # svitlo/profil: уроку нема, лише нагадування про файл
+                if got or store.kv_get("gift:" + str(uid)) or not store.kv_claim("touch_d1:" + str(uid)):
+                    continue
+                ok = send(uid, SVITLO_REMIND, svitlo_kb(stag))
+                store.log_event(uid, "touch", {"step": "d1", "tag": stag, "ok": bool(ok)})
+                n += 1 if ok else 0
                 continue
             done = store.kv_get("kp:%s:%s:done" % (uid, RETUSH_LESSON_PART))
             has_gift = bool(got or store.kv_get("gift:" + str(uid)))
@@ -2636,7 +2692,7 @@ LYUDY_KINDS = {"start": "/start", "magnet": "3 схеми", "retush_entry": "в�
                "keyword": "слово", "kurs_entry": "вхід курсу", "guide_entry": "вхід гайда", "mk_again": "МК вдруге",
                "lesson_gift": "подарунок уроку 1.5", "sub_check": "натиск «Я підписалась»",
                "sub_ok": "підписка підтверджена", "gate": "ворота ціни (Т9)", "zapr_open": "«Розкажіть про курс»",
-               "touch": "дотик воронки"}
+               "touch": "дотик воронки", "svitlo_entry": "вхід svitlo/profil"}
 KANAL_TTL = 600                                # секунд памʼятаємо відповідь getChatMember
 KANAL_MAX = 200                                # нових запитів getChatMember за одне відкриття сторінки
 _kanal_cache = {}                              # uid -> (коли, (True/False/None, пояснення))
@@ -2781,7 +2837,7 @@ def lyudy_rows(data, now=None):
         seen = u.get("last_seen_at")
         msg = e.get("message") or {}
         rows.append({
-            "id": uid, "who": who_s, "marks": marks, "stage": stage, "kanal": (None, "невідомо: ще не перевірено"),
+            "id": uid, "tag": tag, "who": who_s, "marks": marks, "stage": stage, "kanal": (None, "невідомо: ще не перевірено"),
             "schemes": bool(mg_at), "lesson": lesson, "guide": bool(guide_done), "course": bool(course_done),
             "mk": mk, "want": bool(want), "last_at": last[0],
             "blocked": bool(bl and bl[1] and (not seen or bl[1] > seen)),
@@ -2809,6 +2865,16 @@ def lyudy_rows(data, now=None):
     return rows
 
 
+def _svitlo_line(cnt):
+    """По мітках svitlo і profil: скільки людей, скільки отримали файл, скільки в каналі (за перевіркою), скільки взяли гайд."""
+    out = []
+    for t in SVITLO_TAGS:
+        g = [r for r in cnt if (r.get("tag") or "").lower() == t]
+        out.append(t + " " + str(len(g)) + " / " + str(sum(1 for r in g if r["schemes"])) + " / "
+                   + str(sum(1 for r in g if r["kanal"][0] is True)) + " / " + str(sum(1 for r in g if r["guide"])))
+    return "; ".join(out)
+
+
 def lyudy_summary(rows):
     """Зведення угорі: етапи (і скільки з них у каналі), безкоштовне без покупок, МК, блоки, push1."""
     cnt = [r for r in rows if not r["marks"]]
@@ -2826,6 +2892,7 @@ def lyudy_summary(rows):
             "Безкоштовне без покупок: лише схеми " + str(sum(1 for r in free if r["schemes"] and not r["lesson"]))
             + ", лише урок 1.5 " + str(sum(1 for r in free if r["lesson"] and not r["schemes"]))
             + ", обидва " + str(sum(1 for r in free if r["lesson"] and r["schemes"])) + ".",
+            "Входи світла (людей / файл / у каналі / гайд): " + _svitlo_line(cnt) + ".",
             "Заявок на МК (людей): " + str(sum(1 for r in cnt if r["want"])) + "; гостей МК: " + str(len(by["МК"])) + ".",
             "Заблокували бота: " + str(sum(1 for r in cnt if r["blocked"])) + "; push1 отримали: "
             + str(sum(1 for r in cnt if (r["push1"] or "").startswith("ok"))) + ".",
@@ -4369,6 +4436,11 @@ def hook():
                     bg(store.log_event, uid, "retush_entry", {"tag": src})
                     send_card_file(chat_id, "static/retush-12.png", RETUSH_MAGNET_HELLO, retush_magnet_kb())  # обкладинка магніту, без «Студійне світло»
                     kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
+                elif src in SVITLO_TAGS:
+                    # 16.10: реклама (svitlo) і шапка Instagram (profil): привіт про три схеми, «Канал» + «Я підписалась»,
+                    # файл після sub:check; без уроку ретуші і ціни, далі Д2 (гайд 199) як у тих, хто має подарунок
+                    bg(store.log_event, uid, "svitlo_entry", {"tag": src})
+                    send_card(chat_id, START_PIC, SVITLO_HELLOS[src], svitlo_kb(src))
                 elif src == "mk":
                     # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
                     bg(store.log_event, uid, "mk_entry", {"tag": src})
