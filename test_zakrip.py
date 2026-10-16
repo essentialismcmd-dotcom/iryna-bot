@@ -122,65 +122,6 @@ msg("/zakrip Чужий текст", uid=777)
 perevirka("чужий /zakrip не публікує", not any(p.get("chat_id") == "-1004303013438"
                                                for p in vyklyky("sendMessage")) and not vyklyky("pinChatMessage"))
 
-# 7. колір кнопки (Bot API 9.4, style): слово першим після /zakrip, у текстовому режимі і в reply
-bot.ZAKRIP_BTN = "Хочу на МК ♥️"
-for slovo, stil, tekst_knopky in (("зелена", "success", "Хочу на МК ♥️"),
-                                  ("синя", "primary", "Хочу на МК ♥️"),
-                                  ("червона", "danger", "Хочу на МК 🤍")):
-    VYKLYKY.clear()
-    txt = "/zakrip " + slovo + " Тест кнопки: " + slovo
-    cut = len("/zakrip " + slovo + " ")
-    msg(txt, entities=[{"type": "bot_command", "offset": 0, "length": 7},
-                       {"type": "bold", "offset": cut, "length": 4}])
-    post = [p for p in vyklyky("sendMessage") if p.get("chat_id") == "-1004303013438"]
-    perevirka(slovo + ": текст без команди і слова кольору",
-              len(post) == 1 and post[0]["text"] == "Тест кнопки: " + slovo, str(post))
-    perevirka(slovo + ": entities зсунуті", post and post[0].get("entities") == [
-        {"type": "bold", "offset": 0, "length": 4}], str(post and post[0].get("entities")))
-    perevirka(slovo + ": style " + stil + " і текст кнопки",
-              post and post[0]["reply_markup"] == {"inline_keyboard": [[
-                  {"text": tekst_knopky, "url": "https://t.me/iryna_rul_bot?start=mk", "style": stil}]]},
-              str(post and post[0].get("reply_markup")))
-    perevirka(slovo + ": закріп", len(vyklyky("pinChatMessage")) == 1)
-    VYKLYKY.clear()
-    msg("/zakrip " + slovo, reply_to_message={"message_id": 7, "chat": {"id": 1}, "text": "Текст"})
-    cp = vyklyky("copyMessage")
-    perevirka(slovo + ": reply копіює з кнопкою style",
-              len(cp) == 1 and cp[0]["reply_markup"]["inline_keyboard"][0][0].get("style") == stil
-              and cp[0]["reply_markup"]["inline_keyboard"][0][0]["text"] == tekst_knopky, str(cp))
-
-# без слова кольору: кнопка без style, серце як є
-VYKLYKY.clear()
-msg("/zakrip Привіт, червона шапочка")
-post = [p for p in vyklyky("sendMessage") if p.get("chat_id") == "-1004303013438"]
-perevirka("слово кольору не першим: текст цілий, без style",
-          post and post[0]["text"] == "Привіт, червона шапочка"
-          and post[0]["reply_markup"]["inline_keyboard"][0][0] == {
-              "text": "Хочу на МК ♥️", "url": "https://t.me/iryna_rul_bot?start=mk"},
-          str(post))
-
-# ZAKRIP_STYLE для бойового режиму: без слова бере змінну, слово перебиває
-bot.ZAKRIP_STYLE = "success"
-VYKLYKY.clear()
-msg("/zakrip Звичайний закріп")
-post = [p for p in vyklyky("sendMessage") if p.get("chat_id") == "-1004303013438"]
-perevirka("ZAKRIP_STYLE=success: кнопка зелена", post
-          and post[0]["reply_markup"]["inline_keyboard"][0][0].get("style") == "success", str(post))
-VYKLYKY.clear()
-msg("/zakrip синя Інший")
-post = [p for p in vyklyky("sendMessage") if p.get("chat_id") == "-1004303013438"]
-perevirka("слово кольору перебиває ZAKRIP_STYLE", post
-          and post[0]["reply_markup"]["inline_keyboard"][0][0].get("style") == "primary", str(post))
-bot.ZAKRIP_STYLE = ""
-bot.ZAKRIP_BTN = "Хочу на майстер-клас"
-
-# слово кольору саме по собі без reply: підказка, нічого в канал
-VYKLYKY.clear()
-msg("/zakrip червона")
-perevirka("колір без тексту і без reply: нічого в канал", not vyklyky("copyMessage")
-          and not vyklyky("pinChatMessage")
-          and not [p for p in vyklyky("sendMessage") if p.get("chat_id") == "-1004303013438"])
-
 print()
 if PADINNIA:
     print("ПАДІНЬ:", len(PADINNIA), PADINNIA)

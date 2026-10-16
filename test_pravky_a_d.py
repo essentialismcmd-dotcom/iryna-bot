@@ -202,7 +202,7 @@ ok("Подарунок: тим, хто має магніт, не шлеться"
 # підстраховка 24 год
 import datetime as _dt
 CAND = [910, 911, 912, 913]
-bot.store.gift_candidates = lambda since, h, skip: [c for c in CAND if c not in skip]
+bot.store.gift_candidates = lambda since, h, skip, skip_kv=None: [c for c in CAND if c not in skip]
 KV["kp:911:1.5:done"] = "1"
 bot.owned_keys = (lambda orig: (lambda uid, real=False: {"t1"} if uid == 912 and real else orig(uid, real)))(bot.owned_keys)
 night = _dt.datetime(2026, 10, 12, 21, 30, tzinfo=_dt.timezone.utc)      # 00:30 Київ

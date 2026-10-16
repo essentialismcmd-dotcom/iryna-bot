@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Лід-магніт ретуші 08.10: /start retush БЕЗ мережі і бази.
-Перший екран дослівно з MAGNIT-RETUSH-2026-10-08.md, без ціни і без світла,
+Перший екран дослівно з MAGNIT-RETUSH-2026-10-08.md, без ціни і без гайда,
 кнопка «Відкрити урок» веде в кабінет на частину 1.5."""
 import os, sys
 try:
@@ -36,7 +36,7 @@ p = to_user[0]
 text = p.get("text") or p.get("caption") or ""
 ok("текст дослівно", text == bot.RETUSH_MAGNET_HELLO and text.startswith("Привіт, це Ірина Руль ♥️")
    and "«Чистка шкіри без втрати текстури»" in text and "12 хвилин" in text)
-ok("без ціни і світла", not any(w in text.lower() for w in ("грн", "3300", "3 300", "світла", "$")))
+ok("без ціни і гайда", not any(w in text.lower() for w in ("грн", "3300", "3 300", "гайд, ", "$")))
 rm = p["reply_markup"]
 rm = __import__("json").loads(rm) if isinstance(rm, str) else rm
 btns = [b for r in rm["inline_keyboard"] for b in r]

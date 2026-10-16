@@ -259,7 +259,8 @@ ok("чужий код: MK_SHUT", teksty(502) == [bot.MK_SHUT], str(teksty(502)))
 n = staff("МК НЕ видано")
 ok("чужий код: персоналу «закрите: код не той» з кнопками курсу й гайду",
    len(n) == 1 and "(закрите: код не той)" in n[0]["text"] and "id 502" in n[0]["text"]
-   and [b["callback_data"] for b in knopky(n[0])] == ["give:502:k12", "give:502:t1"], str(n))
+   and [b["callback_data"] for b in knopky(n[0])][:2] == ["give:502:k12", "give:502:t1"]
+   and [b["callback_data"] for b in knopky(n[0])][2:] == ["napys:502", "podar:502"], str(n))
 ok("чужий код: нічого не видано, місце не взято", not any(mk_rows(502).values()) and DB["kv"]["mkn:" + KOD] == "1")
 VYKLYKY.clear()
 msg("/start mk_inshyikod9", 502)
