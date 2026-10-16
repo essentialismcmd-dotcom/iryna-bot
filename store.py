@@ -563,6 +563,35 @@ def gift_candidates(since_iso, after_h, skip_ids, skip_kv=None):
     return [r["user_id"] for r in rows or []]
 
 
+def touch_candidates(since_iso, lo_h, hi_h, skip_ids, skip_kv, with_gift=False):
+    """Дотики воронки (16.10): люди з міткою retush*, що зайшли після since, між lo_h і hi_h годин тому,
+    без оплачених покупок, без 403 (kv blocked:), без вже зробленого дотику (kv skip_kv<id>).
+    with_gift: лише ті, хто вже отримав схеми світла (got_magnet_at). Повертає [(user_id, got_magnet_at)]."""
+    gift = "and u.got_magnet_at is not null" if with_gift else ""
+    rows = q("""
+        select u.user_id, u.got_magnet_at from users u
+        where u.source_tag like 'retush%%' and u.role = 'client'
+          and u.created_at >= %s
+          and u.created_at < now() - make_interval(hours => %s)
+          and u.created_at >= now() - make_interval(hours => %s)
+          and not (u.user_id = any(%s))
+          and not exists (select 1 from purchases p where p.user_id = u.user_id
+                          and p.status in ('paid', 'delivered'))
+          and not exists (select 1 from kv where kv.k = 'blocked:' || u.user_id::text)
+          and not exists (select 1 from kv where kv.k = %s || u.user_id::text)
+          """ + gift + """
+        order by u.created_at limit 30
+    """, (since_iso, lo_h, hi_h, list(skip_ids), skip_kv), fetch="all")
+    return [(r["user_id"], r["got_magnet_at"]) for r in rows or []]
+
+
+def user_texts(uid):
+    """Тексти, які людина писала боту (події message): для перевірки на «стоп»."""
+    rows = q("select payload ->> 'text' as t from events where user_id = %s and kind = 'message'",
+             (uid,), fetch="all")
+    return "\n".join(r["t"] for r in rows or [] if r.get("t"))
+
+
 # Розсилка push1 (13.10): по рядку на кожного, хто є в базі (users, оплачені й видані покупки, події).
 # Сегменти й виключення рахує bot.push1_segments; тут лише сирі ознаки. Агрегати одним проходом по
 # кожній таблиці (без підзапиту на людину), без % у тексті запиту (psycopg без параметрів його не чіпає).

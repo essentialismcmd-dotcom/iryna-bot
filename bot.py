@@ -82,7 +82,7 @@ GUIDE_PRICE   = os.getenv("GUIDE_PRICE", "").strip()
 # Воронка після реклами (коворк projects/iryna/VORONKA-2026-10.md, гілка voronka 16.10).
 # Обидва прапорці вимикаються на Render без деплою: =0 повертає стару поведінку.
 GIFT_FOR_SUB  = os.getenv("GIFT_FOR_SUB", "1").strip().lower() not in ("0", "false", "no", "off")   # п.1: подарунок лише за підписку на канал
-PRICE_GATE    = os.getenv("PRICE_GATE", "1").strip().lower() not in ("0", "false", "no", "off")     # п.4-6: холодна бачить ціну курсу лише після «Розкажіть про курс»
+PRICE_GATE    = os.getenv("PRICE_GATE", "0").strip().lower() in ("1", "true", "yes", "on")          # 16.10 (мудрець): ворота ціни ВИМКНЕНО за замовчуванням; хто питає про курс, бачить картку з ціною одразу
 CHANNEL_URL_RETUSH = os.getenv("CHANNEL_URL_RETUSH", "").strip()   # п.10: окреме запрошення в канал для людей ретуші (рахує вступи з бота)
 # Які тарифи гайда показувати. t2 і t3 продають час Іри на розбір кадрів,
 # а з нею це не домовлено, тому за замовчуванням тільки сам гайд.
@@ -1343,13 +1343,12 @@ GIFT_LATE = (
     "«Три схеми світла з одного сетапу», файл нижче"
 )
 # Подарунок лише за підписку (GIFT_FOR_SUB, п.1): тексти Т1-Т5 з VORONKA-2026-10.md дослівно, чернетка для Іри.
-_HELLO_SUB = (
+_HELLO_SUB = (                              # 16.10: одна кнопка «Відкрити урок», без каналу, без слова «курс», без ціни
     "Привіт, це Ірина Руль ♥️\n\n"
-    "Тут мій урок «Чистка шкіри без втрати текстури» з курсу ретуші, цілком, 12 хвилин. "
+    "Тут мій урок «Чистка шкіри без втрати текстури», цілком, 12 хвилин. "
     "Прибираємо дефекти, шкіра лишається живою, без «пластику».\n\n"
-    "Тисніть «Відкрити урок», він відкриється в моєму кабінеті.\n\n"
-    "А ще для вас подарунок: «Три схеми світла з одного сетапу». Підпишіться на мій канал "
-    "«для своїх», де я показую зйомки й бекстейдж, і натисніть «Я підписалась». Файл прийде сюди."
+    "Тисніть «Відкрити урок», він відкриється в моєму кабінеті. "
+    "А після уроку на вас чекає подарунок: три схеми світла."
 )
 SUB_NO = (                                  # Т2: натиснула, а в каналі її нема
     "Поки не бачу вас у каналі ♥️ Натисніть «Канал «для своїх»», підпишіться і поверніться сюди, "
@@ -1363,7 +1362,10 @@ SUB_ALREADY = "Подарунок уже у вас ♥️ Файл надсил�
 SUB_UNKNOWN = "Не можу зараз перевірити підписку ♥️ Подивлюсь сама і надішлю файл."   # ризик (а): бот не адмін каналу
 GIFT_DONE_ASK = "Ви додивились ♥️ Напишіть, як вам урок? Мені важливо."              # Т4, подарунок уже був
 _GIFT_DONE_SUB = GIFT_DONE_ASK + "\n\nПодарунок, як обіцяла: «Три схеми світла з одного сетапу», файл нижче"
-GIFT_DONE_NOSUB = GIFT_DONE_ASK + "\n\nПодарунок чекає на вас: підпишіться на канал «для своїх» і натисніть «Я підписалась»."
+GIFT_DONE_NOSUB = (                         # 16.10: done → текст + Канал/«Я підписалась»; файл лише після sub:check
+    "Ви додивились ♥️ Подарунок «Три схеми світла» віддаю підписникам каналу «для своїх»: "
+    "там бекстейдж і до/після зі зйомок."
+)
 GIFT_REMIND = (                             # Т5: день 1, непідписаній, один раз
     "Доброго дня ♥️ Подарунок досі чекає: «Три схеми світла з одного сетапу». Підпишіться на канал "
     "«для своїх» і натисніть «Я підписалась», файл прийде сюди.\n\n"
@@ -1371,6 +1373,9 @@ GIFT_REMIND = (                             # Т5: день 1, непідпис�
 )
 RETUSH_MAGNET_HELLO = _HELLO_SUB if GIFT_FOR_SUB else _HELLO_AUTO
 GIFT_DONE = _GIFT_DONE_SUB if GIFT_FOR_SUB else _GIFT_DONE_AUTO
+TOUCH_D1_LESSON = "Урок чекає на вас ♥️ 12 хвилин, коли буде зручно"       # Д1, ще не додивилась
+TOUCH_D2_HAJD = ("Три схеми у вас. Усі тринадцять, з розстановкою і кадром, у гайді «Світло», "
+                 "%d грн, доступ назавжди.")                                  # Д2, ціна з GUIDE_PRICE
 # Ворота ціни (п.4-6): Т9, запрошення без ціни; ціна лише після кнопки «Розкажіть про курс».
 ZAPR_TEXT = (
     "Хочу розповісти про свій курс ретуші ♥️ Він для тих, кого лякає Photoshop, а гарні кадри хочеться. "
@@ -1409,12 +1414,11 @@ def sub_kb(lesson=False):
 def retush_magnet_kb():
     """Mini App кнопка: Telegram сам передає підписаний initData, вхід без паролів.
     Без KABINET_URL кнопки нема (тоді лише канал), щоб не слати в нікуди.
-    З GIFT_FOR_SUB під уроком «Канал» і «Я підписалась»."""
+    З GIFT_FOR_SUB (16.10) лише «Відкрити урок»."""
     url = retush_lesson_url()
     rows = [[{"text": "Відкрити урок", "web_app": {"url": url}}]] if url else []
     if GIFT_FOR_SUB:
-        return {"inline_keyboard": rows + retush_channel_rows()
-                + [[{"text": "Я підписалась", "callback_data": "sub:check"}]]}
+        return {"inline_keyboard": rows}           # 16.10: лише «Відкрити урок»; канал і «Я підписалась» з'являються на done
     return {"inline_keyboard": rows + channel_rows()}
 
 
@@ -1475,17 +1479,12 @@ def sub_check(chat_id, uid, u):
 
 
 def lesson_done_gift(uid, name):
-    """done уроку 1.5 з GIFT_FOR_SUB (п.1): Т4 усім; файл лише підписаній без подарунка;
-    непідписаній рядок про підписку і кнопки; хто вже має файл, лише питання про урок."""
+    """done уроку 1.5 з GIFT_FOR_SUB (16.10): файла не шлемо ніколи, лише текст про подарунок і кнопки
+    «Канал» + «Я підписалась» (файл після sub:check з живою перевіркою). Хто вже має файл: лише питання про урок."""
     if store.kv_get("gift:" + str(uid)) or (store.get_user(uid) or {}).get("got_magnet_at"):
         send(uid, GIFT_DONE_ASK)
         return
-    inn, _why = kanal_member(uid)
-    if inn:
-        if give_gift(uid, GIFT_DONE):
-            notify("Подарунок (три схеми світла) після уроку %s: %s" % (RETUSH_LESSON_PART, name), uid=uid)
-    else:
-        send(uid, GIFT_DONE_NOSUB, sub_kb())
+    send(uid, GIFT_DONE_NOSUB, sub_kb())
 
 
 def pay_url(uid, key):
@@ -1621,25 +1620,7 @@ def gift_late_run(now=None):
     skip = [i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i]
     n = 0
     if GIFT_FOR_SUB:
-        # п.1, Т5: 24+ год без подарунка. В каналі (підписалась, кнопку не тисла): файл.
-        # Ні: одне нагадування Т5 (kv gift_remind:<id>, далі людину не чіпаємо; день 3 і далі окремо).
-        for uid in store.gift_candidates(GIFT_SINCE, GIFT_AFTER_H, skip, skip_kv="gift_remind:") or []:
-            if owned_keys(uid, real=True):
-                continue
-            try:
-                if not store.kv_claim("gift_remind:" + str(uid)):
-                    continue
-                if kanal_member(uid)[0]:
-                    if give_gift(uid, GIFT_SUB):
-                        n += 1
-                    continue
-                done = store.kv_get("kp:%s:%s:done" % (uid, RETUSH_LESSON_PART))
-                if send(uid, GIFT_REMIND, sub_kb(lesson=not done)):
-                    n += 1
-                store.log_event(uid, "touch", {"step": "d1"})
-            except Exception:
-                log.exception("gift_remind %s", uid)
-        return n
+        return 0                           # 16.10: автовидачі нема, дотики Д1/Д2 у touch_run
     for uid in store.gift_candidates(GIFT_SINCE, GIFT_AFTER_H, skip) or []:
         if store.kv_get("kp:%s:%s:done" % (uid, RETUSH_LESSON_PART)):
             continue                       # додивилась: подарунок уже пішов або піде з події
@@ -1653,12 +1634,76 @@ def gift_late_run(now=None):
     return n
 
 
+TOUCH_D1 = (20, 36)      # годин після входу: нижня межа ~20 год; верхня 36, щоб ніч не з'їла вікно (10:00-20:00 Київ)
+TOUCH_D2 = (44, 60)
+
+
+def _touch_ok(uid):
+    """Спільні пропуски дотику: купила (у запиті), 403 (у запиті), стоп-слово."""
+    try:
+        return not PUSH_STOP_RE.search(store.user_texts(uid) or "")
+    except Exception:
+        log.exception("touch stop %s", uid)
+        return False
+
+
+def touch_run(now=None):
+    """Дотики Д1 і Д2 замість автовидачі (16.10, мудрець). Раз на 10 хв, лише 10:00-20:00 Київ,
+    по одному на людину на крок (kv touch_d1:/touch_d2:), персонал і GIFT_SINCE пропускаємо.
+    Д1: без done, урок чекає (кнопка «Відкрити урок»); done без подарунка: Т5 (канал, «Я підписалась»).
+    Д2: подарунок вже є, гайда нема: «Гайд, N грн» (callback guide, подія hajd199, kv hajd199:)."""
+    if not GIFT_FOR_SUB:
+        return 0
+    now = now or datetime.now(timezone.utc)
+    if not (GIFT_FROM_H <= kyiv_hour(now) < GIFT_TO_H):
+        return 0
+    skip = [i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i]
+    n = 0
+    for uid, got in store.touch_candidates(GIFT_SINCE, TOUCH_D1[0], TOUCH_D1[1], skip, "touch_d1:") or []:
+        try:
+            if owned_keys(uid, real=True) or not _touch_ok(uid):
+                continue
+            done = store.kv_get("kp:%s:%s:done" % (uid, RETUSH_LESSON_PART))
+            has_gift = bool(got or store.kv_get("gift:" + str(uid)))
+            if done and has_gift:
+                continue                                   # додивилась і подарунок має: Д1 нічого
+            if not store.kv_claim("touch_d1:" + str(uid)):
+                continue
+            if done:
+                ok = send(uid, GIFT_REMIND, sub_kb())
+            else:
+                url = retush_lesson_url()
+                kb = {"inline_keyboard": [[{"text": "Відкрити урок", "web_app": {"url": url}}]]} if url else None
+                ok = send(uid, TOUCH_D1_LESSON, kb)
+            store.log_event(uid, "touch", {"step": "d1", "done": bool(done), "ok": bool(ok)})
+            n += 1 if ok else 0
+        except Exception:
+            log.exception("touch_d1 %s", uid)
+    for uid, _got in store.touch_candidates(GIFT_SINCE, TOUCH_D2[0], TOUCH_D2[1], skip, "touch_d2:", with_gift=True) or []:
+        try:
+            if owned_keys(uid, real=True) or store.kv_get("hajd199:" + str(uid)) or not _touch_ok(uid):
+                continue
+            if not store.kv_claim("touch_d2:" + str(uid)):
+                continue
+            kb = {"inline_keyboard": [[{"text": TIERS["t1"]["btn"], "callback_data": "guide"}]]}
+            ok = send(uid, TOUCH_D2_HAJD % _G, kb)
+            if ok:
+                store.kv_set("hajd199:" + str(uid), "touch_d2")
+            store.log_event(uid, "hajd199", {"via": "touch_d2", "ok": bool(ok)})
+            store.log_event(uid, "touch", {"step": "d2", "ok": bool(ok)})
+            n += 1 if ok else 0
+        except Exception:
+            log.exception("touch_d2 %s", uid)
+    return n
+
+
 def gift_loop():
     STOP.wait(120)
     while not STOP.wait(600):
         store.session_begin()
         try:
-            gift_late_run()
+            gift_late_run()          # з GIFT_FOR_SUB нічого не робить (16.10)
+            touch_run()
         except Exception:
             log.exception("gift_loop")
         finally:
