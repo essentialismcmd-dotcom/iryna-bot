@@ -17,7 +17,7 @@ except Exception:
 INVITE = "https://t.me/+TESTinvite"
 os.environ.update({"BOT_TOKEN": "555:token", "WEBHOOK_SECRET": "sekret", "ADMIN_ID": "1", "NO_THREADS": "1",
                    "MAGNET_URL": "MAGNIT", "NOTIFY_IDS": "1", "IRA_ID": "2", "CHANNEL_URL": "https://t.me/test_kanal",
-                   "PUSH1_URL": INVITE, "KABINET_URL": "https://kab.test", "KABINET_KEY": "k"})
+                   "PUSH1_URL": INVITE, "KABINET_URL": "https://kab.test", "KABINET_KEY": "k", "GUIDE_PRICE": "199"})
 for _k in ("DATABASE_URL", "LEAD_IDS", "PUSH_SKIP_IDS", "PUSH1_G1", "PUSH1_G2", "PUSH1_KNOPKA", "PUSH1_UROK"):
     os.environ.pop(_k, None)
 
@@ -182,5 +182,23 @@ sg = bot.push1_segments(datetime(2026, 10, 15, 8, 0, tzinfo=timezone.utc))
 ok("push1_segments: Коля після mark у «push1 уже був», у G2 її нема", not sg["seg"]["G2"]
    and [p["id"] for p in sg["skip"]["push1 уже був"]] == [KOLIA], str(sg))
 
+
+# 9. 16.10: kb=hajd кнопка гайда (callback guide), mark=hajd199 окремий kv-ключ, вдруге 409; push1 не чіпає
+VYKLYKY.clear()
+j = post(id=str(KOLIA), dry="1", kb="hajd", mark="hajd199").get_json()
+ok("dry hajd: ok попри push1 у kv, кнопка гайда без url", j["ok"] and j["kb"] == [{"text": "Гайд, 199 грн", "url": None, "web_app": False}], str(j))
+HJ = "Сім років світла в одному гайді."
+r = post(id=str(KOLIA), text=HJ, kb="hajd", mark="hajd199", by="arkhitektor")
+sm = sends(KOLIA)
+rm = (sm[0].get("reply_markup") or {}).get("inline_keyboard") if sm else None
+ok("hajd пішло: текст + кнопка «Гайд, 199 грн» з callback guide", r.status_code == 200 and len(sm) == 1 and sm[0]["text"] == HJ
+   and rm == [[{"text": "Гайд, 199 грн", "callback_data": "guide"}]], str(r.get_json()) + str(rm))
+ok("hajd: kv hajd199 = ok hajd, push1 як був", DB["kv"].get("hajd199:" + str(KOLIA)) == "ok hajd"
+   and DB["kv"].get("push1:" + str(KOLIA)) == "ok G2", str(DB["kv"]))
+ok("hajd: подія hajd199", [e for e in DB["events"] if e[0] == KOLIA and e[1] == "hajd199"], str(DB["events"][-2:]))
+VYKLYKY.clear()
+r = post(id=str(KOLIA), text=HJ, kb="hajd", mark="hajd199")
+ok("hajd вдруге: 409, нічого не пішло", r.status_code == 409 and "hajd199" in r.get_json()["error"] and not sends(), str(r.get_json()))
+ok("mark невідомий: 400", post(id=str(KOLIA), text="x", kb="hajd", mark="inshe").status_code == 400)
 print("\nПАДІННЯ: " + str(PADINNIA) if PADINNIA else "\nУсе зелене")
 sys.exit(1 if PADINNIA else 0)

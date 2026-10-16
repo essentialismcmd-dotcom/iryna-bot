@@ -379,8 +379,9 @@ _T2, _T3 = _tier_prices(os.getenv("GUIDE_TIER_PRICES", ""), _G)
 TIERS = {
     "t1": {"name": "Гайд «Світло»", "uah": _G, "btn": "Гайд, " + str(_G) + " грн",
            "text": (_G_LINE + "\n\n"
-                    "42 сторінки, тринадцять моїх робочих схем: розстановка, "
-                    "налаштування і кадр зі зйомки до кожної. Доступ залишається назавжди."),
+                    "Сім років я знімаю зі світлом. Усе, що справді працює, зібрала в один гайд: "
+                    "тринадцять моїх робочих схем, до кожної розстановка, налаштування і кадр зі зйомки. "
+                    "Доступ залишається назавжди."),
            "extra": ""},
     "t2": {"name": "Гайд + розбір одного кадру", "uah": _T2, "btn": "Гайд + розбір кадру, " + str(_T2) + " грн",
            "text": ("Гайд «Світло» + розбір одного кадру, " + str(_T2) + " грн\n\n"
@@ -3753,7 +3754,8 @@ def _result_fid(res, kind):
     return (v or {}).get("file_id") if isinstance(v, dict) else None
 
 
-PC_KB = {"kanal": "кнопка каналу", "urok_kanal": "кнопки «Відкрити урок» і каналу"}
+PC_KB = {"kanal": "кнопка каналу", "urok_kanal": "кнопки «Відкрити урок» і каналу", "hajd": "кнопка гайда"}
+PC_MARKS = {"push1": PUSH_KEY, "hajd199": "hajd199"}   # mark -> префікс kv-ключа (16.10: hajd199 для розсилки про гайд)
 
 
 def pc_kb(name):
@@ -3764,6 +3766,8 @@ def pc_kb(name):
         return push1_kb(t, "")
     if name == "urok_kanal" and retush_lesson_url():
         return push1_kb(t, "G2")
+    if name == "hajd":      # 16.10: розсилка про гайд 199: та сама кнопка, що в боті, відкриває картку гайда
+        return {"inline_keyboard": [[{"text": TIERS["t1"]["btn"], "callback_data": "guide"}]]}
     return None
 
 
@@ -3788,6 +3792,8 @@ def nadislaty():
     15.10: kb=kanal | urok_kanal додає під текст кнопки push1 (лише текст, без файлу); mark=push1 (лише з kb)
     ставить людині push1 так, ніби вона його отримала (kv push1:<id>, події push1 і для урока lesson_gift), щоб
     /push1 go їй не дублював; вдруге mark=push1 цій людині не шле. dry повертає кнопки з посиланнями.
+    16.10: kb=hajd кнопка «Гайд, <ціна> грн» (callback guide, як у боті); mark=hajd199 (kv hajd199:<id>, подія hajd199)
+    ставить, що розсилка про гайд людині була, вдруге не шле.
     Захищено секретом вебхука, як /zalyvka. Подія staff_reply via=pc. Відповідь JSON.
     """
     j = request.get_json(silent=True)
@@ -3820,23 +3826,23 @@ def nadislaty():
             return out(400, ok=False, error="kb: " + ", ".join(PC_KB) + " (урок потребує KABINET_URL)")
         if fid or up or kind:
             return out(400, ok=False, error="kb лише з текстом, без файлу")
-    if mark and (mark != "push1" or not kb):
-        return out(400, ok=False, error="mark: лише push1 і лише разом з kb")
+    if mark and (mark not in PC_MARKS or not kb):
+        return out(400, ok=False, error="mark: " + " | ".join(PC_MARKS) + ", лише разом з kb")
     if mark and not store.ON:
         return out(503, ok=False, error="бази нема: без неї не знаю, кому push1 уже надіслано")
     _tm.person = None
     store.session_begin()
     try:
         name = person_name(target)
-        pkey = PUSH_KEY + ":" + str(target)
+        pkey = PC_MARKS.get(mark, PUSH_KEY) + ":" + str(target)
         if arg("dry").lower() in ("1", "true", "yes"):
             err = None if name else "людина ще не писала боту (Telegram її не знає)"
             if not err and mark and store.kv_get(pkey):
-                err = "push1 цій людині вже був (kv " + pkey + ": " + str(store.kv_get(pkey)) + ")"
+                err = mark + " цій людині вже був (kv " + pkey + ": " + str(store.kv_get(pkey)) + ")"
             extra = {"kb": pc_kb_view(kb), "mark": mark or None} if kb else {}
             return out(200, ok=not err, dry=True, to=name, error=err, **extra)
         if mark and store.kv_get(pkey):
-            return out(409, ok=False, to=name, error="push1 цій людині вже був (kv " + pkey + ": "
+            return out(409, ok=False, to=name, error=mark + " цій людині вже був (kv " + pkey + ": "
                        + str(store.kv_get(pkey)) + "), вдруге не шлю")
         if not (text or fid or up):
             return out(400, ok=False, to=name, error="нема що слати: text, file_id чи file")
@@ -3870,7 +3876,13 @@ def nadislaty():
                 err = _send_err(r)
         if sent:
             _log_sent(target, by, "pc", " + ".join(sent), text)
-            if mark:
+            if mark == "hajd199":
+                try:
+                    store.kv_set(pkey, "ok hajd")
+                    store.log_event(target, "hajd199", {"kb": kbname, "ok": True, "via": "pc"})
+                except Exception as e:
+                    log.warning("mark hajd199 %s: %s", target, e)
+            elif mark:
                 seg = "G2" if kbname == "urok_kanal" else "INV"
                 try:
                     store.kv_set(pkey, "ok " + seg)
