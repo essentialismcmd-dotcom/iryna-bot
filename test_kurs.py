@@ -14,6 +14,7 @@ try:
 except Exception:
     pass
 
+os.environ["GIFT_FOR_SUB"] = "0"     # стара видача магніту без підписки (нова: test_voronka)
 os.environ["BOT_TOKEN"] = "test:token"
 os.environ["WEBHOOK_SECRET"] = "sekret"
 os.environ["ADMIN_ID"] = "1"

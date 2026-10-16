@@ -17,7 +17,8 @@ try:
 except Exception:
     pass
 
-os.environ.update({"BOT_TOKEN": "test:token", "WEBHOOK_SECRET": "sekret", "ADMIN_ID": "1",
+os.environ.update({"GIFT_FOR_SUB": "0",   # стара видача магніту без підписки (нова: test_voronka)
+                   "BOT_TOKEN": "test:token", "WEBHOOK_SECRET": "sekret", "ADMIN_ID": "1",
                    "NO_THREADS": "1", "GUIDE_FILE_ID": "GUIDE", "MAGNET_URL": "MAGNIT",
                    "NOTIFY_IDS": "1", "CHANNEL_URL": "https://t.me/test_kanal"})
 for k in ("DATABASE_URL", "PAY_URL", "COURSES_ON", "GUIDE_PRICE", "COURSE_PRICES", "TEST_MODE"):

@@ -101,6 +101,19 @@ V.clear()
 cb(777, "sub:check")
 ok("вдруге: «уже у вас», другого файла нема", texts(777) == [bot.SUB_ALREADY] and not docs(777), texts(777))
 
+# ---- п.1: кнопка «Забрати три схеми світла» (голий /start, «Мої матеріали») теж за підписку
+user_obj[791] = user(791, tag=""); MEMBER[791] = "left"; V.clear()
+cb(791, "magnet")
+ok("magnet без підписки: Т2, файла нема", texts(791) == [bot.SUB_NO] and not docs(791) and 791 not in MAGNET, texts(791))
+ok("magnet без підписки: кнопки канал + «Я підписалась»", names(msgs(791)[0]) == ["Канал «для своїх»", "Я підписалась"], names(msgs(791)[0]))
+V.clear(); cb(791, "lock:check")
+ok("стара lock:check без підписки: файла нема", not docs(791), texts(791))
+V.clear(); MEMBER[791] = "member"
+cb(791, "magnet")
+ok("magnet з підпискою: Т3 + файл", texts(791)[:1] == [bot.GIFT_SUB] and len(docs(791)) == 1 and 791 in MAGNET, texts(791))
+V.clear(); cb(791, "magnet")
+ok("magnet вдруге: «уже у вас», без файла", texts(791) == [bot.SUB_ALREADY] and not docs(791), texts(791))
+
 # ---- невідомо (бот не адмін): людині «подивлюсь сама», персоналу кнопка подарунка
 user_obj[790] = user(790); MEMBER[790] = "err"; V.clear()
 cb(790, "sub:check")

@@ -4414,7 +4414,12 @@ def hook():
             if _held:
                 _held.acquire()
 
-            if data == "magnet" or data in LEGACY_LOCK_DATA:
+            if (data == "magnet" or data in LEGACY_LOCK_DATA) and GIFT_FOR_SUB:
+                # п.1: «Забрати три схеми світла» тим самим шляхом, що «Я підписалась»:
+                # у каналі файл (раз назавжди), ні: Т2 з кнопками канал і «Я підписалась».
+                store.log_event(uid, "magnet_ask", {"legacy": data} if data != "magnet" else None)
+                sub_check(chat_id, uid, u)
+            elif data == "magnet" or data in LEGACY_LOCK_DATA:
                 # Файл одразу, канал просимо після нього (AFTER з кнопкою каналу).
                 # lock:check і lock:free: старі кнопки замка в чатах, теж віддають файл.
                 give_magnet(chat_id)
