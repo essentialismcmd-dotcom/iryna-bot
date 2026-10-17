@@ -3393,6 +3393,32 @@ def privacy():
     return PRYVATNIST, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
+VYDALENNIA = """<!doctype html><html lang="uk"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Видалення даних / Data deletion</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:720px;margin:2em auto;padding:0 1em}</style></head><body>
+<h1>Видалення даних</h1>
+<p>Щоб видалити дані, які бот <code>@iryna_rul_bot</code> і застосунок Meta <code>iryna-reklama</code>
+зберігають про вас (зокрема листування в Instagram Direct з @iryna_rul_photographer),
+напишіть на <a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a> з темою
+<b>Видалення даних</b> і вкажіть свій нік в Instagram або Telegram, або напишіть боту «видаліть мої дані».
+Дані видаляються протягом 30 днів, підтвердження надсилаємо у відповідь.
+Повна політика: <a href="/privacy">/privacy</a>.</p>
+<h1 id="en">Data deletion</h1>
+<p>To delete the data that the bot <code>@iryna_rul_bot</code> and the Meta app <code>iryna-reklama</code>
+keep about you (including Instagram Direct messages with @iryna_rul_photographer), email
+<a href="mailto:essentialism.core@gmail.com">essentialism.core@gmail.com</a> with the subject
+<b>Data deletion</b> and your Instagram or Telegram username, or write "delete my data" to the bot.
+Data is deleted within 30 days and a confirmation is sent in reply.
+Full policy: <a href="/privacy#en">/privacy</a>.</p>
+</body></html>"""
+
+
+@app.get("/data-deletion")
+def data_deletion():
+    """Інструкція з видалення даних для налаштувань застосунку Meta (18.10)."""
+    return VYDALENNIA, 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
 @app.post("/kabinet-kupyty")
 def kabinet_kupyty():
     """Кнопка «Весь курс» у кабінеті (08.10): кабінет просить прислати людині картку курсу
@@ -4164,6 +4190,108 @@ def dm_hook_meta():
     except Exception as e:
         log.warning("dm_hook_meta впав: %s", e)
         # Meta повторює доставку на не-200, тому віддаємо 200 і ловимо в лозі.
+        return {"ok": False, "err": str(e)[:200]}, 200
+    finally:
+        store.session_end()
+
+
+# ---------- автовідповідь в Instagram Direct (18.10) ----------
+# Власна заміна ManyChat: людині з реклами одна відповідь з посиланням у бота.
+# Працює лише з IG_VERIFY_TOKEN, META_APP_SECRET і IG_PAGE_TOKEN; без них вимкнено.
+# Читати й писати чужим людям Meta дає лише з Advanced access instagram_manage_messages.
+IG_VERIFY_TOKEN = os.getenv("IG_VERIFY_TOKEN", "").strip()
+META_APP_SECRET = os.getenv("META_APP_SECRET", "").strip()
+IG_PAGE_TOKEN = os.getenv("IG_PAGE_TOKEN", "").strip()
+IG_ADS = {"52535499581237": "A", "52535495609037": "B"}
+IG_REPLY_A = "Тримайте ♥️ Файл «3 схеми світла з одного сетапу» тут: https://t.me/iryna_rul_bot?start=svitlo"
+IG_REPLY_B = "Гайд «Світло» тут ♥️ https://t.me/iryna_rul_bot?start=hajd299"
+IG_REPLIES = {"A": IG_REPLY_A, "B": IG_REPLY_B}
+_IG_RE_A = re.compile(r"(3|три)\s*схем|схем\w*\s+світла", re.I)
+_IG_RE_B = re.compile(r"гайд", re.I)
+
+
+def ig_on():
+    return bool(IG_VERIFY_TOKEN and META_APP_SECRET and IG_PAGE_TOKEN)
+
+
+def ig_sig_ok(raw, header):
+    """X-Hub-Signature-256: sha256=<hmac тіла ключем секрету додатка>."""
+    if not META_APP_SECRET or not header or not header.startswith("sha256="):
+        return False
+    good = hmac.new(META_APP_SECRET.encode(), raw, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(good, header[7:])
+
+
+def ig_which(text, ad_id):
+    """'A', 'B' або None. Слова людини важать більше за оголошення."""
+    t = text or ""
+    if _IG_RE_A.search(t):
+        return "A"
+    if _IG_RE_B.search(t):
+        return "B"
+    return IG_ADS.get(str(ad_id or ""))
+
+
+def _ig_ad_id(m):
+    msg = m.get("message") or {}
+    for r in (msg.get("referral"), m.get("referral"),
+              ((msg.get("reply_to") or {}).get("ad") if isinstance(msg.get("reply_to"), dict) else None)):
+        if isinstance(r, dict):
+            a = r.get("ad_id") or r.get("id")
+            if a:
+                return str(a)
+    return None
+
+
+def ig_send(ig_id, text):
+    r = requests.post("https://graph.facebook.com/v21.0/me/messages",
+                      params={"access_token": IG_PAGE_TOKEN},
+                      json={"recipient": {"id": ig_id}, "message": {"text": text}}, timeout=15)
+    if r.status_code != 200:
+        log.warning("ig_send %s: %s", r.status_code, r.text[:300])
+    return r.status_code == 200
+
+
+@app.get("/ig-webhook")
+def ig_verify():
+    if IG_VERIFY_TOKEN and request.args.get("hub.mode") == "subscribe" and \
+       request.args.get("hub.verify_token") == IG_VERIFY_TOKEN:
+        return request.args.get("hub.challenge", ""), 200
+    return "ni", 403
+
+
+@app.post("/ig-webhook")
+def ig_webhook():
+    if not ig_on():
+        return {"ok": False, "err": "vymkneno"}, 200
+    raw = request.get_data()
+    if not ig_sig_ok(raw, request.headers.get("X-Hub-Signature-256", "")):
+        return "ni", 403
+    try:
+        d = json.loads(raw or b"{}")
+    except ValueError:
+        return {"ok": False}, 200
+    sent = 0
+    store.session_begin()
+    try:
+        for z in _rozgornuty_meta(d):
+            if z["is_echo"] or not z["ig_id"]:
+                continue
+            try:
+                cid = store.dm_contact(z["ig_id"])
+                store.dm_event(cid, "in", body=z["text"], kind=z["kind"],
+                               payload=z["_syre"], ext_id=z["mid"])
+            except Exception as e:
+                log.warning("ig_webhook запис: %s", e)
+            which = ig_which(z["text"], _ig_ad_id(z["_syre"]))
+            # одна автовідповідь на людину назавжди; без бази kv_claim дає False
+            if which and store.kv_claim("ig_auto:" + z["ig_id"]):
+                if ig_send(z["ig_id"], IG_REPLIES[which]):
+                    sent += 1
+                    store.log_event(None, "ig_auto", {"ig": z["ig_id"], "v": which})
+        return {"ok": True, "sent": sent}, 200
+    except Exception as e:
+        log.warning("ig_webhook впав: %s", e)
         return {"ok": False, "err": str(e)[:200]}, 200
     finally:
         store.session_end()
