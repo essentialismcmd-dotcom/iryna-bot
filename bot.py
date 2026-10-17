@@ -1407,6 +1407,9 @@ PROFIL_HELLO = (
     "Віддаю її підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
 )
 SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO}
+# 17.10: реклама гайда (креатив Іри 299), ?start=hajd299 одразу дає картку гайда з тарифами, як слово «гайд»;
+# окрема мітка, щоб у /lyudy порівняти з svitlo (вхід, канал, покупка)
+HAJD_TAG = "hajd299"
 SVITLO_REMIND = (                           # Д1 для svitlo/profil без файла: без уроку
     "Доброго дня ♥️ Три схеми світла чекають: підпишіться на канал «для своїх» і натисніть "
     "«Я підписалась», файл прийде сюди."
@@ -2866,9 +2869,9 @@ def lyudy_rows(data, now=None):
 
 
 def _svitlo_line(cnt):
-    """По мітках svitlo і profil: скільки людей, скільки отримали файл, скільки в каналі (за перевіркою), скільки взяли гайд."""
+    """По мітках svitlo, profil і hajd299: скільки людей, скільки отримали файл, скільки в каналі (за перевіркою), скільки взяли гайд."""
     out = []
-    for t in SVITLO_TAGS:
+    for t in SVITLO_TAGS + (HAJD_TAG,):
         g = [r for r in cnt if (r.get("tag") or "").lower() == t]
         out.append(t + " " + str(len(g)) + " / " + str(sum(1 for r in g if r["schemes"])) + " / "
                    + str(sum(1 for r in g if r["kanal"][0] is True)) + " / " + str(sum(1 for r in g if r["guide"])))
@@ -4489,6 +4492,13 @@ def hook():
                     # файл після sub:check; без уроку ретуші і ціни, далі Д2 (гайд 199) як у тих, хто має подарунок
                     bg(store.log_event, uid, "svitlo_entry", {"tag": src})
                     send_card(chat_id, START_PIC, SVITLO_HELLOS[src], svitlo_kb(src))
+                elif src == HAJD_TAG:
+                    bg(store.log_event, uid, "guide_entry", {"tag": src})
+                    if not GUIDE_SALE:
+                        send_paused(chat_id)
+                    else:
+                        kb = tiers_kb()
+                        send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
                 elif src == "mk":
                     # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
                     bg(store.log_event, uid, "mk_entry", {"tag": src})

@@ -134,7 +134,14 @@ rows = [{"marks": [], "stage": "схеми", "tag": "svitlo", "schemes": True, "
         {"marks": [], "stage": "старт", "tag": "svitlo", "schemes": False, "guide": False, "kanal": (False, "")},
         {"marks": [], "stage": "гайд", "tag": "profil", "schemes": True, "guide": True, "kanal": (True, "")}]
 ln = bot._svitlo_line(rows)
-ok("/lyudy: svitlo 2/1/1/0; profil 1/1/1/1", ln == "svitlo 2 / 1 / 1 / 0; profil 1 / 1 / 1 / 1", ln)
+ok("/lyudy: svitlo 2/1/1/0; profil 1/1/1/1; hajd299 0", ln == "svitlo 2 / 1 / 1 / 0; profil 1 / 1 / 1 / 1; hajd299 0 / 0 / 0 / 0", ln)
+
+# 17.10: ?start=hajd299 (реклама гайда 299): одразу картка гайда з тарифами, подія guide_entry
+start(840, "hajd299"); m = msgs(840)
+ok("hajd299: одна картка гайда, як на слово «гайд»", len(m) == 1 and texts(840)[0] == bot.guide_intro(bot.tiers_kb())
+   and names(m[0]) == names({"reply_markup": bot.tiers_kb()}), texts(840))
+ok("hajd299: подія guide_entry з міткою", (840, "guide_entry", {"tag": "hajd299"}) in EV, EV[-3:])
+ok("hajd299: не магніт і не svitlo", texts(840)[0] not in (bot.HELLO, bot.SVITLO_HELLO))
 ok("LYUDY_KINDS знає svitlo_entry", "svitlo_entry" in bot.LYUDY_KINDS)
 import inspect, store as _s
 ok("store.touch_candidates бере svitlo і profil", "'svitlo', 'profil'" in inspect.getsource(_s.touch_candidates) if hasattr(_s.touch_candidates, "__code__") and _s.touch_candidates.__name__ != "_tc" else True)
