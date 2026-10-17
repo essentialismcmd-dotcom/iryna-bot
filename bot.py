@@ -1779,8 +1779,8 @@ def give_guide(uid, tier):
     if extra:
         send(uid, extra)
     # Покупець у момент оплати найтепліший, другого такого моменту не буде.
-    if courses_sale():
-        send(uid, NEXT_AFTER_GUIDE, retush_kb_one())
+    if courses_sale():                    # 17.10: канал без умов, покупцеві й так цікаво
+        send(uid, NEXT_AFTER_GUIDE, {"inline_keyboard": retush_kb_one()["inline_keyboard"] + channel_rows()})
     else:
         send_card(uid, CARD_KANAL, NEXT_AFTER_GUIDE_NOC, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
     return True
