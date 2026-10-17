@@ -3845,11 +3845,13 @@ PC_EXT = {".jpg": "photo", ".jpeg": "photo", ".png": "photo", ".mp4": "video", "
 PC_NO_CAPTION = ("video_note", "sticker")
 
 
-def _upload(method, field, chat_id, name, blob, caption=None):
+def _upload(method, field, chat_id, name, blob, caption=None, reply_markup=None):
     """Файл з диска ПК людині (multipart); 403 = позначка blocked, як в api_raw."""
     data = {"chat_id": chat_id}
     if caption:
         data["caption"] = caption
+    if reply_markup:
+        data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
     try:
         j = requests.post(API + "/" + method, data=data, files={field: (name, blob)}, timeout=120).json()
     except Exception as e:
@@ -3867,7 +3869,8 @@ def _result_fid(res, kind):
 
 
 PC_KB = {"kanal": "кнопка каналу", "urok_kanal": "кнопки «Відкрити урок» і каналу", "hajd": "кнопка гайда"}
-PC_MARKS = {"push1": PUSH_KEY, "hajd199": "hajd199"}   # mark -> префікс kv-ключа (16.10: hajd199 для розсилки про гайд)
+PC_MARKS = {"push1": PUSH_KEY, "hajd199": "hajd199", "post51": "post51"}   # mark -> префікс kv-ключа (16.10: hajd199
+# для розсилки про гайд; 17.10: post51, пост каналу зі схемою світла непідписаним, кнопка каналу під фото)
 
 
 def pc_kb(name):
@@ -3936,8 +3939,8 @@ def nadislaty():
         kb = pc_kb(kbname)
         if not kb:
             return out(400, ok=False, error="kb: " + ", ".join(PC_KB) + " (урок потребує KABINET_URL)")
-        if fid or up or kind:
-            return out(400, ok=False, error="kb лише з текстом, без файлу")
+        if (fid or up or kind) and ((kind or "photo") in PC_NO_CAPTION or not text or len(text) > 1024):
+            return out(400, ok=False, error="kb лише з текстом чи під файлом з підписом до 1024 знаків")
     if mark and (mark not in PC_MARKS or not kb):
         return out(400, ok=False, error="mark: " + " | ".join(PC_MARKS) + ", лише разом з kb")
     if mark and not store.ON:
@@ -3964,6 +3967,7 @@ def nadislaty():
         has_file = bool(up or fid)
         cap = text if has_file and text and len(text) <= 1024 and kind not in PC_NO_CAPTION else None
         sent, new_fid, err = [], None, None
+        file_kb = kb if has_file and cap else None       # 17.10: кнопки під фото з підписом, одним повідомленням
         if text and not cap:
             if kbname == "urok_kanal":
                 kabinet_mist.push_user(target)         # людина в базі кабінету до кнопки уроку, як у push1 G2
@@ -3975,25 +3979,27 @@ def nadislaty():
         if has_file and not err:
             if up:
                 blob, fname = up.read(), up.filename or "file"
-                r = _upload(PC_KINDS[kind][0], kind, target, fname, blob, cap)
+                r = _upload(PC_KINDS[kind][0], kind, target, fname, blob, cap, file_kb)
                 if not r.get("ok") and kind == "photo" and r.get("error_code") == 400:
                     kind = "document"      # фото не пройшло як фото (розмір, пропорції): шлемо файлом
-                    r = _upload("sendDocument", kind, target, fname, blob, cap)
+                    r = _upload("sendDocument", kind, target, fname, blob, cap, file_kb)
             else:
-                r = api_raw(PC_KINDS[kind][0], **{"chat_id": target, kind: fid, "caption": cap})
+                r = api_raw(PC_KINDS[kind][0], **{"chat_id": target, kind: fid, "caption": cap,
+                                                  "reply_markup": file_kb})
             if r.get("ok"):
-                sent.append(PC_KINDS[kind][1] + (" з підписом" if cap else ""))
+                sent.append(PC_KINDS[kind][1] + (" з підписом" if cap else "")
+                            + (" + " + PC_KB[kbname] if file_kb else ""))
                 new_fid = _result_fid(r.get("result"), kind)
             else:
                 err = _send_err(r)
         if sent:
             _log_sent(target, by, "pc", " + ".join(sent), text)
-            if mark == "hajd199":
+            if mark in ("hajd199", "post51"):
                 try:
-                    store.kv_set(pkey, "ok hajd")
-                    store.log_event(target, "hajd199", {"kb": kbname, "ok": True, "via": "pc"})
+                    store.kv_set(pkey, "ok " + kbname)
+                    store.log_event(target, mark, {"kb": kbname, "ok": True, "via": "pc"})
                 except Exception as e:
-                    log.warning("mark hajd199 %s: %s", target, e)
+                    log.warning("mark %s %s: %s", mark, target, e)
             elif mark:
                 seg = "G2" if kbname == "urok_kanal" else "INV"
                 try:
@@ -4007,6 +4013,48 @@ def nadislaty():
         return out(502 if err else 200, ok=not err, to=name, sent=sent, file_id=new_fid, error=err)
     finally:
         store.session_end()
+
+
+@app.get("/ne_v_kanali/" + SECRET)
+def ne_v_kanali():
+    """
+    Кому слати розсилку з кнопкою каналу (17.10, пост 51 непідписаним): клієнти з бази без персоналу,
+    PUSH_SKIP_IDS, заблокованих бота і тих, хто писав «стоп»; ?mark=post51 прибирає тих, кому вже було.
+    Кожному getChatMember: «ні» йде в to, «так» і «невідомо» окремо. Лише читання, JSON; слати /nadislaty.
+    """
+    mark = (request.args.get("mark") or "").strip().lower()
+    if mark and mark not in PC_MARKS:
+        return json.dumps({"ok": False, "error": "mark: " + " | ".join(PC_MARKS)}, ensure_ascii=False), 400
+    store.session_begin()
+    try:
+        rows = store.push_rows() if store.ON else None
+        if rows is None:
+            return json.dumps({"ok": False, "error": "бази нема або не відповіла"}, ensure_ascii=False), 503
+        staff = {i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i}
+        pool, skip = [], {"персонал чи вручну": 0, "заблокували бота": 0, "писали «стоп»": 0, mark or "-": 0}
+        for r in rows:
+            uid, seen, blocked_at = r.get("user_id"), r.get("last_seen_at"), r.get("blocked_at")
+            if uid in staff or uid in PUSH_SKIP_IDS or (r.get("role") or "client") != "client":
+                skip["персонал чи вручну"] += 1
+            elif blocked_at and not (seen and seen > blocked_at):
+                skip["заблокували бота"] += 1
+            elif PUSH_STOP_RE.search(r.get("texts") or ""):
+                skip["писали «стоп»"] += 1
+            elif mark and store.kv_get(PC_MARKS[mark] + ":" + str(uid)):
+                skip[mark] += 1
+            else:
+                pool.append(r)
+    finally:
+        store.session_end()
+    kan = kanal_many([r["user_id"] for r in pool])
+    to, yes, unk = [], [], []
+    for r in pool:
+        st = kan[r["user_id"]]
+        p = {"id": r["user_id"], "who": who({"id": r["user_id"], "username": r.get("username"),
+                                             "first_name": r.get("first_name"), "last_name": r.get("last_name")})}
+        (to if st[0] is False else yes if st[0] else unk).append(dict(p, why=st[1]) if st[0] is None else p)
+    return json.dumps({"ok": True, "to": to, "v_kanali": len(yes), "nevidomo": unk, "skip": skip},
+                      ensure_ascii=False), 200, {"Content-Type": "application/json; charset=utf-8"}
 
 
 @app.get("/jars/" + SECRET)

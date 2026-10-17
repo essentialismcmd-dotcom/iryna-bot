@@ -117,11 +117,24 @@ ok("dry без kb: як було (без kb у відповіді)", j["ok"] and
 
 # 2. погані параметри
 ok("kb невідомий: 400", post(id=str(KOLIA), text="x", kb="zzz").status_code == 400)
-ok("kb з файлом: 400", post(id=str(KOLIA), text="x", kb="kanal", file_id="F", kind="photo").status_code == 400)
+ok("kb під кружком: 400", post(id=str(KOLIA), text="x", kb="kanal", file_id="F", kind="video_note").status_code == 400)
+ok("kb з файлом без підпису: 400", post(id=str(KOLIA), kb="kanal", file_id="F", kind="photo").status_code == 400)
 ok("mark без kb: 400", post(id=str(KOLIA), text="x", mark="push1").status_code == 400)
 ok("mark не push1: 400", post(id=str(KOLIA), text="x", kb="kanal", mark="inshe").status_code == 400)
+VYKLYKY.clear()
 ok("kb без тексту: 400, нічого не шле", post(id=str(KOLIA), kb="kanal").status_code == 400 and not sends())
 ok("поганих викликів не було", not sends())
+
+# 2б. 17.10: kb під фото з підписом одним повідомленням (пост 51 непідписаним), mark=post51 вдруге не шле
+VYKLYKY.clear()
+r = post(id=str(KOLIA), text="схема", kb="kanal", file_id="F", kind="photo", mark="post51")
+sm = sends(KOLIA)
+ok("фото + kb: одне sendPhoto з підписом і кнопкою каналу", r.status_code == 200 and len(sm) == 1
+   and sm[0].get("caption") == "схема" and INVITE in str(sm[0].get("reply_markup")), str(sm))
+ok("post51: kv і вдруге 409", DB["kv"].get("post51:" + str(KOLIA)) == "ok kanal"
+   and post(id=str(KOLIA), text="схема", kb="kanal", file_id="F", kind="photo", mark="post51").status_code == 409)
+DB["kv"].pop("post51:" + str(KOLIA), None)
+VYKLYKY.clear()
 
 # 3. без kb усе як було: ні кнопок, ні позначок
 VYKLYKY.clear()
