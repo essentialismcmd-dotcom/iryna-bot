@@ -134,7 +134,7 @@ rows = [{"marks": [], "stage": "схеми", "tag": "svitlo", "schemes": True, "
         {"marks": [], "stage": "старт", "tag": "svitlo", "schemes": False, "guide": False, "kanal": (False, "")},
         {"marks": [], "stage": "гайд", "tag": "profil", "schemes": True, "guide": True, "kanal": (True, "")}]
 ln = bot._svitlo_line(rows)
-ok("/lyudy: svitlo 2/1/1/0; profil 1/1/1/1; hajd299 0", ln == "svitlo 2 / 1 / 1 / 0; profil 1 / 1 / 1 / 1; hajd299 0 / 0 / 0 / 0", ln)
+ok("/lyudy: svitlo 2/1/1/0; profil 1/1/1/1; storis 0; hajd299 0", ln == "svitlo 2 / 1 / 1 / 0; profil 1 / 1 / 1 / 1; storis 0 / 0 / 0 / 0; hajd299 0 / 0 / 0 / 0", ln)
 
 # 17.10: ?start=hajd299 (реклама гайда 299): одразу картка гайда з тарифами, подія guide_entry
 start(840, "hajd299"); m = msgs(840)
@@ -144,7 +144,7 @@ ok("hajd299: подія guide_entry з міткою", (840, "guide_entry", {"tag
 ok("hajd299: не магніт і не svitlo", texts(840)[0] not in (bot.HELLO, bot.SVITLO_HELLO))
 ok("LYUDY_KINDS знає svitlo_entry", "svitlo_entry" in bot.LYUDY_KINDS)
 import inspect, store as _s
-ok("store.touch_candidates бере svitlo і profil", "'svitlo', 'profil'" in inspect.getsource(_s.touch_candidates) if hasattr(_s.touch_candidates, "__code__") and _s.touch_candidates.__name__ != "_tc" else True)
+ok("store.touch_candidates бере svitlo і profil", "'svitlo', 'profil', 'storis'" in inspect.getsource(_s.touch_candidates) if hasattr(_s.touch_candidates, "__code__") and _s.touch_candidates.__name__ != "_tc" else True)
 
 print("ПАДІННЯ: " + ", ".join(bad) if bad else "усе зелене")
 sys.exit(1 if bad else 0)

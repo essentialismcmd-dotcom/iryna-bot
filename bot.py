@@ -1393,7 +1393,7 @@ RETUSH_LESSON_PART = "1.5"
 
 # 16.10: два входи на один шлях, ?start=svitlo (реклама) і ?start=profil (шапка Instagram):
 # привіт про три схеми світла, «Канал» + «Я підписалась», файл після живого sub:check (без уроку ретуші і ціни).
-SVITLO_TAGS = ("svitlo", "profil")
+SVITLO_TAGS = ("svitlo", "profil", "storis")   # 18.10: storis = сторіз Іри, окремо від реклами
 # Тексти з projects/iryna/kontent/2026-10-16-svitlo-statyka/TEKST.md п.5 дослівно (копірайтер, Іра пише «це Іра»).
 SVITLO_HELLO = (
     "Привіт, це Іра ♥️\n"
@@ -1406,7 +1406,7 @@ PROFIL_HELLO = (
     "Ви прийшли з мого профілю, тут добірка «Три схеми світла з одного сетапу»: три різні картинки за одну зйомку.\n"
     "Віддаю її підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
 )
-SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO}
+SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO, "storis": SVITLO_HELLO}
 # 17.10: реклама гайда (креатив Іри 299), ?start=hajd299 одразу дає картку гайда з тарифами, як слово «гайд»;
 # окрема мітка, щоб у /lyudy порівняти з svitlo (вхід, канал, покупка)
 HAJD_TAG = "hajd299"
@@ -2869,7 +2869,7 @@ def lyudy_rows(data, now=None):
 
 
 def _svitlo_line(cnt):
-    """По мітках svitlo, profil і hajd299: скільки людей, скільки отримали файл, скільки в каналі (за перевіркою), скільки взяли гайд."""
+    """По мітках svitlo, profil, storis і hajd299: скільки людей, скільки отримали файл, скільки в каналі (за перевіркою), скільки взяли гайд."""
     out = []
     for t in SVITLO_TAGS + (HAJD_TAG,):
         g = [r for r in cnt if (r.get("tag") or "").lower() == t]

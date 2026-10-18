@@ -572,7 +572,7 @@ def touch_candidates(since_iso, lo_h, hi_h, skip_ids, skip_kv, with_gift=False):
     gift = "and u.got_magnet_at is not null" if with_gift else ""
     rows = q("""
         select u.user_id, u.got_magnet_at from users u
-        where (u.source_tag like 'retush%%' or u.source_tag in ('svitlo', 'profil')) and u.role = 'client'
+        where (u.source_tag like 'retush%%' or u.source_tag in ('svitlo', 'profil', 'storis')) and u.role = 'client'
           and u.created_at >= %s
           and u.created_at < now() - make_interval(hours => %s)
           and u.created_at >= now() - make_interval(hours => %s)
