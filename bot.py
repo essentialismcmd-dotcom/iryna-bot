@@ -4209,7 +4209,7 @@ IG_REPLIES = {"A": IG_REPLY_A, "B": IG_REPLY_B}
 _IG_RE_A = re.compile(r"(3|три)\s*схем|схем\w*\s+світла", re.I)
 _IG_RE_B = re.compile(r"гайд", re.I)
 # стандартна фраза Instagram, коли людина пише з рілса чи сторіз реклами (шаблон там не показується)
-_IG_RE_REKLAMA = re.compile(r"дізнатися\s+більше|узнать\s+(об\s+этом\s+)?подробнее|подробн|learn\s+more|more\s+info", re.I)
+_IG_RE_REKLAMA = re.compile(r"дізнатися\s+більше|узнать\s+(об\s+этом\s+)?подробнее|learn\s+more|more\s+info", re.I)
 
 
 def ig_on():
