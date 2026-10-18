@@ -4203,11 +4203,13 @@ IG_VERIFY_TOKEN = os.getenv("IG_VERIFY_TOKEN", "").strip()
 META_APP_SECRET = os.getenv("META_APP_SECRET", "").strip()
 IG_PAGE_TOKEN = os.getenv("IG_PAGE_TOKEN", "").strip()
 IG_ADS = {"52535499581237": "A", "52535495609037": "B"}
-IG_REPLY_A = "Тримайте ♥️ Файл «3 схеми світла з одного сетапу» тут: https://t.me/iryna_rul_bot?start=svitlo"
-IG_REPLY_B = "Гайд «Світло» тут ♥️ https://t.me/iryna_rul_bot?start=hajd299"
+IG_REPLY_A = "Привіт ♥️ Це Іра. Мій безкоштовний файл «3 схеми світла з одного сетапу» тут: https://t.me/iryna_rul_bot?start=svitlo"
+IG_REPLY_B = "Привіт ♥️ Це Іра. Гайд «Світло»: 13 моїх схем з імпульсним світлом, 299 грн замість 900. Тут: https://t.me/iryna_rul_bot?start=hajd299"
 IG_REPLIES = {"A": IG_REPLY_A, "B": IG_REPLY_B}
 _IG_RE_A = re.compile(r"(3|три)\s*схем|схем\w*\s+світла", re.I)
 _IG_RE_B = re.compile(r"гайд", re.I)
+# стандартна фраза Instagram, коли людина пише з рілса чи сторіз реклами (шаблон там не показується)
+_IG_RE_REKLAMA = re.compile(r"дізнатися\s+більше|узнать\s+(об\s+этом\s+)?подробнее|подробн|learn\s+more|more\s+info", re.I)
 
 
 def ig_on():
@@ -4229,7 +4231,10 @@ def ig_which(text, ad_id):
         return "A"
     if _IG_RE_B.search(t):
         return "B"
-    return IG_ADS.get(str(ad_id or ""))
+    if str(ad_id or "") in IG_ADS:
+        return IG_ADS[str(ad_id)]
+    # фраза з реклами без відомого ad_id: головне оголошення А
+    return "A" if _IG_RE_REKLAMA.search(t) else None
 
 
 def _ig_ad_id(m):
