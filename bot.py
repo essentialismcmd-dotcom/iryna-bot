@@ -1539,13 +1539,25 @@ def lesson_done_gift(uid, name):
     send(uid, GIFT_DONE_NOSUB, sub_kb())
 
 
+def osobysta_tsina(uid, key):
+    """Особиста ціна курсу (19.10, слово Yaro): /tsina кладе kv tsina:<id>; для k12/k12z важить більше за PRODUCTS."""
+    if key not in ("k12", "k12z") or not uid:
+        return None
+    try:
+        v = store.kv_get("tsina:" + str(uid))
+        return int(v) if v else None
+    except Exception:
+        return None
+
+
 def pay_url(uid, key):
     """Персональне посилання на банку: сума товару і код людини вже підставлені
     (перевірено 02.10: ?a=сума&t=коментар, є Apple Pay / Google Pay)."""
     if not PAY_URL:
         return ""
     sep = "&" if "?" in PAY_URL else "?"
-    return PAY_URL + sep + urlencode({"a": PRODUCTS[key]["uah"], "t": order_code(uid, key)})
+    return PAY_URL + sep + urlencode({"a": osobysta_tsina(uid, key) or PRODUCTS[key]["uah"],
+                                      "t": order_code(uid, key)})
 
 
 def pay_kb(key, uid=None):
@@ -3030,7 +3042,7 @@ def handle_tx(tx):
         return
     key = BY_CODE.get(m.group(2), "t" + m.group(2))
     code = "IR" + m.group(1).upper() + "-" + m.group(2)
-    need = PRODUCTS.get(key, {}).get("uah", 0) * 100
+    need = (osobysta_tsina(uid, key) or PRODUCTS.get(key, {}).get("uah", 0)) * 100
     if amount < need * 0.9:
         store.log_event(uid, "pay_short", {"code": code, "uah": amount // 100})
         notify("Оплата " + str(amount // 100) + " грн за кодом " + code
@@ -4489,6 +4501,27 @@ def hook():
                     send(chat_id, "Видано: " + name)
                 else:
                     send(chat_id, "Не вдалося видати " + name + ". " + pname(vkey) + ": " + ready_text(vkey))
+                return "ok"
+            # Особиста ціна курсу (19.10): /tsina <id> <грн>, з нового рядка текст картки. Людині йде цей текст,
+            # код платежу і кнопка банки на цю суму; оплата з кодом видає курс сама (handle_tx бере kv tsina:).
+            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/tsina":
+                _head, _, _body = text.partition("\n")
+                _parts = _head.split() + ["", ""]
+                if not (_parts[1].isdigit() and _parts[2].isdigit() and _body.strip()):
+                    send(chat_id, "Напишіть так: /tsina 897646290 2500\nтекст картки з нового рядка")
+                    return "ok"
+                target, uah = int(_parts[1]), int(_parts[2])
+                store.kv_set("tsina:" + str(target), str(uah))
+                code = order_code(target, "k12z")
+                store.add_purchase(target, "course", tier="k12z", order_code=code, amount_uah=uah)
+                store.log_event(target, "tier_pick", {"tier": "k12z", "code": code, "tsina": uah})
+                body = (_body.strip() + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
+                        + ("\n\nПісля оплати курс відкриється тут, зазвичай протягом кількох хвилин." if PAY_URL else ""))
+                tu = store.get_user(target) or {}
+                name = who({"id": target, "username": tu.get("username"),
+                            "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
+                ok = send(target, body, pay_kb("k12z", target))
+                send(chat_id, ("Надіслано: " if ok else "Не дійшло: ") + name + ", " + str(uah) + " грн, код " + code)
                 return "ok"
             # Подарунок схем вручну (14.10): /podarunok <id> шле тим самим give_gift текст GIFT_HAND і PDF магніту
             # з кнопкою каналу; раз назавжди (kv gift:<id>), схеми вже видані чи заявка зайнята = нічого не шле.
