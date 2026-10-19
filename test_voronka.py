@@ -203,7 +203,7 @@ bot.owned_keys = bot_owned
 # ---- 16.10: ворота ціни вимкнені, слова про курс дають картку з ціною одразу
 user_obj[780] = user(780, "retush_liza"); V.clear()
 msg(780, "курс")
-ok("холодна пише «курс»: картка з ціною одразу", texts(780) and has_price(texts(780)[0]) and "IR" in texts(780)[0], texts(780))
+ok("холодна пише «курс»: картка з ціною одразу", texts(780) and has_price(texts(780)[0]) and "впишіть" not in texts(780)[0], texts(780))
 ok("кнопки «Розкажіть про курс» нема", not any("Розкажіть про курс" in names(p) for p in msgs(780)))
 ok("події gate нема", not any(e[1] == "gate" for e in EV))
 V.clear()

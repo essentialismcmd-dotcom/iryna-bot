@@ -376,7 +376,8 @@ VYKLYKY.clear()
 msg("/start kurs10", 532)
 p = sent(chat=532)
 ok("kurs10: картка курсу зі знижкою і код -7", p and "знижка 10 %" in p[-1]["text"]
-   and ("IR" + bot.b36(532) + "-7") in p[-1]["text"], p[-1]["text"][:80] if p else "")
+   and "впишіть" not in p[-1]["text"] and ("IR" + bot.b36(532) + "-7") in bot.pay_url(532, "k12z"),
+   p[-1]["text"][:80] if p else "")
 ok("kurs10: «Новий у боті» з кнопкою «Видати курс вручну»",
    any(knopky(x) and knopky(x)[0]["text"] == "Видати курс вручну" for x in staff("Новий у боті")))
 

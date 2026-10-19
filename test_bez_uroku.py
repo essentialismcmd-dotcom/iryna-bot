@@ -35,7 +35,7 @@ to_user = [p for m, p in V if p.get("chat_id") == 777 and m in ("sendMessage", "
 ok("людині пішло одне повідомлення", len(to_user) == 1, len(to_user))
 p = to_user[0]
 text = p.get("text") or p.get("caption") or ""
-ok("це картка курсу з кодом", "курс" in text.lower() and "Призначення платежу" in text, text[:80])
+ok("це картка курсу, без «впишіть»", "курс" in text.lower() and "Призначення платежу" not in text, text[:80])
 ok("про урок 1.5 ні слова", "Відкрити урок" not in text and "Чистка шкіри" not in text)
 rm = p["reply_markup"]
 rm = __import__("json").loads(rm) if isinstance(rm, str) else rm

@@ -1286,7 +1286,8 @@ def pick_product(chat_id, uid, u, data, gate=True):
     store.add_purchase(uid, t["product"], tier=data, order_code=code,
                        amount_uah=t["uah"])
     store.log_event(uid, "tier_pick", {"tier": data, "code": code})
-    body = t["text"] + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
+    # 19.10, слово Yaro: код уже в посиланні банки, вписувати нічого не треба; без банки код лишається
+    body = t["text"] if PAY_URL else t["text"] + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
     if PAY_URL:
         body += ("\n\nПісля оплати курс відкриється тут, зазвичай протягом кількох хвилин."
                  if t["product"] == "course" else

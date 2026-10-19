@@ -63,7 +63,8 @@ for cmd in ("/start kurs", "/kurs"):
     ok(cmd + ": що всередині", all(x in t for x in ("18 відео", "135 хвилин", "4 уроки",
        "бʼюті-портрет", "темний фон", "фешн-колір", "пресети", "Доступ назавжди",
        "Увесь курс відкривається одразу після оплати")))
-    ok(cmd + ": код платежу -7 (знижка всім)", "-7" in t, t[-60:].replace(chr(10), " "))
+    ok(cmd + ": код платежу -7 (знижка всім) у посиланні, без «впишіть»", "впишіть" not in t
+       and any("-7" in (b.get("url") or "") for b in btns(out[0])), t[-60:].replace(chr(10), " "))
     ok(cmd + ": без Stars", "Stars" not in t and "star" not in t.lower())
     ok(cmd + ": кнопка оплати карткою", any("pay.test" in (b.get("url") or "") for b in btns(out[0])))
 
@@ -73,7 +74,7 @@ ok("меню: є /kurs «Курс ретуші»", {"command": "kurs", "descript
 out = msg("/start kurs10")
 t = (out[0].get("text") or "") if out else ""
 ok("kurs10: картка з ціною і знижкою", len(out) == 1 and "3300 грн" in t and "10 % як першій учениці на нашій платформі: 2970 грн" in t, t[:90])
-ok("kurs10: код платежу -7", "-7" in t)
+ok("kurs10: код платежу -7 у посиланні", out and any("-7" in (b.get("url") or "") for b in btns(out[0])))
 u = [b.get("url") or "" for b in btns(out[0])] if out else []
 ok("kurs10: банка на 2970", any("a=2970" in x for x in u), str(u))
 DANO = []
