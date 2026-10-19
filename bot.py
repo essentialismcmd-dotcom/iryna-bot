@@ -2134,6 +2134,12 @@ def give_course(uid, key):
     if not any(COURSE_SECTIONS.get(k) for k in keys):
         return False
     lines = ["Готово, курс ваш ♥️", ""]
+    kb = None
+    if kabinet_mist.URL:
+        # 19.10, слово Yaro: покупниця шукала відео серед файлів практики, тож одразу кажемо, де відео
+        lines[1:1] = ["Відео всіх уроків у моєму кабінеті: синя кнопка «Кабінет» зліва внизу або кнопка під цим "
+                      "повідомленням. Файли в чаті це практика, їх відкривайте на комп'ютері у Photoshop.", ""]
+        kb = {"inline_keyboard": [[{"text": "Відкрити кабінет", "web_app": {"url": kabinet_mist.URL + "/"}}]]}
     for k in keys:
         lines.append(COURSES[k]["name"] + ":")
         for i, (title, files) in enumerate(COURSE_SECTIONS.get(k) or []):
@@ -2141,7 +2147,7 @@ def give_course(uid, key):
         lines.append("")
     lines.append("Йдемо по одному уроку: дивитесь відео, робите практику, тиснете «Далі». "
                  "Усе куплене завжди під рукою в меню «Мої матеріали».")
-    send(uid, "\n".join(lines))
+    send(uid, "\n".join(lines), kb)
     time.sleep(1.0)
     first = next(k for k in keys if COURSE_SECTIONS.get(k))
     return send_lesson(uid, first, 0)

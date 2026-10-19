@@ -223,6 +223,9 @@ _hello = next(i for i in _order if VYKLYKY[i][1].get("text") == bot.MK_HELLO)
 _guide = next(i for i in _order if VYKLYKY[i][1].get("document") == "GUIDE")
 _intro = next(i for i in _order if "Готово, курс ваш" in (VYKLYKY[i][1].get("text") or ""))
 ok("видача: порядок вітання, гайд, курс", _hello < _guide < _intro)
+_ip = VYKLYKY[_intro][1]
+ok("19.10: у вітанні курсу сказано, що відео в кабінеті, і є кнопка кабінету",
+   "кабінеті" in _ip.get("text", "") and "kab.test" in str(_ip.get("reply_markup")), str(_ip.get("reply_markup"))[:120])
 ok("видача: без підводки до продажу і без оплати",
    not any("Покажу мій курс" in x or "Оплатити" in x or "pay.test" in x for x in t)
    and not any("pay.test" in str(b) for p in sent(chat=501) for b in knopky(p)))
