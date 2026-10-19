@@ -432,6 +432,22 @@ def ensure_purchase(uid, product, tier=None, order_code=None, amount_uah=None):
           uid, SLOTS.get(tier, 0)), fetch="one")
 
 
+def pending_by_amount(amount_uah, hours=24):
+    """
+    Незакриті покупки на цю суму, тариф яких обрали за останні hours годин.
+    19.10: оплата йде за посиланням на картку, код до виписки не доходить,
+    тож бот звіряє вхідний переказ за сумою.
+    """
+    return q("""
+        select * from purchases p
+        where p.status = 'new' and p.amount_uah = %s
+          and exists (select 1 from events e where e.kind = 'tier_pick'
+                      and e.payload->>'code' = p.order_code
+                      and e.created_at > now() - make_interval(hours => %s))
+        order by p.id
+    """, (amount_uah, hours), fetch="all") or []
+
+
 def get_purchase(order_code):
     return q("select * from purchases where order_code = %s", (order_code,), fetch="one")
 

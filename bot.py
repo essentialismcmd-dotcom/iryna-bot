@@ -2,8 +2,8 @@
 """
 Бот Iryna Rul. Три речі й нічого більше.
 
-1. Лійка: магніт → гайд «Світло» → канал «для своїх» (там МК), оплата в банку
-   Monobank, видача файлів. Тарифи t2/t3 і курси ретуші сплять за перемикачами
+1. Лійка: магніт → гайд «Світло» → канал «для своїх» (там МК), оплата за
+   посиланням Monobank на картку Іри, видача файлів. Тарифи t2/t3 і курси ретуші сплять за перемикачами
    GUIDE_TIERS і COURSES_ON: людина бачить лише те, що продається зараз.
 2. Приймання матеріалів від Іри: вона кидає що завгодно з коротким підписом,
    рівно як кидала в особистий чат. Бот приймає і мовчить.
@@ -259,7 +259,7 @@ AFTER_NOC = (
 )
 MOI_EMPTY_NOC = ("Поки нічого не куплено ♥️ Безкоштовні три схеми світла і повний гайд "
                  "по кнопках нижче.")
-# Без оплати (PAY_URL порожній, ФОП і банка пізніше, слово Yaro 29.09): бот завершений
+# Без оплати (PAY_URL порожній, слово Yaro 29.09): бот завершений
 # з тим, що є зараз, тобто магніт, канал. Жодних «реквізити», «скоро», «надішлю».
 GUIDE_SALE = bool(PAY_URL)
 
@@ -454,7 +454,7 @@ for _k, _c in (("k1", "4"), ("k2", "5"), ("k12", "6")):
     PRODUCTS[_k] = dict(COURSES[_k], code=_c, product="course")
 # Слово Yaro 08.10: перша покупниця (лід з діректу до анонсу) отримує курс
 # зі знижкою 10 % за міткою ?start=kurs10. Окремий продукт з кодом -7, щоб
-# банка перевіряла саме знижену суму; видається як звичайний курс k12.
+# оплату звіряли саме зі зниженою сумою; видається як звичайний курс k12.
 KURS_ZNYZHKA = 10
 _K12Z = int(round(_K12 * (100 - KURS_ZNYZHKA) / 100.0))
 PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=(
@@ -1284,9 +1284,9 @@ def pick_product(chat_id, uid, u, data, gate=True):
         return
     code = order_code(uid, data)
     store.add_purchase(uid, t["product"], tier=data, order_code=code,
-                       amount_uah=t["uah"])
+                       amount_uah=osobysta_tsina(uid, data) or t["uah"])
     store.log_event(uid, "tier_pick", {"tier": data, "code": code})
-    # 19.10, слово Yaro: код уже в посиланні банки, вписувати нічого не треба; без банки код лишається
+    # 19.10, слово Yaro: людині нічого вписувати не треба, оплату бот звіряє сам; без PAY_URL код лишається
     body = t["text"] if PAY_URL else t["text"] + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
     if PAY_URL:
         body += ("\n\nПісля оплати курс відкриється тут, зазвичай протягом кількох хвилин."
@@ -1552,8 +1552,8 @@ def osobysta_tsina(uid, key):
 
 
 def pay_url(uid, key):
-    """Персональне посилання на банку: сума товару і код людини вже підставлені
-    (перевірено 02.10: ?a=сума&t=коментар, є Apple Pay / Google Pay)."""
+    """Персональне посилання на оплату (Mono «За посиланням», картка Іри): сума і код підставлені
+    (?a=сума&t=коментар, є Apple Pay / Google Pay). Код до виписки не доходить, звірка за сумою в handle_tx."""
     if not PAY_URL:
         return ""
     sep = "&" if "?" in PAY_URL else "?"
@@ -3028,21 +3028,46 @@ def handle_tx(tx):
     amount = tx.get("amount", 0)
     comment = (tx.get("comment") or "") + " " + (tx.get("description") or "")
     m = CODE_RE.search(comment.replace(" ", ""))
-    if not m:
+    how = ""
+    if m:
+        try:
+            uid = unb36(m.group(1).upper())
+        except Exception:
+            return
+        key = BY_CODE.get(m.group(2), "t" + m.group(2))
+        code = "IR" + m.group(1).upper() + "-" + m.group(2)
+    else:
+        # 19.10: оплата за посиланням на картку Іри, коду у виписці нема. Одна людина
+        # з незакритим тарифом на цю суму за добу = її оплата. Решта вхідних на картку
+        # не наші: мовчимо, крім сум, що збігаються з ціною товару.
+        rows = []
+        if amount > 0 and amount % 100 == 0:
+            try:
+                rows = store.pending_by_amount(amount // 100)
+            except Exception as e:
+                log.warning("pending_by_amount: %s", e)
+        uids = list(dict.fromkeys(r["user_id"] for r in rows))
         when = tx.get("time")
         when = time.strftime("%d.%m %H:%M", time.localtime(when)) if when else "час невідомий"
-        notify("Оплата " + str(amount // 100) + " грн у банці, але БЕЗ КОДУ.\n"
-               "Коли: " + when + "\n"
-               "Від кого: " + (tx.get("description") or "не вказано") + "\n"
-               "Коментар: " + (tx.get("comment") or "порожній") + "\n\n"
-               "Впізнай по імені і видай вручну.")
-        return
-    try:
-        uid = unb36(m.group(1).upper())
-    except Exception:
-        return
-    key = BY_CODE.get(m.group(2), "t" + m.group(2))
-    code = "IR" + m.group(1).upper() + "-" + m.group(2)
+        if len(uids) > 1:
+            names = []
+            for r in rows:
+                tu = store.get_user(r["user_id"]) or {}
+                names.append(who({"id": r["user_id"], "username": tu.get("username"), "first_name":
+                                  tu.get("first_name"), "last_name": tu.get("last_name")}) + ", " + r["order_code"])
+            notify("Оплата " + str(amount // 100) + " грн на картці (" + when + "), а тариф на цю суму за добу брали кілька людей:\n"
+                   + "\n".join(names) + "\n\nВпізнай і видай /vydaty.")
+            return
+        if not uids:
+            if amount // 100 in {p.get("uah") for p in PRODUCTS.values()}:
+                notify("Оплата " + str(amount // 100) + " грн на картці, але чия, не видно: коду нема, тариф на цю суму за добу ніхто не брав.\n"
+                       "Коли: " + when + "\n"
+                       "Від кого: " + (tx.get("description") or "не вказано") + "\n"
+                       "Коментар: " + (tx.get("comment") or "порожній") + "\n\n"
+                       "БЕЗ КОДУ: впізнай по імені і видай вручну.")
+            return
+        r = rows[0]
+        uid, key, code, how = r["user_id"], r["tier"], r["order_code"], " (впізнано за сумою)"
     need = (osobysta_tsina(uid, key) or PRODUCTS.get(key, {}).get("uah", 0)) * 100
     if amount < need * 0.9:
         store.log_event(uid, "pay_short", {"code": code, "uah": amount // 100})
@@ -3061,7 +3086,7 @@ def handle_tx(tx):
     store.log_event(uid, "pay_ok" if ok else "pay_undelivered", {"code": code})
     kabinet_mist.push_user(uid)
     if ok:
-        notify("Оплата " + str(amount // 100) + " грн, код " + code + ". "
+        notify("Оплата " + str(amount // 100) + " грн, код " + code + how + ". "
                + pname(key) + ": видано автоматично.", uid=uid)
     else:
         notify("Оплата " + str(amount // 100) + " грн, код " + code
@@ -3129,7 +3154,7 @@ def status_text():
         "База: " + db,
         "Комміт: " + (os.getenv("RENDER_GIT_COMMIT", "")[:7] or "невідомий"),
         "Тестовий режим: " + ("увімкнений, кнопка тільки адмінам" if TEST_MODE else "вимкнений"),
-        "Банка: " + ("підключена" if PAY_URL else "не підключена")
+        "Оплата за посиланням: " + ("підключена" if PAY_URL else "не підключена")
         + " · токен Mono: " + ("є" if MONO_TOKEN and MONO_JAR else "немає"),
         "Бот Іри: " + ("увімкнений" if IRA_ON else "вимкнений"),
         "Магніт: " + version_line("magnet")
@@ -4104,6 +4129,7 @@ def ne_v_kanali():
 
 @app.get("/jars/" + SECRET)
 def jars():
+    """Рахунки Mono для MONO_JAR (19.10: картки, на які йде «За посиланням», і старі банки)."""
     if not MONO_TOKEN:
         return "MONO_TOKEN не заданий"
     try:
@@ -4111,7 +4137,10 @@ def jars():
                          headers={"X-Token": MONO_TOKEN}, timeout=20)
         if r.status_code != 200:
             return "monobank: " + str(r.status_code)
-        out = ["<pre>"]
+        out = ["<pre>", "MONO_JAR зараз: " + (MONO_JAR[:6] + "…" if MONO_JAR else "порожній")]
+        for a in (r.json().get("accounts") or []):
+            out.append("картка " + ", ".join(x[-4:] for x in (a.get("maskedPan") or []))
+                       + " " + str(a.get("type")) + "  id: " + str(a.get("id")))
         for j in (r.json().get("jars") or []):
             out.append(str(j.get("title")) + "  id: " + str(j.get("id")))
         return "\n".join(out) + "</pre>"
@@ -4504,7 +4533,7 @@ def hook():
                     send(chat_id, "Не вдалося видати " + name + ". " + pname(vkey) + ": " + ready_text(vkey))
                 return "ok"
             # Особиста ціна курсу (19.10): /tsina <id> <грн>, з нового рядка текст картки. Людині йде цей текст,
-            # код платежу і кнопка банки на цю суму; оплата з кодом видає курс сама (handle_tx бере kv tsina:).
+            # кнопка оплати на цю суму; оплату на цю суму handle_tx звіряє і видає курс сам (kv tsina:).
             if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/tsina":
                 _head, _, _body = text.partition("\n")
                 _parts = _head.split() + ["", ""]
@@ -4516,7 +4545,7 @@ def hook():
                 code = order_code(target, "k12z")
                 store.add_purchase(target, "course", tier="k12z", order_code=code, amount_uah=uah)
                 store.log_event(target, "tier_pick", {"tier": "k12z", "code": code, "tsina": uah})
-                # 19.10, слово Yaro: код уже в посиланні банки, людині нічого не вписувати
+                # 19.10, слово Yaro: людині нічого не вписувати
                 body = _body.strip()
                 tu = store.get_user(target) or {}
                 name = who({"id": target, "username": tu.get("username"),

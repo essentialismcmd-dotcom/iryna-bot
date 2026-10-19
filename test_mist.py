@@ -423,7 +423,7 @@ vybir_taryfu(806, "k1")
 bot.handle_tx(tx(806, "k1", bot.PRODUCTS["k1"]["uah"]))
 ok("з натиснутим тарифом дубліката нема", len(ryadky(806)) == 1 and ryadky(806)[0]["status"] == "delivered")
 VYKLYKY.clear()
-bot.handle_tx({"id": "nocode", "amount": 100000, "comment": "просто так", "description": "Х", "time": 0})
+bot.handle_tx({"id": "nocode", "amount": bot.PRODUCTS["k1"]["uah"] * 100, "comment": "просто так", "description": "Х", "time": 0})
 ok("БЕЗ КОДУ як і раніше: лише повідомлення, рядка нема",
    any("БЕЗ КОДУ" in str(p.get("text", "")) for m, p in VYKLYKY)
    and len(BAZA["purchases"]) == n0 + 2, str(len(BAZA["purchases"])))
