@@ -84,6 +84,7 @@ GUIDE_PRICE   = os.getenv("GUIDE_PRICE", "").strip()
 GIFT_FOR_SUB  = os.getenv("GIFT_FOR_SUB", "1").strip().lower() not in ("0", "false", "no", "off")   # п.1: подарунок лише за підписку на канал
 PRICE_GATE    = os.getenv("PRICE_GATE", "0").strip().lower() in ("1", "true", "yes", "on")          # 16.10 (мудрець): ворота ціни ВИМКНЕНО за замовчуванням; хто питає про курс, бачить картку з ціною одразу
 CHANNEL_URL_RETUSH = os.getenv("CHANNEL_URL_RETUSH", "").strip()   # п.10: окреме запрошення в канал для людей ретуші (рахує вступи з бота)
+FREE_LESSON   = os.getenv("FREE_LESSON", "0").strip().lower() in ("1", "true", "yes", "on")         # 19.10, слово Yaro: урок 1.5 не роздаємо, мітка retush одразу на картку курсу
 # Які тарифи гайда показувати. t2 і t3 продають час Іри на розбір кадрів,
 # а з нею це не домовлено, тому за замовчуванням тільки сам гайд.
 GUIDE_TIERS   = [t for t in os.getenv("GUIDE_TIERS", "t1").replace(" ", "").split(",") if t]
@@ -1726,6 +1727,8 @@ def touch_run(now=None):
             has_gift = bool(got or store.kv_get("gift:" + str(uid)))
             if done and has_gift:
                 continue                                   # додивилась і подарунок має: Д1 нічого
+            if not done and not FREE_LESSON:
+                continue                                   # 19.10: урок закрито, кликати дивитись нема куди
             if not store.kv_claim("touch_d1:" + str(uid)):
                 continue
             if done:
@@ -4615,6 +4618,9 @@ def hook():
                 if src == "guide":
                     bg(store.log_event, uid, "guide_entry", {"tag": src})
                     send_card(chat_id, START_PIC, GUIDE_HELLO if courses_sale() else GUIDE_HELLO_NOC, guide_kb())
+                elif src == "retush" and not FREE_LESSON and courses_sale():
+                    bg(store.log_event, uid, "retush_entry", {"tag": src})
+                    pick_product(chat_id, uid, u, "k12", gate=False)
                 elif src == "retush":
                     # лід-магніт ретуші 08.10: урок 1.5 безкоштовно в кабінеті, без світла і без ціни
                     bg(store.log_event, uid, "retush_entry", {"tag": src})

@@ -22,6 +22,7 @@ def fake_post(url, json=None, data=None, files=None, timeout=None):
     V.append((url.rsplit("/", 1)[-1], json or data or {}))
     return _R({"ok": True, "result": {"message_id": len(V)}})
 requests.post = fake_post
+os.environ["FREE_LESSON"] = "1"   # 19.10: магніт уроку вимкнено за замовчуванням, тут перевіряємо його самого
 import bot
 app = bot.app.test_client()
 bad = []

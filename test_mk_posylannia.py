@@ -47,6 +47,7 @@ def fake_post(url, json=None, data=None, files=None, timeout=None, **kw):
 
 
 requests.post = fake_post
+os.environ["FREE_LESSON"] = "1"   # 19.10: магніт уроку вимкнено за замовчуванням, тут перевіряємо його самого
 import bot
 
 bot.time.sleep = lambda s: None

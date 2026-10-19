@@ -32,6 +32,7 @@ def fake_post(url, json=None, data=None, files=None, timeout=None, headers=None)
         return _R({"ok": True, "result": {"status": st}})
     return _R({"ok": True, "result": {"message_id": len(V)}})
 requests.post = fake_post
+os.environ["FREE_LESSON"] = "1"   # 19.10: магніт уроку вимкнено за замовчуванням, тут перевіряємо його самого
 import bot, store
 KV, USERS, EV, MAGNET = {}, {}, [], set()
 store.kv_get = lambda k, d=None: KV.get(k, d)
