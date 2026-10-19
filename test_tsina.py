@@ -40,7 +40,7 @@ to_her = [p for m, p in V if p.get("chat_id") == ANNA]
 ok("Анні пішла одна картка", len(to_her) == 1, len(to_her))
 p = to_her[0]
 code = bot.order_code(ANNA, "k12z")
-ok("текст Yaro і код", p["text"].startswith("Аня, тримай ♥️") and code in p["text"], p["text"])
+ok("лише текст Yaro, без «впишіть»", p["text"] == "Аня, тримай ♥️", p["text"])
 rm = p["reply_markup"]
 rm = __import__("json").loads(rm) if isinstance(rm, str) else rm
 url = rm["inline_keyboard"][0][0].get("url", "")

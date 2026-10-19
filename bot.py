@@ -4515,8 +4515,8 @@ def hook():
                 code = order_code(target, "k12z")
                 store.add_purchase(target, "course", tier="k12z", order_code=code, amount_uah=uah)
                 store.log_event(target, "tier_pick", {"tier": "k12z", "code": code, "tsina": uah})
-                body = (_body.strip() + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
-                        + ("\n\nПісля оплати курс відкриється тут, зазвичай протягом кількох хвилин." if PAY_URL else ""))
+                # 19.10, слово Yaro: код уже в посиланні банки, людині нічого не вписувати
+                body = _body.strip()
                 tu = store.get_user(target) or {}
                 name = who({"id": target, "username": tu.get("username"),
                             "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
