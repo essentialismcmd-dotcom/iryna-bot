@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Лід-магніт ретуші 08.10: /start retush БЕЗ мережі і бази.
 Перший екран дослівно з MAGNIT-RETUSH-2026-10-08.md, без ціни і без гайда,
-кнопка «Відкрити урок» веде в кабінет на частину 1.5."""
+кнопка «Відкрити урок» веде в кабінет на частину 1.3 (20.10: маски замість чистки шкіри)."""
 import os, sys
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -36,12 +36,12 @@ ok("людині пішло одне повідомлення", len(to_user) == 
 p = to_user[0]
 text = p.get("text") or p.get("caption") or ""
 ok("текст дослівно", text == bot.RETUSH_MAGNET_HELLO and text.startswith("Привіт, це Ірина Руль ♥️")
-   and "«Чистка шкіри без втрати текстури»" in text and "12 хвилин" in text)
+   and "«Маски: волосся і фон»" in text and "7 хвилин" in text)
 ok("без ціни і гайда", not any(w in text.lower() for w in ("грн", "3300", "3 300", "гайд, ", "$")))
 rm = p["reply_markup"]
 rm = __import__("json").loads(rm) if isinstance(rm, str) else rm
 btns = [b for r in rm["inline_keyboard"] for b in r]
-ok("кнопка «Відкрити урок» = Mini App на 1.5", btns[0] == {"text": "Відкрити урок", "web_app": {"url": "https://kab.test/?p=1.5"}}, btns)
+ok("кнопка «Відкрити урок» = Mini App на 1.3", btns[0] == {"text": "Відкрити урок", "web_app": {"url": "https://kab.test/?p=1.3"}}, btns)
 ok("магніта світла нема в кнопках", not any("світла" in b["text"] for b in btns))
 ok("повідомлення «Урок ваш» ще не йде", True)
 print("ПАДІННЯ: " + ", ".join(bad) if bad else "усе зелене")

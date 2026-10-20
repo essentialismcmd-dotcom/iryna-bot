@@ -355,7 +355,7 @@ def podiia(uid, kind, lesson):
 
 bot.magnet_ref = lambda: "MAGNETFILE"
 VYKLYKY.clear()
-podiia(501, "start", "1.1"); podiia(501, "done", "1.5")
+podiia(501, "start", "1.1"); podiia(501, "done", "1.3")
 ok("кабінет: гостю МК персоналу тиша", not sent(chat=1))
 ok("кабінет: гостю МК подарунка нема", not sent("sendDocument", 501))
 VYKLYKY.clear()
@@ -372,7 +372,7 @@ ok("mk: «Новий у боті», мітка mk", any("Мітка: mk" in p["t
 VYKLYKY.clear()
 msg("/start retush_liza", 531)
 card = sent("sendPhoto", 531) or sent("sendMessage", 531)
-ok("retush_liza: магніт уроку", card and "Чистка шкіри" in (card[0].get("caption") or card[0].get("text") or ""))
+ok("retush_liza: магніт уроку", card and "Маски: волосся і фон" in (card[0].get("caption") or card[0].get("text") or ""))
 ok("retush_liza: source_tag і підпис партнера", DB["users"][531]["source_tag"] == "retush_liza"
    and any("(від Лізи (liza.khbchk))" in p["text"] for p in staff("Новий у боті")))
 VYKLYKY.clear()
