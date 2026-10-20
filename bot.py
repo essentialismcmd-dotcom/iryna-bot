@@ -111,6 +111,7 @@ LEAD_IDS = _ids(os.getenv("LEAD_IDS", "")) or NOTIFY_IDS
 
 API = "https://api.telegram.org/bot" + TOKEN
 MONO = "https://api.monobank.ua"
+PICK_WIN = int(os.getenv("PICK_WIN", "5400"))   # с: вибір тарифу не раніше ніж за 90 хв до платежу, щоб впізнати серед кількох
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("bot")
@@ -3053,7 +3054,16 @@ def handle_tx(tx):
             except Exception as e:
                 log.warning("pending_by_amount: %s", e)
         uids = list(dict.fromkeys(r["user_id"] for r in rows))
+        uids_all = uids
         when = tx.get("time")
+        # 20.10: Тетяна обрала тариф о 9:31, заплатила о 9:33, а бот питав адміна, бо той самий
+        # тариф за добу брали ще троє (учора). Коли кандидатів кілька, лишаємо тих, хто обрав
+        # тариф за останні PICK_WIN секунд до платежу; один такий = його оплата.
+        if len(uids) > 1 and when:
+            fresh = [r for r in rows if r.get("pick_ts") and 0 <= when - float(r["pick_ts"]) <= PICK_WIN]
+            fresh_uids = list(dict.fromkeys(r["user_id"] for r in fresh))
+            if len(fresh_uids) == 1:
+                rows, uids = fresh, fresh_uids
         when = time.strftime("%d.%m %H:%M", time.localtime(when)) if when else "час невідомий"
         if len(uids) > 1:
             names = []
@@ -3061,8 +3071,11 @@ def handle_tx(tx):
                 tu = store.get_user(r["user_id"]) or {}
                 names.append(who({"id": r["user_id"], "username": tu.get("username"), "first_name":
                                   tu.get("first_name"), "last_name": tu.get("last_name")}) + ", " + r["order_code"])
+            # нічия оплата: хто з кандидатів натисне «оплатила» протягом NECHYIA_WIN, тому бот видасть сам (claim_nechyia)
+            store.kv_set("tx_nechyia", json.dumps({"id": tx.get("id"), "uah": amount // 100,
+                                                   "time": tx.get("time") or int(time.time()), "uids": uids}))
             notify("Оплата " + str(amount // 100) + " грн на картці (" + when + "), а тариф на цю суму за добу брали кілька людей:\n"
-                   + "\n".join(names) + "\n\nВпізнай і видай /vydaty.")
+                   + "\n".join(names) + "\n\nВпізнай і видай /vydaty. Якщо хтось із них натисне «оплатила», бот видасть сам.")
             return
         if not uids:
             if amount // 100 in {p.get("uah") for p in PRODUCTS.values()}:
@@ -3073,7 +3086,41 @@ def handle_tx(tx):
                        "БЕЗ КОДУ: впізнай по імені і видай вручну.")
             return
         r = rows[0]
-        uid, key, code, how = r["user_id"], r["tier"], r["order_code"], " (впізнано за сумою)"
+        uid, key, code = r["user_id"], r["tier"], r["order_code"]
+        how = " (впізнано за сумою і часом)" if len(uids_all) > 1 else " (впізнано за сумою)"
+    _pay_issue(uid, key, code, amount, how)
+
+
+NECHYIA_WIN = int(os.getenv("NECHYIA_WIN", "2700"))   # с: «оплатила» не пізніше ніж за 45 хв після нічиєї оплати
+
+
+def claim_nechyia(uid, key):
+    """
+    20.10: оплата без коду на суму, яку за добу брали кілька людей, лежить у kv як «нічия».
+    Людина з того списку тисне «оплатила» протягом NECHYIA_WIN після платежу, і тариф
+    сходиться за сумою: видаємо їй і забираємо запис. True = видано.
+    """
+    try:
+        raw = store.kv_get("tx_nechyia")
+        if not raw:
+            return False
+        d = json.loads(raw)
+        if uid not in d.get("uids", []) or time.time() - float(d.get("time") or 0) > NECHYIA_WIN:
+            return False
+        if (osobysta_tsina(uid, key) or PRODUCTS.get(key, {}).get("uah", 0)) != d.get("uah"):
+            return False
+        if not store.kv_claim("tx_nechyia_" + str(d.get("id"))):
+            return False
+        store.kv_set("tx_nechyia", "")
+    except Exception as e:
+        log.warning("claim_nechyia: %s", e)
+        return False
+    _pay_issue(uid, key, order_code(uid, key), d["uah"] * 100, " (впізнано за сумою і кнопкою «оплатила»)")
+    return True
+
+
+def _pay_issue(uid, key, code, amount, how=""):
+    """Оплата впізнана: записати, видати, сказати адміну. amount у копійках."""
     need = (osobysta_tsina(uid, key) or PRODUCTS.get(key, {}).get("uah", 0)) * 100
     if amount < need * 0.9:
         store.log_event(uid, "pay_short", {"code": code, "uah": amount // 100})
@@ -4862,6 +4909,8 @@ def hook():
                     send(chat_id, RETUSH_PRO, course_kb("k2"))
             elif data in PRODUCTS:
                 pick_product(chat_id, uid, u, data)
+            elif data.startswith("noget:") and claim_nechyia(uid, data.split(":")[1]):
+                store.log_event(uid, "noget_claimed", {"tier": data.split(":")[1]})
             elif data.startswith("noget:"):
                 key = data.split(":")[1]
                 code = order_code(uid, key)

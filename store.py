@@ -439,7 +439,9 @@ def pending_by_amount(amount_uah, hours=24):
     тож бот звіряє вхідний переказ за сумою.
     """
     return q("""
-        select * from purchases p
+        select p.*, extract(epoch from (select max(e.created_at) from events e
+                      where e.kind = 'tier_pick' and e.payload->>'code' = p.order_code)) as pick_ts
+        from purchases p
         where p.status = 'new' and p.amount_uah = %s
           and exists (select 1 from events e where e.kind = 'tier_pick'
                       and e.payload->>'code' = p.order_code

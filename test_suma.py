@@ -47,6 +47,30 @@ bot.handle_tx({"amount": K * 100, "comment": "", "time": 0})
 ok("дві людини на суму: нічого не видано", GIVEN == [], GIVEN)
 ok("адміну обидва імені і /vydaty", any("Л501" in t and "Л502" in t and "/vydaty" in t for t in admin()), admin())
 V.clear()
+import time as _t
+NOW = int(_t.time())
+PEND[0]["pick_ts"] = NOW - 20 * 3600          # 501 обрав тариф учора
+PEND[1]["pick_ts"] = NOW - 120                # 502 обрав дві хвилини тому
+bot.handle_tx({"amount": K * 100, "comment": "", "time": NOW})
+ok("двоє на суму, але один обрав тариф щойно: видано йому", GIVEN == [(502, "k12z")], GIVEN)
+ok("адміну «за сумою і часом»", any("за сумою і часом" in t for t in admin()), admin())
+V.clear(); GIVEN.clear()
+PEND[0]["pick_ts"] = NOW - 300; PEND[1]["pick_ts"] = NOW - 120
+bot.handle_tx({"amount": K * 100, "comment": "", "time": NOW})
+ok("двоє обрали щойно: знову питання адміну", GIVEN == [] and any("/vydaty" in t for t in admin()), admin())
+V.clear()
+# нічия оплата: двоє обрали щойно, 502 тисне «оплатила»
+KV = {}
+store.kv_get = lambda k, default=None: KV.get(k, default)
+store.kv_set = lambda k, v: KV.__setitem__(k, str(v))
+store.kv_claim = lambda k: KV.setdefault("claim:" + k, 0) == 0 and not KV.__setitem__("claim:" + k, 1)
+bot.handle_tx({"amount": K * 100, "comment": "", "time": NOW, "id": "tx9"})
+ok("нічия оплата записана", "502" in KV.get("tx_nechyia", "") and "501" in KV.get("tx_nechyia", ""), KV)
+ok("«оплатила» від 503 (не кандидат): нічого", bot.claim_nechyia(503, "k12z") is False and GIVEN == [], GIVEN)
+ok("«оплатила» від 502: видано", bot.claim_nechyia(502, "k12z") is True and GIVEN == [(502, "k12z")], GIVEN)
+ok("адміну «за сумою і кнопкою»", any("кнопкою" in t for t in admin()), admin())
+ok("«оплатила» від 501 після того: нічого, запис забрано", bot.claim_nechyia(501, "k12z") is False and GIVEN == [(502, "k12z")], GIVEN)
+V.clear(); GIVEN.clear()
 bot.handle_tx({"amount": 123400, "comment": "від мами", "time": 0})
 ok("чужа сума: тиша", GIVEN == [] and admin() == [], admin())
 bot.handle_tx({"amount": bot.PRODUCTS["k1"]["uah"] * 100, "comment": "", "time": 0})
