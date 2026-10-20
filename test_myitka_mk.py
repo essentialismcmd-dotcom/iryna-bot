@@ -75,22 +75,28 @@ def pobachene(uid=777):
 PODII = []
 bot.store.log_event = lambda uid, kind, payload=None: PODII.append((uid, kind, payload))
 
-# 1. ?start=mk: картка МК з кнопкою заявки, без вітання з магнітом
+# 1. ?start=mk (20.10): коротке привітання MK_HELLO з кнопкою «Дізнатися детальніше», без картки й без магніту
 msg("/start mk")
 z_mitky = pobachene()
 ok("/start mk: одне повідомлення", len(z_mitky) == 1, str(z_mitky))
-ok("/start mk: фото CARD_MK з MK_TEXT", z_mitky and z_mitky[0][:3] == ("sendPhoto", "PIC_MK", bot.MK_TEXT), str(z_mitky)[:200])
-ok("/start mk: кнопка «Хочу на майстер-клас»", z_mitky and z_mitky[0][3] == bot.mk_kb()
-   and bot.mk_kb()["inline_keyboard"][0][0] == {"text": "Хочу на майстер-клас", "callback_data": "mk:want"})
+ok("/start mk: текст MK_HELLO без фото", z_mitky and z_mitky[0][:3] == ("sendMessage", None, bot.MK_HELLO), str(z_mitky)[:200])
+ok("/start mk: кнопка «Дізнатися детальніше» → mk", z_mitky and z_mitky[0][3] == bot.mk_hello_kb()
+   and bot.mk_hello_kb()["inline_keyboard"][0][0] == {"text": "Дізнатися детальніше", "callback_data": "mk"})
+ok("/start mk: картки МК і заявки ще нема", not any(x[1] == "PIC_MK" for x in z_mitky))
 ok("/start mk: магніту і HELLO нема", not any(x[2] == bot.HELLO for x in z_mitky))
 ok("/start mk: подія start з міткою mk", (777, "start", {"tag": "mk"}) in PODII, str(PODII))
 ok("/start mk: подія mk_entry", any(k == "mk_entry" for _, k, _ in PODII), str(PODII))
 
-# 2. той самий екран, що слово «МК» і кнопка mk
-msg("МК")
-ok("слово МК: те саме, що ?start=mk", pobachene() == z_mitky, str(pobachene())[:200])
+# 2. «Дізнатися детальніше» (mk) і слово «МК» дають картку МК з кнопкою заявки
+PODII.clear()
 cb("mk")
-ok("кнопка mk: те саме, що ?start=mk", pobachene() == z_mitky, str(pobachene())[:200])
+kartka = pobachene()
+ok("кнопка mk: фото CARD_MK з MK_TEXT", kartka and kartka[0][:3] == ("sendPhoto", "PIC_MK", bot.MK_TEXT), str(kartka)[:200])
+ok("кнопка mk: кнопка «Хочу на майстер-клас»", kartka and kartka[0][3] == bot.mk_kb()
+   and bot.mk_kb()["inline_keyboard"][0][0] == {"text": "Хочу на майстер-клас", "callback_data": "mk:want"})
+ok("кнопка mk: подія mk_open", any(k == "mk_open" for _, k, _ in PODII), str(PODII))
+msg("МК")
+ok("слово МК: та сама картка, що кнопка mk", pobachene() == kartka, str(pobachene())[:200])
 
 # 3. кнопка заявки після мітки працює як завжди
 PODII.clear()
@@ -100,7 +106,7 @@ ok("заявка: людина бачить MK_THANKS", any(x[2] == bot.MK_THANK
 
 # 4. фото не прийнялось: той самий текст з кнопкою
 ZLAMANE_FOTO.add("PIC_MK")
-msg("/start mk")
+cb("mk")
 ok("фото зламане: MK_TEXT текстом з кнопкою", pobachene()[-1:] == [("sendMessage", None, bot.MK_TEXT, bot.mk_kb())],
    str(pobachene())[:200])
 ZLAMANE_FOTO.clear()

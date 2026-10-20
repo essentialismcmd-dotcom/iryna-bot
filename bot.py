@@ -238,6 +238,14 @@ MK_TEXT = (
     "Тисніть кнопку, і я напишу вам особисто: дати, місто, деталі."
 )
 MK_THANKS = "Записала ♥️ Напишу вам особисто найближчим часом."
+# 20.10 (слово Yaro): кнопка «Хочу на МК» в каналі більше не показує одразу картку з заявкою.
+# Спершу коротке привітання з кнопкою «Дізнатися детальніше»; лише її натиск (mk_open) є кроком цікавості,
+# а заявка (mk_want) лишається окремою кнопкою на картці. Так відсіюються випадкові натиски в каналі.
+MK_HELLO = (
+    "Привіт, це Іра ♥️ Ви натиснули «Хочу на МК» у каналі.\n\n"
+    "Майстер-клас індивідуальний: студія, імпульсне світло, ви знімаєте самі, я поруч і виправляю.\n\n"
+    "Якщо справді цікаво, тисніть кнопку, розкажу детальніше."
+)
 SHOOT_TEXT = ("Про зйомку швидше в інстаграмі ♥️ @iryna_rul_photographer, "
               "там відповідаю одразу. Ваше повідомлення я теж бачу.")
 # Курсів у продажу нема (25.09): слово КУРС і старі кнопки курсу ведуть на
@@ -1301,6 +1309,10 @@ def pick_product(chat_id, uid, u, data, gate=True):
 
 def mk_kb():
     return {"inline_keyboard": [[{"text": "Хочу на майстер-клас", "callback_data": "mk:want"}]]}
+
+
+def mk_hello_kb():
+    return {"inline_keyboard": [[{"text": "Дізнатися детальніше", "callback_data": "mk"}]]}
 
 
 def channel_rows():
@@ -2712,7 +2724,7 @@ LYUDY_CORE = ("прийшла", "3 схеми", "урок 1.5", "гайд", "к�
 LYUDY_MANUAL_WINDOW = timedelta(minutes=10)    # ручна видача і рядок покупки в межах цих хвилин = одна дія
 LYUDY_KINDS = {"start": "/start", "magnet": "3 схеми", "retush_entry": "вхід в урок 1.5", "message": "повідомлення",
                "give_manual": "ручна видача", "pay_ok": "оплата", "push1": "push1", "staff_reply": "відповідь персоналу",
-               "mk_grant": "видача МК", "mk_want": "заявка МК", "mk_open": "опис МК", "mk_entry": "опис МК",
+               "mk_grant": "видача МК", "mk_want": "заявка МК", "mk_open": "опис МК (цікавиться)", "mk_entry": "кнопка МК в каналі",
                "kanal_btn": "кнопка каналу", "lesson": "урок курсу", "practice": "практика",
                "guide_open": "картка гайда", "retush_open": "картка курсу", "tier_pick": "вибір тарифу",
                "keyword": "слово", "kurs_entry": "вхід курсу", "guide_entry": "вхід гайда", "mk_again": "МК вдруге",
@@ -2854,7 +2866,7 @@ def lyudy_rows(data, now=None):
                  else "урок" if lesson else "схеми" if mg_at else "старт")
         parts = {n: v for n, v in (kp.get(uid) or {}).items() if n != "1.5"}
         want = e.get("mk_want") or {}
-        mk_seen = [x["first_at"] for x in (e.get("mk_open"), e.get("mk_entry")) if x]
+        mk_open, mk_entry = e.get("mk_open"), e.get("mk_entry")
         touches = [(u.get("last_seen_at"), "писала чи тиснула в боті")] + [
             (x.get("last_at"), LYUDY_KINDS.get(kd, kd)) for kd, x in e.items()]
         touches = [t for t in touches if t[0]]
@@ -2882,7 +2894,8 @@ def lyudy_rows(data, now=None):
                 ("МК", ("гість за посиланням МК, " + _kt((e.get("mk_grant") or {}).get("first_at"))) if mk else
                  ("заявка " + _kt(want.get("first_at")) + (" (натискань: " + str(want["n"]) + ")"
                                                           if want.get("n", 0) > 1 else "")) if want else
-                 ("дивилась опис " + _kt(min(mk_seen)) + ", заявки нема") if mk_seen else "—"),
+                 ("дивилась опис " + _kt(mk_open["first_at"]) + ", заявки нема") if mk_open else
+                 ("кнопка в каналі " + _kt(mk_entry["first_at"]) + ", детальніше не тиснула") if mk_entry else "—"),
                 ("писала боту", (str(msg["n"]) + ", останнє " + _kt(msg.get("last_at"))) if msg else "—"),
                 ("останній дотик", (_kt(last[0]) + " (" + last[1] + ")") if last[0] else "—"),
             ] + ([("заблокувала бота", _kt(bl[1]))] if bl and bl[1] and (not seen or bl[1] > seen) else [])
@@ -4755,9 +4768,10 @@ def hook():
                         kb = tiers_kb()
                         send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
                 elif src == "mk":
-                    # мітка закріпу каналу: одразу опис МК з кнопкою заявки (як слово «МК»)
+                    # мітка закріпу каналу (20.10): коротке привітання і «Дізнатися детальніше»;
+                    # картка з кнопкою заявки лише після цього натиску (callback mk)
                     bg(store.log_event, uid, "mk_entry", {"tag": src})
-                    send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
+                    send(chat_id, MK_HELLO, mk_hello_kb())
                 elif src.startswith("mk_"):
                     mk_start(chat_id, uid, u, src[3:])
                 elif src in ("kurs", "kurs10") and course_owner_reply(chat_id, uid):

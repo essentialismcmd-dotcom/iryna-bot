@@ -366,7 +366,7 @@ ok("кабінет: звичайній людині сповіщення як р
 # 14. mk, retush_liza, kurs10 як раніше
 VYKLYKY.clear()
 msg("/start mk", 530)
-ok("mk: опис МК і кнопка заявки", any(p.get("text") == bot.MK_TEXT and knopky(p)[0].get("callback_data") == "mk:want"
+ok("mk: привітання МК і кнопка «Дізнатися детальніше» (20.10)", any(p.get("text") == bot.MK_HELLO and knopky(p)[0].get("callback_data") == "mk"
                                       for p in sent(chat=530)))
 ok("mk: «Новий у боті», мітка mk", any("Мітка: mk" in p["text"] for p in staff("Новий у боті")))
 VYKLYKY.clear()
