@@ -1409,7 +1409,7 @@ RETUSH_LESSON_PART = "1.3"   # 20.10, слово Yaro: даємо урок з м
 
 # 16.10: два входи на один шлях, ?start=svitlo (реклама) і ?start=profil (шапка Instagram):
 # привіт про три схеми світла, «Канал» + «Я підписалась», файл після живого sub:check (без уроку ретуші і ціни).
-SVITLO_TAGS = ("svitlo", "profil", "storis", "svit")   # 18.10: storis = сторіз Іри, svit = реклама на світ без України
+SVITLO_TAGS = ("svitlo", "profil", "storis", "svit", "shema2")   # 18.10: storis = сторіз Іри, svit = реклама на світ без України; 21.10: shema2 = реклама UA з рілсом «Чорний фон»
 # Тексти з projects/iryna/kontent/2026-10-16-svitlo-statyka/TEKST.md п.5 дослівно (копірайтер, Іра пише «це Іра»).
 SVITLO_HELLO = (
     "Привіт, це Іра ♥️\n"
@@ -1422,7 +1422,7 @@ PROFIL_HELLO = (
     "Ви прийшли з мого профілю, тут добірка «Три схеми світла з одного сетапу»: три різні картинки за одну зйомку.\n"
     "Віддаю її підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
 )
-SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO, "storis": SVITLO_HELLO, "svit": SVITLO_HELLO}
+SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO, "storis": SVITLO_HELLO, "svit": SVITLO_HELLO, "shema2": SVITLO_HELLO}
 # 17.10: реклама гайда (креатив Іри 299), ?start=hajd299 одразу дає картку гайда з тарифами, як слово «гайд»;
 # окрема мітка, щоб у /lyudy порівняти з svitlo (вхід, канал, покупка)
 HAJD_TAG = "hajd299"
