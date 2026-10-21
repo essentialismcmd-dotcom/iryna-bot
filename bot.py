@@ -1409,7 +1409,7 @@ RETUSH_LESSON_PART = "1.3"   # 20.10, слово Yaro: даємо урок з м
 
 # 16.10: два входи на один шлях, ?start=svitlo (реклама) і ?start=profil (шапка Instagram):
 # привіт про три схеми світла, «Канал» + «Я підписалась», файл після живого sub:check (без уроку ретуші і ціни).
-SVITLO_TAGS = ("svitlo", "profil", "storis", "svit", "shema2")   # 18.10: storis = сторіз Іри, svit = реклама на світ без України; 21.10: shema2 = реклама UA з рілсом «Чорний фон»
+SVITLO_TAGS = ("svitlo", "profil", "storis", "svit", "shema2", "koment")   # 21.10: koment = приватна відповідь на коментар «схема» під рілсом   # 18.10: storis = сторіз Іри, svit = реклама на світ без України; 21.10: shema2 = реклама UA з рілсом «Чорний фон»
 # Тексти з projects/iryna/kontent/2026-10-16-svitlo-statyka/TEKST.md п.5 дослівно (копірайтер, Іра пише «це Іра»).
 SVITLO_HELLO = (
     "Привіт, це Іра ♥️\n"
@@ -1422,7 +1422,7 @@ PROFIL_HELLO = (
     "Ви прийшли з мого профілю, тут добірка «Три схеми світла з одного сетапу»: три різні картинки за одну зйомку.\n"
     "Віддаю її підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
 )
-SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO, "storis": SVITLO_HELLO, "svit": SVITLO_HELLO, "shema2": SVITLO_HELLO}
+SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO, "storis": SVITLO_HELLO, "svit": SVITLO_HELLO, "shema2": SVITLO_HELLO, "koment": SVITLO_HELLO}
 # 17.10: реклама гайда (креатив Іри 299), ?start=hajd299 одразу дає картку гайда з тарифами, як слово «гайд»;
 # окрема мітка, щоб у /lyudy порівняти з svitlo (вхід, канал, покупка)
 HAJD_TAG = "hajd299"
@@ -4323,7 +4323,11 @@ IG_ADS = {"52535499581237": "A", "52535495609037": "B", "52536319850037": "C"}  
 IG_REPLY_A = "Привіт ♥️ Це Іра. Мій безкоштовний файл «3 схеми світла з одного сетапу» тут: https://t.me/iryna_rul_bot?start=svitlo"
 IG_REPLY_B = "Привіт ♥️ Це Іра. Гайд «Світло»: 13 моїх схем з імпульсним світлом, 299 грн замість 900. Тут: https://t.me/iryna_rul_bot?start=hajd299"
 IG_REPLY_C = IG_REPLY_A.replace("start=svitlo", "start=shema2")
-IG_REPLIES = {"A": IG_REPLY_A, "B": IG_REPLY_B, "C": IG_REPLY_C}
+IG_REPLY_K = IG_REPLY_A.replace("start=svitlo", "start=koment")   # 21.10 (Yaro): коментар «схема» під відео → лінк у Direct
+IG_REPLIES = {"A": IG_REPLY_A, "B": IG_REPLY_B, "C": IG_REPLY_C, "K": IG_REPLY_K}
+IG_USER_ID = "17841421469087917"   # @iryna_rul_photographer (бізнес-акаунт сторінки Iryna rul)
+IG_PAGE_ID = "1159407250599020"    # сторінка Iryna rul
+_IG_RE_KOMENT = re.compile(r"схем", re.I)   # 21.10 (Yaro): «коли в коментарях пишуть схема»
 _IG_RE_A = re.compile(r"(3|три)\s*схем|схем\w*\s+світла|^\W*схеми\W*$", re.I)   # 21.10: голе «СХЕМИ» з реклами shema2
 _IG_RE_B = re.compile(r"гайд", re.I)
 # стандартна фраза Instagram, коли людина пише з рілса чи сторіз реклами (шаблон там не показується)
@@ -4366,13 +4370,39 @@ def _ig_ad_id(m):
     return None
 
 
-def ig_send(ig_id, text):
+def ig_send(ig_id, text, comment_id=None):
+    """Відповідь у Direct. comment_id = приватна відповідь на коментар (Meta: один раз на коментар, до 7 днів)."""
+    to = {"comment_id": comment_id} if comment_id else {"id": ig_id}
     r = requests.post("https://graph.facebook.com/v21.0/me/messages",
                       params={"access_token": IG_PAGE_TOKEN},
-                      json={"recipient": {"id": ig_id}, "message": {"text": text}}, timeout=15)
+                      json={"recipient": to, "message": {"text": text}}, timeout=15)
     if r.status_code != 200:
         log.warning("ig_send %s: %s", r.status_code, r.text[:300])
     return r.status_code == 200
+
+
+def _ig_komentari(d):
+    """Коментарі з вебхука (object instagram, entry[].changes[] field comments)."""
+    out = []
+    for e in d.get("entry") or []:
+        for ch in e.get("changes") or []:
+            if ch.get("field") != "comments":
+                continue
+            v = ch.get("value") or {}
+            out.append({"id": v.get("id"), "from": str((v.get("from") or {}).get("id") or ""),
+                        "text": v.get("text") or "", "media": (v.get("media") or {}).get("id")})
+    return out
+
+
+@app.get("/ig-subscribe/" + SECRET)
+def ig_subscribe():
+    """Підписати сторінку Іри на вебхук застосунку (потрібен IG_PAGE_TOKEN з pages_manage_metadata)."""
+    if not IG_PAGE_TOKEN:
+        return {"ok": False, "err": "nema IG_PAGE_TOKEN"}, 200
+    r = requests.post("https://graph.facebook.com/v21.0/%s/subscribed_apps" % IG_PAGE_ID,
+                      params={"access_token": IG_PAGE_TOKEN,
+                              "subscribed_fields": "messages,messaging_postbacks,messaging_referral,feed"}, timeout=15)
+    return {"status": r.status_code, "body": r.text[:500]}, 200
 
 
 @app.get("/ig-webhook")
@@ -4412,6 +4442,14 @@ def ig_webhook():
                 if ig_send(z["ig_id"], IG_REPLIES[which]):
                     sent += 1
                     store.log_event(None, "ig_auto", {"ig": z["ig_id"], "v": which})
+        # 21.10 (Yaro): коментар зі «схем…» під відео → одна приватна відповідь у Direct з лінком koment
+        for k in _ig_komentari(d):
+            if not k["id"] or k["from"] in ("", IG_USER_ID) or not _IG_RE_KOMENT.search(k["text"]):
+                continue
+            if store.kv_claim("ig_kom:" + k["from"]):
+                if ig_send(None, IG_REPLY_K, comment_id=k["id"]):
+                    sent += 1
+                    store.log_event(None, "ig_auto", {"ig": k["from"], "v": "K", "media": k["media"]})
         return {"ok": True, "sent": sent}, 200
     except Exception as e:
         log.warning("ig_webhook впав: %s", e)
