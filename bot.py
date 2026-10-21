@@ -780,12 +780,30 @@ def _without_ira(ids, target):
     return kept
 
 
-def _staff_send(ids, text, markup=None, uid=None):
+# Слово Yaro 21.10: Ірі лише три види сповіщень: оплата (pay), підписка на канал (sub) і повідомлення
+# людини в боті (msg), щоб вона бачила і відповідала. Решта (новий у боті, заявки, уроки, МК, системне)
+# їй не йде, «збиває з толку». Ці три види йдуть їй навіть без неї в NOTIFY_IDS.
+IRA_KINDS = ("pay", "sub", "msg")
+
+
+def _ira_filter(ids, kind):
+    ids = list(ids)
+    if not IRA_ID:
+        return ids
+    if kind in IRA_KINDS:
+        if IRA_ID not in ids:
+            ids.append(IRA_ID)
+        return ids
+    return [i for i in ids if i != IRA_ID]
+
+
+def _staff_send(ids, text, markup=None, uid=None, kind="system"):
     """Сповіщення персоналу без постійної кнопки, навіть коли пише сам адмін (13.10). Сповіщення про
     одну людину (uid або єдиний «id N» у тексті) несе кнопки «Написати» і «🎁 Подарунок» (тим, хто
-    може /do), а reply на нього йде цій людині (14.10). Про акаунт Yaro Ірі не йде (14.10)."""
+    може /do), а reply на нього йде цій людині (14.10). Про акаунт Yaro Ірі не йде (14.10).
+    kind: pay / sub / msg ідуть Ірі, решта ні (21.10)."""
     target = uid or _one_person(text)
-    ids = _without_ira(ids, target)
+    ids = _without_ira(_ira_filter(ids, kind), target)
     person, _tm.person = getattr(_tm, "person", None), None
     try:
         for cid in ids:
@@ -798,12 +816,13 @@ def _staff_send(ids, text, markup=None, uid=None):
         _tm.person = person
 
 
-def notify_lead(text, uid=None):
-    _staff_send(LEAD_IDS, text, uid=uid)
+def notify_lead(text, uid=None, kind="msg"):
+    """Заявки на зйомку і МК: це слова людини, Іра має їх бачити (kind msg)."""
+    _staff_send(LEAD_IDS, text, uid=uid, kind=kind)
 
 
-def notify(text, markup=None, uid=None):
-    _staff_send(NOTIFY_IDS, text, markup, uid)
+def notify(text, markup=None, uid=None, kind="system"):
+    _staff_send(NOTIFY_IDS, text, markup, uid, kind)
 
 
 def who(u):
@@ -1547,6 +1566,8 @@ def sub_check(chat_id, uid, u):
     if inn:
         if store.kv_claim("sub_ok:" + str(uid)):
             store.log_event(uid, "sub_ok")
+            if IRA_ID:      # 21.10, слово Yaro: Ірі коротке «підписалась», лише їй, лише раз на людину
+                _staff_send([IRA_ID], "Підписалась на канал: " + who(u), uid=uid, kind="sub")
         if not give_gift(uid, GIFT_SUB):
             send(chat_id, SUB_ALREADY)
         return
@@ -3183,11 +3204,11 @@ def _pay_issue(uid, key, code, amount, how=""):
     kabinet_mist.push_user(uid)
     if ok:
         notify("Оплата " + str(amount // 100) + " грн, код " + code + how + ". "
-               + pname(key) + ": видано автоматично.", uid=uid)
+               + pname(key) + ": видано автоматично.", uid=uid, kind="pay")
     else:
         notify("Оплата " + str(amount // 100) + " грн, код " + code
                + ", але файл не пішов. " + pname(key) + ": " + ready_text(key),
-               give_kb(uid, key), uid=uid)
+               give_kb(uid, key), uid=uid, kind="pay")
 
 
 def mono_poll():
@@ -4898,9 +4919,7 @@ def hook():
                 store.log_event(uid, "message", {"text": text[:300]})
                 if not is_file:
                     ntext = "Повідомлення в боті від " + who(u) + ":\n" + (text or "[не текст]")
-                    notify(ntext, uid=uid)
-                    if IRA_ID and IRA_ID not in NOTIFY_IDS:
-                        _staff_send([IRA_ID], ntext, uid=uid)
+                    notify(ntext, uid=uid, kind="msg")      # Ірі теж, через kind (21.10)
                 low = text.lower()
                 if "курс" in low and OWNER_RE.search(low):
                     # Людина каже, що вже має курс: не шаблон, а відповідь по суті.
