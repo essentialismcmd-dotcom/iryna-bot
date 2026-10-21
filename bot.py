@@ -1446,15 +1446,21 @@ SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO, "storis": SVITL
 # окрема мітка, щоб у /lyudy порівняти з svitlo (вхід, канал, покупка)
 HAJD_TAG = "hajd299"
 # 21.10 (Yaro: «пресети прикольна штука… придумаєш магніт і відос під нього»): магніт ретуші, пресет кольору Іри
-# з рілса «Один клік». ManyChat слово «ПРЕСЕТ» → ?start=preset. Файл одразу, без замка каналу («простота продає»).
+# з рілса «Один клік». ManyChat слово «ПРЕСЕТ» → ?start=preset. 21.10 увечері (Yaro: «пресет віддаємо тільки
+# по підписці»): привіт з «Канал» + «Я підписалась», файл після sub:check, як зі схемами світла.
 PRESET_TAG = "preset"
 PRESET_FILE = "static/Iryna-Rul-Kolir-1.xmp"
-PRESET_HELLO = (
+PRESET_HELLO_SUB = (
     "Привіт, це Іра ♥️\n"
-    "Мій пресет «Колір 1» для Lightroom і Camera Raw: той колір, що у відео, одним кліком. Файл нижче.\n\n"
+    "Мій пресет «Колір 1» для Lightroom і Camera Raw: той колір, що у відео, одним кліком.\n"
+    "Віддаю його підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
+)
+PRESET_HELLO = (
+    "Дякую, що ви з нами ♥️ Тримайте пресет «Колір 1», файл нижче.\n\n"
     "Як поставити: Lightroom → Presets → три крапки → Import Presets → цей файл.\n"
     "Camera Raw → вкладка Presets → три крапки → Import Profiles & Presets."
 )
+PRESET_ALREADY = "Пресет уже у вас ♥️ Файл надсилала вище в цьому чаті."
 PRESET_AFTER = (
     "Пресет дає колір. Шкіру, обʼєм і світло на цих кадрах я роблю руками, саме це розбираю в курсі ретуші.\n\n"
     "У каналі «Iryna Rul | для своїх» показую «до/після» з кожної зйомки."
@@ -1551,8 +1557,19 @@ def kanal_member_fresh(uid):
     return kanal_member(uid)
 
 
+def preset_wait(uid):
+    """Людина прийшла по пресет і ще не отримала його (мітка в kv, бо source_tag лишається першим)."""
+    try:
+        return bool(store.kv_get("preset_wait:" + str(uid)))
+    except Exception:
+        return False
+
+
 def _sub_kb_for(uid):
-    """Клавіатура «Канал» + «Я підписалась»: для svitlo/profil звичайний канал, для решти sub_kb()."""
+    """Клавіатура «Канал» + «Я підписалась»: для svitlo/profil звичайний канал, для пресета свій лінк
+    (CHANNEL_URL_PRESET, інакше CHANNEL_URL), для решти sub_kb()."""
+    if preset_wait(uid):
+        return svitlo_kb(PRESET_TAG)
     t = svitlo_tag(uid)
     return svitlo_kb(t) if t else sub_kb()
 
@@ -1568,6 +1585,13 @@ def sub_check(chat_id, uid, u):
             store.log_event(uid, "sub_ok")
             if IRA_ID:      # 21.10, слово Yaro: Ірі коротке «підписалась», лише їй, лише раз на людину
                 _staff_send([IRA_ID], "Підписалась на канал: " + who(u), uid=uid, kind="sub")
+        if preset_wait(uid):                      # 21.10: прийшла по пресет, віддаємо пресет, раз назавжди
+            if store.kv_claim("preset_given:" + str(uid)):
+                give_preset(chat_id)
+                store.log_event(uid, "preset", {"via": "sub"})
+            else:
+                send(chat_id, PRESET_ALREADY)
+            return
         if not give_gift(uid, GIFT_SUB):
             send(chat_id, SUB_ALREADY)
         return
@@ -1690,7 +1714,8 @@ def give_magnet(chat_id):
 
 
 def give_preset(chat_id):
-    """21.10: магніт ретуші. Привіт, файл пресету з репозиторію, далі місток до курсу (картка магніту, кнопки як після схем)."""
+    """21.10: магніт ретуші після підписки. Дякую, файл пресету з репозиторію, далі місток до курсу
+    (картка магніту, кнопки як після схем)."""
     send(chat_id, PRESET_HELLO)
     try:
         with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), PRESET_FILE), "rb") as f:
@@ -4852,7 +4877,8 @@ def hook():
                     kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
                 elif src == PRESET_TAG:
                     bg(store.log_event, uid, "preset_entry", {"tag": src})
-                    give_preset(chat_id)
+                    store.kv_set("preset_wait:" + str(uid), "1")     # файл після «Я підписалась»
+                    send_card(chat_id, START_PIC, PRESET_HELLO_SUB, svitlo_kb(PRESET_TAG))
                 elif src in SVITLO_TAGS:
                     # 16.10: реклама (svitlo) і шапка Instagram (profil): привіт про три схеми, «Канал» + «Я підписалась»,
                     # файл після sub:check; без уроку ретуші і ціни, далі Д2 (гайд 199) як у тих, хто має подарунок
