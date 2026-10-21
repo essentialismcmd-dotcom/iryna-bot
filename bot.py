@@ -4207,9 +4207,10 @@ def jars():
         out = ["<pre>", "MONO_JAR зараз: " + (MONO_JAR[:6] + "…" if MONO_JAR else "порожній")]
         for a in (r.json().get("accounts") or []):
             out.append("картка " + ", ".join(x[-4:] for x in (a.get("maskedPan") or []))
-                       + " " + str(a.get("type")) + "  id: " + str(a.get("id")))
+                       + " " + str(a.get("type")) + "  id: " + str(a.get("id"))
+                       + "  лінк: " + str(a.get("sendId")))
         for j in (r.json().get("jars") or []):
-            out.append(str(j.get("title")) + "  id: " + str(j.get("id")))
+            out.append(str(j.get("title")) + "  id: " + str(j.get("id")) + "  лінк: " + str(j.get("sendId")))
         return "\n".join(out) + "</pre>"
     except Exception as e:
         return "помилка: " + str(e)
