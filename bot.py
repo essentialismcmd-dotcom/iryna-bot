@@ -1426,6 +1426,20 @@ SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO, "storis": SVITL
 # 17.10: реклама гайда (креатив Іри 299), ?start=hajd299 одразу дає картку гайда з тарифами, як слово «гайд»;
 # окрема мітка, щоб у /lyudy порівняти з svitlo (вхід, канал, покупка)
 HAJD_TAG = "hajd299"
+# 21.10 (Yaro: «пресети прикольна штука… придумаєш магніт і відос під нього»): магніт ретуші, пресет кольору Іри
+# з рілса «Один клік». ManyChat слово «ПРЕСЕТ» → ?start=preset. Файл одразу, без замка каналу («простота продає»).
+PRESET_TAG = "preset"
+PRESET_FILE = "static/Iryna-Rul-Kolir-1.xmp"
+PRESET_HELLO = (
+    "Привіт, це Іра ♥️\n"
+    "Мій пресет «Колір 1» для Lightroom і Camera Raw: той колір, що у відео, одним кліком. Файл нижче.\n\n"
+    "Як поставити: Lightroom → Presets → три крапки → Import Presets → цей файл.\n"
+    "Camera Raw → вкладка Presets → три крапки → Import Profiles & Presets."
+)
+PRESET_AFTER = (
+    "Пресет дає колір. Шкіру, обʼєм і світло на цих кадрах я роблю руками, саме це розбираю в курсі ретуші.\n\n"
+    "У каналі «Iryna Rul | для своїх» показую «до/після» з кожної зйомки."
+)
 SVITLO_REMIND = (                           # Д1 для svitlo/profil без файла: без уроку
     "Доброго дня ♥️ Три схеми світла чекають: підпишіться на канал «для своїх» і натисніть "
     "«Я підписалась», файл прийде сюди."
@@ -1652,6 +1666,21 @@ def give_magnet(chat_id):
         return
     text = AFTER_NOPAY if not GUIDE_SALE else (AFTER if courses_sale() else AFTER_NOC)
     send_card(chat_id, CARD_MAGNIT, text, after_kb())
+
+
+def give_preset(chat_id):
+    """21.10: магніт ретуші. Привіт, файл пресету з репозиторію, далі місток до курсу (картка магніту, кнопки як після схем)."""
+    send(chat_id, PRESET_HELLO)
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), PRESET_FILE), "rb") as f:
+            blob = f.read()
+    except Exception as e:
+        log.warning("preset file: %s", e)
+        blob = None
+    if not blob or not send_file(chat_id, "Iryna-Rul-Kolir-1.xmp", blob, caption="Iryna Rul · Колір 1 (.xmp)"):
+        send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
+        return
+    send_card(chat_id, CARD_MAGNIT, PRESET_AFTER, after_kb())
 
 
 def give_gift(uid, text):
@@ -2731,7 +2760,7 @@ LYUDY_KINDS = {"start": "/start", "magnet": "3 схеми", "retush_entry": "в�
                "keyword": "слово", "kurs_entry": "вхід курсу", "guide_entry": "вхід гайда", "mk_again": "МК вдруге",
                "lesson_gift": "подарунок уроку 1.5", "sub_check": "натиск «Я підписалась»",
                "sub_ok": "підписка підтверджена", "gate": "ворота ціни (Т9)", "zapr_open": "«Розкажіть про курс»",
-               "touch": "дотик воронки", "svitlo_entry": "вхід svitlo/profil"}
+               "touch": "дотик воронки", "svitlo_entry": "вхід svitlo/profil", "preset_entry": "вхід пресет"}
 KANAL_TTL = 600                                # секунд памʼятаємо відповідь getChatMember
 KANAL_MAX = 200                                # нових запитів getChatMember за одне відкриття сторінки
 _kanal_cache = {}                              # uid -> (коли, (True/False/None, пояснення))
@@ -4800,6 +4829,9 @@ def hook():
                     bg(store.log_event, uid, "retush_entry", {"tag": src})
                     send_card_file(chat_id, "static/retush-masky.png", RETUSH_MAGNET_HELLO, retush_magnet_kb())  # обкладинка магніту, без «Студійне світло»
                     kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
+                elif src == PRESET_TAG:
+                    bg(store.log_event, uid, "preset_entry", {"tag": src})
+                    give_preset(chat_id)
                 elif src in SVITLO_TAGS:
                     # 16.10: реклама (svitlo) і шапка Instagram (profil): привіт про три схеми, «Канал» + «Я підписалась»,
                     # файл після sub:check; без уроку ретуші і ціни, далі Д2 (гайд 199) як у тих, хто має подарунок
