@@ -3176,7 +3176,11 @@ def mono_poll():
             continue
         try:
             frm = int(time.time()) - 3600
-            r = requests.get(MONO + "/personal/statement/" + MONO_JAR + "/" + str(frm),
+            # 21.10: MONO_JAR може бути списком через кому (перехід між картками):
+            # Mono пускає 1 запит виписки на 60 с, тому рахунки читаємо по черзі, один за цикл.
+            jars = [j.strip() for j in MONO_JAR.split(",") if j.strip()]
+            jar = jars[int(time.time() // 70) % len(jars)]
+            r = requests.get(MONO + "/personal/statement/" + jar + "/" + str(frm),
                              headers={"X-Token": MONO_TOKEN}, timeout=25)
             if r.status_code != 200:
                 continue
