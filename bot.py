@@ -166,8 +166,9 @@ GUIDE_INTRO_ONE = "Натисніть кнопку нижче, і гайд бу�
 def guide_intro(kb):
     n = len(kb.get("inline_keyboard", []))
     return GUIDE_INTRO_HEAD + (GUIDE_INTRO_MANY.get(n, GUIDE_INTRO_MANY[3]) if n > 1 else GUIDE_INTRO_ONE)
-NOGET_TEXT = ("Перевірю вручну, зазвичай це кілька хвилин ♥️ "
-              "Файл прийде сюди, нічого робити не треба.")
+NOGET_TEXT = ("Банк передає оплату кілька хвилин ♥️ Файл прийде сюди сам, нічого робити не треба. "
+              "Якщо за 15 хвилин не прийде, я перевірю вручну.")
+NOGET_WAIT = int(os.getenv("NOGET_WAIT", "600"))   # с: стільки чекаємо банк, перш ніж турбувати адміна (Yaro 22.10)
 
 # Курс ретуші. Скрипт з її переписок, де оплата приходила за пʼять хвилин:
 # питання-кваліфікатор, рекомендація конкретного курсу, реквізити.
@@ -1922,6 +1923,52 @@ def pidsumok_run(now=None):
     return bool(text)
 
 
+def noget_notify(uid, key, who_text):
+    if lead_once(uid, "noget:" + key):
+        notify("КАЖЕ, ЩО ОПЛАТИВ, А ФАЙЛУ НЕМАЄ\n" + pname(key) + "\n" + who_text
+               + "\nКод: " + order_code(uid, key), give_kb(uid, key), uid=uid)
+
+
+def noget_wait(uid, key, who_text):
+    """Кнопка «оплатив, а файлу немає» (Yaro 22.10): банк часто доносить оплату за хвилини, тож адміна
+    не турбуємо одразу, а кладемо в чергу kv; noget_run через NOGET_WAIT або видасть сам, або повідомить.
+    Без бази (kv не тримає) повідомляємо одразу, як раніше."""
+    k = "noget_wait:" + str(uid) + ":" + key
+    try:
+        if store.kv_get(k) is None:
+            store.kv_set(k, str(time.time()) + "|" + who_text)
+        if store.kv_get(k) is not None:
+            return True
+    except Exception as e:
+        log.warning("noget_wait %s: %s", k, e)
+    noget_notify(uid, key, who_text)
+    return False
+
+
+def noget_run(now=None):
+    """Черга «оплатив, а файлу немає»: кому оплата вже дійшла, тих мовчки знімаємо; решту після NOGET_WAIT
+    показуємо адміну. Повертає кількість повідомлених."""
+    now = now or time.time()
+    sent = 0
+    for r in store.kv_prefix("noget_wait:"):
+        try:
+            _, uid, key = r["k"].split(":", 2)
+            uid = int(uid)
+            ts, _, who_text = (r["v"] or "0|").partition("|")
+            if now - float(ts) < NOGET_WAIT:
+                continue
+            p = store.get_purchase(order_code(uid, key))
+            if (p and p.get("status") in ("paid", "delivered")) or key in owned_keys(uid, real=True):
+                store.kv_del(r["k"])
+                continue
+            noget_notify(uid, key, who_text or ("id " + str(uid)))
+            store.kv_del(r["k"])
+            sent += 1
+        except Exception:
+            log.exception("noget_run %s", r)
+    return sent
+
+
 def gift_loop():
     STOP.wait(120)
     while not STOP.wait(600):
@@ -1930,6 +1977,7 @@ def gift_loop():
             gift_late_run()          # з GIFT_FOR_SUB нічого не робить (16.10)
             touch_run()
             pidsumok_run()           # 21:00 Київ: підсумок продажів Ірі й адміну (22.10)
+            noget_run()              # «оплатив, а файлу немає» після паузи на банк (22.10)
         except Exception:
             log.exception("gift_loop")
         finally:
@@ -5140,9 +5188,7 @@ def hook():
                 code = order_code(uid, key)
                 send(chat_id, NOGET_TEXT)
                 store.log_event(uid, "noget", {"code": code})
-                if lead_once(uid, "noget:" + key):
-                    notify("КАЖЕ, ЩО ОПЛАТИВ, А ФАЙЛУ НЕМАЄ\n" + pname(key) + "\n" + who(u)
-                           + "\nКод: " + code, give_kb(uid, key), uid=uid)
+                noget_wait(uid, key, who(u))
             elif data.startswith("paid:") and TEST_MODE and uid in NOTIFY_IDS:
                 key = data.split(":")[1]
                 code = order_code(uid, key)

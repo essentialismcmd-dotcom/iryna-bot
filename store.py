@@ -545,6 +545,15 @@ def kv_set(k, v):
                 on conflict (k) do update set v = excluded.v, updated_at = now()""", (k, str(v)))
 
 
+def kv_prefix(prefix):
+    """Усі ключі з префіксом (черга «оплатив, а файлу немає», 22.10). Без бази []."""
+    return q("select k, v from kv where k like %s order by updated_at", (prefix + "%",), fetch="all") or []
+
+
+def kv_del(k):
+    return q("delete from kv where k = %s", (k,))
+
+
 def kv_claim(k):
     """Атомарна заявка ключа: True лише тому, хто вставив рядок першим (дедуп «раз назавжди»).
     Без бази повертає False, щоб ніщо не слалось двічі навмання."""
