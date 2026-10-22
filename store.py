@@ -715,6 +715,26 @@ def people_data():
         return None
 
 
+def sales_summary(skip_ids=()):
+    """Продано по продуктах (paid/delivered): за київську добу і за весь час. Для Іри (22.10).
+    Дата оплати: paid_at, для ручної видачі без paid_at береться delivered_at. Без бази None."""
+    skip = list(skip_ids) or [0]
+    return q("""
+        with p as (
+            select product, amount_uah,
+                   (coalesce(paid_at, delivered_at) at time zone 'Europe/Kyiv')::date as d
+            from purchases
+            where status in ('paid', 'delivered') and not (user_id = any(%s))
+        )
+        select product,
+               count(*) filter (where d = (now() at time zone 'Europe/Kyiv')::date) as today_n,
+               coalesce(sum(amount_uah) filter (where d = (now() at time zone 'Europe/Kyiv')::date), 0) as today_uah,
+               count(*) as all_n,
+               coalesce(sum(amount_uah), 0) as all_uah
+        from p group by product order by product
+    """, (skip,), fetch="all")
+
+
 def stats_day():
     """Цифри за добу, для рядка стану."""
     return {

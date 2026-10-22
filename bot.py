@@ -1867,6 +1867,61 @@ def touch_run(now=None):
     return n
 
 
+# ---------- підсумок продажів для Іри (слово Yaro 22.10) ----------
+# Під кожною оплатою Ірі один рядок «Сьогодні: гайд 2, курс 1 · 3 898 грн»; о 21:00 за Києвом
+# підсумок дня і за весь час, лише якщо за день щось продалось. Без бази мовчимо.
+
+PRODUCT_WORD = {"guide": "гайд", "course": "курс"}
+
+
+def _sales_line(rows, n_key, uah_key):
+    parts = [PRODUCT_WORD.get(r["product"], r["product"]) + " " + str(r[n_key])
+             for r in rows if r[n_key]]
+    if not parts:
+        return None
+    total = sum(int(r[uah_key] or 0) for r in rows)
+    return ", ".join(parts) + " · " + "{:,}".format(total).replace(",", " ") + " грн"
+
+
+def sales_rows():
+    skip = [i for i in [ADMIN_ID] + NOTIFY_IDS + LEAD_IDS if i]
+    try:
+        return store.sales_summary(skip) or []
+    except Exception as e:
+        log.warning("sales_summary: %s", e)
+        return []
+
+
+def ira_today_line():
+    """Рядок Ірі після оплати. None без бази чи без продажів."""
+    if not IRA_ID:
+        return None
+    line = _sales_line(sales_rows(), "today_n", "today_uah")
+    return "Сьогодні: " + line if line else None
+
+
+def pidsumok_text():
+    """Вечірній підсумок: день і весь час. None, якщо за день нічого."""
+    rows = sales_rows()
+    day = _sales_line(rows, "today_n", "today_uah")
+    if not day:
+        return None
+    return "Підсумок дня: " + day + "\nЗа весь час: " + (_sales_line(rows, "all_n", "all_uah") or "0 грн")
+
+
+def pidsumok_run(now=None):
+    """Раз на день після 21:00 за Києвом; заявка в kv, щоб не слати двічі з двох воркерів."""
+    k = kyiv_now(now)
+    if k.hour < 21:
+        return False
+    if not store.kv_claim("pidsumok:" + k.strftime("%Y-%m-%d")):
+        return False
+    text = pidsumok_text()
+    if text:
+        _staff_send(staff_ids(), text, kind="pay")
+    return bool(text)
+
+
 def gift_loop():
     STOP.wait(120)
     while not STOP.wait(600):
@@ -1874,6 +1929,7 @@ def gift_loop():
         try:
             gift_late_run()          # з GIFT_FOR_SUB нічого не робить (16.10)
             touch_run()
+            pidsumok_run()           # 21:00 Київ: підсумок продажів Ірі й адміну (22.10)
         except Exception:
             log.exception("gift_loop")
         finally:
@@ -3255,6 +3311,9 @@ def _pay_issue(uid, key, code, amount, how=""):
     if ok:
         notify("Оплата " + str(amount // 100) + " грн, код " + code + how + ". "
                + pname(key) + ": видано автоматично.", uid=uid, kind="pay")
+        line = ira_today_line()
+        if line:
+            _staff_send([IRA_ID], line, kind="pay")      # лише Ірі, у Yaro є CRM (22.10)
     else:
         notify("Оплата " + str(amount // 100) + " грн, код " + code
                + ", але файл не пішов. " + pname(key) + ": " + ready_text(key),
