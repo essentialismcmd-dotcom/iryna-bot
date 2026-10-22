@@ -18,14 +18,14 @@
    crs:ContactInfo="instagram.com/irynarul"
    crs:Version="17.0"
    crs:ProcessVersion="15.4"
-   crs:Contrast2012="0"
-   crs:Highlights2012="0"
-   crs:Shadows2012="+14"
-   crs:Whites2012="+19"
-   crs:Blacks2012="+8"
+   crs:Contrast2012="-7"
+   crs:Highlights2012="+15"
+   crs:Shadows2012="+40"
+   crs:Whites2012="+25"
+   crs:Blacks2012="0"
    crs:Texture="0"
    crs:Clarity2012="0"
-   crs:Dehaze="+11"
+   crs:Dehaze="+10"
    crs:Vibrance="0"
    crs:Saturation="0"
    crs:ParametricShadows="0"
@@ -35,40 +35,40 @@
    crs:ParametricShadowSplit="25"
    crs:ParametricMidtoneSplit="50"
    crs:ParametricHighlightSplit="75"
-   crs:HueAdjustmentRed="-15"
-   crs:HueAdjustmentOrange="-2"
-   crs:HueAdjustmentYellow="-28"
+   crs:HueAdjustmentRed="0"
+   crs:HueAdjustmentOrange="0"
+   crs:HueAdjustmentYellow="0"
    crs:HueAdjustmentGreen="0"
    crs:HueAdjustmentAqua="0"
    crs:HueAdjustmentBlue="0"
    crs:HueAdjustmentPurple="0"
    crs:HueAdjustmentMagenta="0"
-   crs:SaturationAdjustmentRed="+8"
+   crs:SaturationAdjustmentRed="0"
    crs:SaturationAdjustmentOrange="0"
-   crs:SaturationAdjustmentYellow="-12"
-   crs:SaturationAdjustmentGreen="-9"
-   crs:SaturationAdjustmentAqua="-51"
-   crs:SaturationAdjustmentBlue="-48"
-   crs:SaturationAdjustmentPurple="-46"
-   crs:SaturationAdjustmentMagenta="-11"
-   crs:LuminanceAdjustmentRed="+6"
-   crs:LuminanceAdjustmentOrange="0"
-   crs:LuminanceAdjustmentYellow="+40"
-   crs:LuminanceAdjustmentGreen="+46"
-   crs:LuminanceAdjustmentAqua="+37"
+   crs:SaturationAdjustmentYellow="-13"
+   crs:SaturationAdjustmentGreen="-27"
+   crs:SaturationAdjustmentAqua="-27"
+   crs:SaturationAdjustmentBlue="-38"
+   crs:SaturationAdjustmentPurple="0"
+   crs:SaturationAdjustmentMagenta="0"
+   crs:LuminanceAdjustmentRed="-23"
+   crs:LuminanceAdjustmentOrange="-5"
+   crs:LuminanceAdjustmentYellow="0"
+   crs:LuminanceAdjustmentGreen="0"
+   crs:LuminanceAdjustmentAqua="0"
    crs:LuminanceAdjustmentBlue="0"
    crs:LuminanceAdjustmentPurple="0"
    crs:LuminanceAdjustmentMagenta="0"
-   crs:SplitToningShadowHue="230"
-   crs:SplitToningShadowSaturation="11"
-   crs:SplitToningHighlightHue="8"
-   crs:SplitToningHighlightSaturation="9"
-   crs:SplitToningBalance="+4"
-   crs:ColorGradeMidtoneHue="31"
-   crs:ColorGradeMidtoneSat="20"
-   crs:ColorGradeShadowLum="-3"
-   crs:ColorGradeMidtoneLum="+29"
-   crs:ColorGradeHighlightLum="+10"
+   crs:SplitToningShadowHue="0"
+   crs:SplitToningShadowSaturation="0"
+   crs:SplitToningHighlightHue="0"
+   crs:SplitToningHighlightSaturation="0"
+   crs:SplitToningBalance="0"
+   crs:ColorGradeMidtoneHue="0"
+   crs:ColorGradeMidtoneSat="0"
+   crs:ColorGradeShadowLum="0"
+   crs:ColorGradeMidtoneLum="0"
+   crs:ColorGradeHighlightLum="0"
    crs:ColorGradeBlending="50"
    crs:ColorGradeGlobalHue="0"
    crs:ColorGradeGlobalSat="0"
@@ -115,15 +115,12 @@
    </crs:Group>
    <crs:Description>
     <rdf:Alt>
-     <rdf:li xml:lang="x-default">Колір Іри Руль: студійний портрет, теплі середні тони, м’які тіні.</rdf:li>
+     <rdf:li xml:lang="x-default">Колір Іри Руль з кадру Марії: м’які тіні, приглушені синій і зелений, глибокий червоний. Основа, далі руками.</rdf:li>
     </rdf:Alt>
    </crs:Description>
 
    <crs:ToneCurvePV2012>
-    <rdf:Seq>
-     <rdf:li>0, 0</rdf:li>
-     <rdf:li>255, 255</rdf:li>
-    </rdf:Seq>
+    <rdf:Seq><rdf:li>0, 0</rdf:li><rdf:li>255, 255</rdf:li></rdf:Seq>
    </crs:ToneCurvePV2012>
 
    <crs:ToneCurvePV2012Red>
@@ -146,12 +143,6 @@
      <rdf:li>255, 255</rdf:li>
     </rdf:Seq>
    </crs:ToneCurvePV2012Blue>
-
-   <crs:PointColors>
-    <rdf:Seq>
-     <rdf:li>-1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000, -1.000000</rdf:li>
-    </rdf:Seq>
-   </crs:PointColors>
 
    <crs:Look>
     <rdf:Description
