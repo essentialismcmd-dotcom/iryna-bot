@@ -1477,6 +1477,24 @@ PRESET_AFTER = (
     "саме це розбираю в курсі ретуші.\n\n"
     "У каналі «Iryna Rul | для своїх» показую «до/після» з кожної зйомки."
 )
+# 22.10 (Yaro: «люди вибрали, яку схему світла ми робимо… рілс → бот → підписка → канал»): схема 4 з опитування
+# в каналі 20.10 («Темний фон з підсвіченою циклорамою», 9 з 23). ManyChat слово «ЦИКЛОРАМА» → ?start=shema4.
+# Файл після «Я підписалась», як пресет (kv shema4_wait); текст схеми дослівно Іри (12.09), місток до гайда (ще 12 схем).
+SHEMA4_TAG = "shema4"
+SHEMA4_FILE = "static/Iryna-Rul-Shema-4-tsyklorama.pdf"
+SHEMA4_HELLO_SUB = (
+    "Привіт, це Іра ♥️\n"
+    "У каналі обрали, яку схему світла розібрати наступною: «Темний фон з підсвіченою циклорамою». "
+    "Зібрала її повністю: розстановка, два джерела, потужності, де ставити флаги, і 4 кадри з цього сетапу.\n"
+    "Віддаю її підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
+)
+SHEMA4_HELLO = "Дякую, що ви з нами ♥️ Тримайте схему, файл нижче."
+SHEMA4_AFTER = (
+    "Ця схема одна з тринадцяти в моєму гайді «Світло»: до кожної розстановка, налаштування і кадри зі зйомки. "
+    "Тут одна, у гайді ще дванадцять, доступ назавжди.\n\n"
+    "У каналі «Iryna Rul | для своїх» показую зйомки зсередини і «до/після» з кожної."
+)
+
 SVITLO_REMIND = (                           # Д1 для svitlo/profil без файла: без уроку
     "Доброго дня ♥️ Три схеми світла чекають: підпишіться на канал «для своїх» і натисніть "
     "«Я підписалась», файл прийде сюди."
@@ -1585,11 +1603,45 @@ def _preset_wait_clear(uid):
         log.warning("preset_wait_clear %s: %s", uid, e)
 
 
+def shema4_wait(uid):
+    """Людина прийшла по схему 4 (циклорама) і ще не отримала її."""
+    try:
+        return bool(store.kv_get("shema4_wait:" + str(uid)))
+    except Exception:
+        return False
+
+
+def _shema4_wait_clear(uid):
+    try:
+        store.kv_del("shema4_wait:" + str(uid))
+    except Exception as e:
+        log.warning("shema4_wait_clear %s: %s", uid, e)
+
+
+def give_shema4(chat_id):
+    """22.10: схема 4 після підписки. Дякую, PDF з репозиторію, далі місток до гайда (кнопки як після схем)."""
+    send(chat_id, SHEMA4_HELLO)
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), SHEMA4_FILE), "rb") as f:
+            blob = f.read()
+    except Exception as e:
+        log.warning("shema4 file: %s", e)
+        blob = None
+    if not blob or not send_file(chat_id, "Iryna-Rul-Shema-4-tsyklorama.pdf", blob,
+                                  caption="Схема 4 · Темний фон з підсвіченою циклорамою"):
+        send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
+        return
+    send_card(chat_id, CARD_GUIDE or CARD_MAGNIT, SHEMA4_AFTER, after_kb())
+
+
+
 def _sub_kb_for(uid):
     """Клавіатура «Канал» + «Я підписалась»: для svitlo/profil звичайний канал, для пресета свій лінк
     (CHANNEL_URL_PRESET, інакше CHANNEL_URL), для решти sub_kb()."""
     if preset_wait(uid):
         return svitlo_kb(PRESET_TAG)
+    if shema4_wait(uid):
+        return svitlo_kb(SHEMA4_TAG)
     t = svitlo_tag(uid)
     return svitlo_kb(t) if t else sub_kb()
 
@@ -1614,6 +1666,13 @@ def sub_check(chat_id, uid, u):
             # 22.10: пресет уже має (Alena 465273166 тиснула «Забрати три схеми» 6 разів і чула про пресет):
             # мітку знімаємо і йдемо далі до схем
             _preset_wait_clear(uid)
+        if shema4_wait(uid):                      # 22.10: прийшла по схему 4 (циклорама), раз назавжди
+            if store.kv_claim("shema4_given:" + str(uid)):
+                give_shema4(chat_id)
+                store.log_event(uid, "shema4", {"via": "sub"})
+                _shema4_wait_clear(uid)
+                return
+            _shema4_wait_clear(uid)                # уже має: далі до трьох схем
         if not give_gift(uid, GIFT_SUB):
             send(chat_id, SUB_ALREADY)
         return
@@ -3127,7 +3186,7 @@ def lyudy_rows(data, now=None):
 def _svitlo_line(cnt):
     """По мітках svitlo, profil, storis, svit і hajd299: скільки людей, скільки отримали файл, скільки в каналі (за перевіркою), скільки взяли гайд."""
     out = []
-    for t in SVITLO_TAGS + (HAJD_TAG,):
+    for t in SVITLO_TAGS + (HAJD_TAG, PRESET_TAG, SHEMA4_TAG):
         g = [r for r in cnt if (r.get("tag") or "").lower() == t]
         out.append(t + " " + str(len(g)) + " / " + str(sum(1 for r in g if r["schemes"])) + " / "
                    + str(sum(1 for r in g if r["kanal"][0] is True)) + " / " + str(sum(1 for r in g if r["guide"])))
@@ -5026,6 +5085,10 @@ def hook():
                     bg(store.log_event, uid, "preset_entry", {"tag": src})
                     store.kv_set("preset_wait:" + str(uid), "1")     # файл після «Я підписалась»
                     send_card(chat_id, START_PIC, PRESET_HELLO_SUB, svitlo_kb(PRESET_TAG))
+                elif src == SHEMA4_TAG:
+                    bg(store.log_event, uid, "shema4_entry", {"tag": src})
+                    store.kv_set("shema4_wait:" + str(uid), "1")     # файл після «Я підписалась»
+                    send_card(chat_id, START_PIC, SHEMA4_HELLO_SUB, svitlo_kb(SHEMA4_TAG))
                 elif src in SVITLO_TAGS:
                     # 16.10: реклама (svitlo) і шапка Instagram (profil): привіт про три схеми, «Канал» + «Я підписалась»,
                     # файл після sub:check; без уроку ретуші і ціни, далі Д2 (гайд 199) як у тих, хто має подарунок
