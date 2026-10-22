@@ -1572,6 +1572,14 @@ def preset_wait(uid):
         return False
 
 
+def _preset_wait_clear(uid):
+    """Пресет виданий: мітка «чекає пресет» більше не має перехоплювати «Я підписалась» і «Забрати три схеми»."""
+    try:
+        store.kv_del("preset_wait:" + str(uid))
+    except Exception as e:
+        log.warning("preset_wait_clear %s: %s", uid, e)
+
+
 def _sub_kb_for(uid):
     """Клавіатура «Канал» + «Я підписалась»: для svitlo/profil звичайний канал, для пресета свій лінк
     (CHANNEL_URL_PRESET, інакше CHANNEL_URL), для решти sub_kb()."""
@@ -1596,9 +1604,11 @@ def sub_check(chat_id, uid, u):
             if store.kv_claim("preset_given:" + str(uid)):
                 give_preset(chat_id)
                 store.log_event(uid, "preset", {"via": "sub"})
-            else:
-                send(chat_id, PRESET_ALREADY)
-            return
+                _preset_wait_clear(uid)
+                return
+            # 22.10: пресет уже має (Alena 465273166 тиснула «Забрати три схеми» 6 разів і чула про пресет):
+            # мітку знімаємо і йдемо далі до схем
+            _preset_wait_clear(uid)
         if not give_gift(uid, GIFT_SUB):
             send(chat_id, SUB_ALREADY)
         return
