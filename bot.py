@@ -4333,6 +4333,14 @@ def pc_kb_view(kb):
     return out
 
 
+@app.get("/pidsumok/" + SECRET)
+def pidsumok_route():
+    """Лише читання (23.10): той самий текст, що йде Ірі о 21:00, без надсилання; «нічого» без продажів за день."""
+    rows = sales_rows()
+    return {"den": _sales_line(rows, "today_n", "today_uah"), "vsoho": _sales_line(rows, "all_n", "all_uah"),
+            "text": pidsumok_text()}
+
+
 @app.post("/prodazh/" + SECRET)
 def prodazh_route():
     """З ПК те саме, що /prodazh у боті (23.10): поля id, uah, key (k12 | t1), by. JSON."""
