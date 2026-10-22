@@ -2166,6 +2166,23 @@ def block_items(block, keys):
     return [(label, docs)] if docs else []
 
 
+DE_VIDEO_TEXT = ("Це файли для практики: RAW, налаштування і готовий PSD. Вони відкриваються на комп'ютері "
+                 "у Photoshop, з телефона не відкриються, і це нормально.\n\n"
+                 "Відео всіх уроків у моєму кабінеті: синя кнопка «Кабінет» зліва внизу чату "
+                 "або кнопка під цим повідомленням ♥️")
+DE_VIDEO_RE = re.compile(r"(урок|відео|видео|файл|матеріал|psd|raw)")
+DE_VIDEO_ASK_RE = re.compile(r"(?<!\w)(де|как|як|куда|куди)(?!\w)|не можу|не могу|не відкрив|не открыв|не бачу|не вижу|не знайд|не найд|це урок|это урок|правильно розумію|правильно понимаю")
+
+
+def send_de_video(uid):
+    """Картка «Де відео уроків?» (22.10, слово Yaro: покупниці думають, що файли практики це уроки).
+    Після файлів практики і на питання покупця, де уроки. Лише з кабінетом."""
+    if not kabinet_mist.URL:
+        return None
+    kb = {"inline_keyboard": [[{"text": "Відкрити кабінет", "web_app": {"url": kabinet_mist.URL + "/"}}]]}
+    return send_card_file(uid, "static/de-video.png", DE_VIDEO_TEXT, kb)
+
+
 def send_practice(uid, block=None):
     """Кнопка кабінету «Отримати в Telegram»: лише практика (без відео), лише покупцям.
     block (u1–u3, c1–c5) шле файли одного блоку, без нього все. Повертає скільки файлів пішло;
@@ -2206,6 +2223,8 @@ def send_practice(uid, block=None):
     if sent == 0:
         log.warning("практика %s: жоден файл не пішов (блок %s)", uid, block or "all")
         send(uid, "Не вдалося надіслати файли. Спробуйте ще раз за хвилину або напишіть мені сюди ♥️")
+    else:
+        send_de_video(uid)      # після файлів одразу: де відео, бо файли з телефона не відкриваються
     store.log_event(uid, "practice", {"sent": sent, "block": block or "all"})
     return sent
 
@@ -4971,6 +4990,10 @@ def hook():
                 else:
                     # покупцю (курс чи гайд) під довільним текстом уроки, не «напишіть в інстаграм» (правка Б)
                     kb = lessons_kb(uid) if owned_keys(uid, real=True) else None
+                    if kb and DE_VIDEO_RE.search(low) and DE_VIDEO_ASK_RE.search(low):
+                        # покупець питає, де уроки чи чому файли не відкриваються: картка зі стрілкою на «Кабінет»
+                        store.log_event(uid, "de_video")
+                        send_de_video(chat_id)
                     send(chat_id, CLIENT_TEXT_BUYER if kb else CLIENT_TEXT, kb or empty_kb(uid))
             return "ok"
 
