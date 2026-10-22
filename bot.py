@@ -5084,10 +5084,12 @@ def hook():
                 elif src == PRESET_TAG:
                     bg(store.log_event, uid, "preset_entry", {"tag": src})
                     store.kv_set("preset_wait:" + str(uid), "1")     # файл після «Я підписалась»
+                    _shema4_wait_clear(uid)                             # 22.10: останній лінк головний
                     send_card(chat_id, START_PIC, PRESET_HELLO_SUB, svitlo_kb(PRESET_TAG))
                 elif src == SHEMA4_TAG:
                     bg(store.log_event, uid, "shema4_entry", {"tag": src})
                     store.kv_set("shema4_wait:" + str(uid), "1")     # файл після «Я підписалась»
+                    _preset_wait_clear(uid)                             # 22.10: 5413676351 прийшла по схему, а дістала пресет
                     send_card(chat_id, START_PIC, SHEMA4_HELLO_SUB, svitlo_kb(SHEMA4_TAG))
                 elif src in SVITLO_TAGS:
                     # 16.10: реклама (svitlo) і шапка Instagram (profil): привіт про три схеми, «Канал» + «Я підписалась»,

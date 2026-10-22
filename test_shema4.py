@@ -88,4 +88,10 @@ bot.app.test_client().post("/sekret", json=upd)
 check("старт: мітка shema4_wait", KV.get("shema4_wait:888") == "1")
 check("старт: привіт про циклораму", any("підсвіченою циклорамою" in t for _, t, _ in SENT))
 check("старт: без трьох схем у привіті", not any("Три схеми світла з одного сетапу" in t for _, t, _ in SENT))
+
+# 5. мала пресет-мітку, прийшла по схему 4: останній лінк головний (22.10, 5413676351)
+KV.clear(); KV["preset_wait:999"] = "1"
+upd["message"]["chat"]["id"] = 999; upd["message"]["from"]["id"] = 999
+bot.app.test_client().post("/sekret", json=upd)
+check("старт shema4 знімає preset_wait", "preset_wait:999" not in KV and KV.get("shema4_wait:999") == "1")
 sys.exit(1 if bad else 0)
