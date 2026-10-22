@@ -1984,6 +1984,21 @@ def pidsumok_text():
     return "Підсумок дня: " + day + "\nЗа весь час: " + (_sales_line(rows, "all_n", "all_uah") or "0 грн")
 
 
+def prodazh_mark(target, uah, key="k12"):
+    """Ручна видача як продаж (23.10, слово Yaro): kv prodazh:<код> = сума з картки, рядок покупки
+    є чи створюється (paid+delivered, дата = зараз, якщо його не було). Повертає (код, текст для персоналу)."""
+    key = "t1" if key in ("t1", "gaid", "guide", "гайд") else "k12"
+    code = order_code(target, key)
+    row = store.get_purchase(code)
+    if not row:
+        store.ensure_purchase(target, PRODUCTS[key]["product"], tier=key, order_code=code, amount_uah=uah)
+        store.mark_paid(code, uah)
+        store.mark_delivered(code)
+    store.kv_set("prodazh:" + code, str(uah))
+    store.log_event(target, "prodazh", {"code": code, "uah": uah, "tier": key})
+    return code, "Зараховано: " + pname(key) + ", " + str(uah) + " грн, код " + code
+
+
 def pidsumok_run(now=None):
     """Раз на день після 21:00 за Києвом; заявка в kv, щоб не слати двічі з двох воркерів."""
     k = kyiv_now(now)
@@ -4318,6 +4333,19 @@ def pc_kb_view(kb):
     return out
 
 
+@app.post("/prodazh/" + SECRET)
+def prodazh_route():
+    """З ПК те саме, що /prodazh у боті (23.10): поля id, uah, key (k12 | t1), by. JSON."""
+    j = request.get_json(silent=True)
+    j = j if isinstance(j, dict) else {}
+    g = lambda k: str(j.get(k, request.form.get(k, request.args.get(k, "")))).strip()
+    if not (g("id").isdigit() and g("uah").isdigit()):
+        return {"ok": False, "error": "id і uah числами"}, 400
+    code, msg = prodazh_mark(int(g("id")), int(g("uah")), g("key").lower())
+    store.log_event(int(g("id")), "prodazh_pc", {"by": g("by")})
+    return {"ok": True, "code": code, "text": msg}
+
+
 @app.post("/nadislaty/" + SECRET)
 def nadislaty():
     """
@@ -4944,6 +4972,16 @@ def hook():
                             "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
                 ok = send(target, body, pay_kb("k12z", target))
                 send(chat_id, ("Надіслано: " if ok else "Не дійшло: ") + name + ", " + str(uah) + " грн, код " + code)
+                return "ok"
+            # Продаж з картки після ручної видачі (23.10): /prodazh <id> <грн> [gaid]; інакше ручна видача
+            # в підсумок Ірі не входить.
+            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/prodazh":
+                _parts = text.split() + ["", "", ""]
+                if not (_parts[1].isdigit() and _parts[2].isdigit()):
+                    send(chat_id, "Напишіть так: /prodazh 897646290 2500 (курс) або /prodazh 897646290 299 gaid")
+                    return "ok"
+                _code, _msg = prodazh_mark(int(_parts[1]), int(_parts[2]), _parts[3].lower())
+                send(chat_id, _msg)
                 return "ok"
             # Подарунок схем вручну (14.10): /podarunok <id> шле тим самим give_gift текст GIFT_HAND і PDF магніту
             # з кнопкою каналу; раз назавжди (kv gift:<id>), схеми вже видані чи заявка зайнята = нічого не шле.

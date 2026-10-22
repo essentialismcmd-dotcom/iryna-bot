@@ -68,4 +68,20 @@ bot._pay_issue(555, "t1", "IRTEST-1", bot.PRODUCTS["t1"]["uah"] * 100)
 msgs = [(int(p["chat_id"]), p["text"]) for m, p in CALLS if m == MSG]
 check("оплата: адмін і Іра отримали «Оплата …»", sorted(c for c, t in msgs if t.startswith("Оплата ") and "видано" in t) == [1, 2])
 check("рядок «Сьогодні» лише Ірі", [c for c, t in msgs if t.startswith("Сьогодні:")] == [2])
+# /prodazh (23.10): ручна видача як продаж з картки, kv prodazh:<код> = сума
+KV = {}
+bot.store.kv_set = lambda k, v: KV.__setitem__(k, v)
+bot.store.get_purchase = lambda code: {"order_code": code} if code.endswith("-" + bot.PRODUCTS["k12"]["code"]) else None
+ENS = []
+bot.store.ensure_purchase = lambda *a, **k: ENS.append(k)
+code, msg = bot.prodazh_mark(897646290, 2500)
+check("курс: код k12 і kv", code == bot.order_code(897646290, "k12") and KV.get("prodazh:" + code) == "2500")
+check("рядок був: без ensure", not ENS and msg.startswith("Зараховано: ") and "2500 грн" in msg)
+code2, _ = bot.prodazh_mark(1164433116, 299, "gaid")
+check("гайд: код t1, рядка не було: ensure з сумою", code2.endswith("-" + bot.PRODUCTS["t1"]["code"]) and ENS and ENS[-1]["amount_uah"] == 299)
+c = bot.app.test_client()
+r = c.post("/prodazh/sekret", data={"id": "1164433116", "uah": "2970", "key": "k12", "by": "test"})
+check("маршрут /prodazh", r.status_code == 200 and r.get_json()["ok"] and KV.get("prodazh:" + bot.order_code(1164433116, "k12")) == "2970")
+r = c.post("/prodazh/sekret", data={"id": "x", "uah": "1"})
+check("маршрут: погані поля 400", r.status_code == 400)
 sys.exit(1 if bad else 0)

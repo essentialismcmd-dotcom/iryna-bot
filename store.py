@@ -725,15 +725,23 @@ def people_data():
 
 
 def sales_summary(skip_ids=()):
-    """Продано по продуктах (paid/delivered): за київську добу і за весь час. Для Іри (22.10).
-    Дата оплати: paid_at, для ручної видачі без paid_at береться delivered_at. Без бази None."""
+    """Продано по продуктах: за київську добу і за весь час. Для Іри (22.10).
+    23.10, слово Yaro («14 400 це те, що прийшло на карту, все інше не враховую»): рахуються лише рядки,
+    де бот сам побачив оплату (подія pay_ok з цим кодом), і ручні видачі, позначені /prodazh
+    (kv prodazh:<код> = сума з картки; вона важить більше за amount_uah). Ручні /vydaty без позначки,
+    МК і тести не рахуються. Дата: paid_at, інакше delivered_at. Без бази None."""
     skip = list(skip_ids) or [0]
     return q("""
         with p as (
-            select product, amount_uah,
-                   (coalesce(paid_at, delivered_at) at time zone 'Europe/Kyiv')::date as d
-            from purchases
-            where status in ('paid', 'delivered') and not (user_id = any(%s))
+            select pr.product,
+                   coalesce(nullif(k.v, '')::int, pr.amount_uah) as amount_uah,
+                   (coalesce(pr.paid_at, pr.delivered_at) at time zone 'Europe/Kyiv')::date as d
+            from purchases pr
+            left join kv k on k.k = 'prodazh:' || pr.order_code
+            where pr.status in ('paid', 'delivered') and not (pr.user_id = any(%s))
+              and (k.k is not null or exists (
+                    select 1 from events e
+                    where e.kind = 'pay_ok' and e.payload->>'code' = pr.order_code))
         )
         select product,
                count(*) filter (where d = (now() at time zone 'Europe/Kyiv')::date) as today_n,
