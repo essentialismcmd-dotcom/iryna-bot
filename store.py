@@ -503,6 +503,12 @@ def events_recent(limit=200):
              (limit,), fetch="all")
 
 
+def events_after(after_id=0, limit=5000):
+    """24.10: повне вивантаження журналу частинами за id (розбір кожної людини покроково)."""
+    return q("select * from events where id > %s order by id limit %s",
+             (after_id, limit), fetch="all")
+
+
 def assets_recent(limit=200):
     """Усі матеріали, найновіші першими, будь-який кошик."""
     return q("select * from assets order by created_at desc, id desc limit %s",
