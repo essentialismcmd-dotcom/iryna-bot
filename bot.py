@@ -1451,6 +1451,7 @@ HAJD_TAG = "hajd299"
 # по підписці»): привіт з «Канал» + «Я підписалась», файл після sub:check, як зі схемами світла.
 PRESET_TAG = "preset"
 PRESET_AD_TAG = "preset_ad"   # 23.10: реклама на безкоштовний пресет, той самий шлях, окремий рахунок
+PRESET_AD_TAGS = (PRESET_AD_TAG, "preset_a", "preset_b", "preset_c", "preset_d", "preset_e")   # 23.10 тест креативів: мітка на кожен ролик
 PRESET_FILE = "static/Iryna-Rul-Kolir-1.xmp"
 PRESET_HELLO_SUB = (
     "Привіт, це Іра ♥️\n"
@@ -3202,7 +3203,7 @@ def lyudy_rows(data, now=None):
 def _svitlo_line(cnt):
     """По мітках svitlo, profil, storis, svit і hajd299: скільки людей, скільки отримали файл, скільки в каналі (за перевіркою), скільки взяли гайд."""
     out = []
-    for t in SVITLO_TAGS + (HAJD_TAG, PRESET_TAG, PRESET_AD_TAG, SHEMA4_TAG):
+    for t in SVITLO_TAGS + (HAJD_TAG, PRESET_TAG) + PRESET_AD_TAGS + (SHEMA4_TAG,):
         g = [r for r in cnt if (r.get("tag") or "").lower() == t]
         out.append(t + " " + str(len(g)) + " / " + str(sum(1 for r in g if r["schemes"])) + " / "
                    + str(sum(1 for r in g if r["kanal"][0] is True)) + " / " + str(sum(1 for r in g if r["guide"])))
@@ -5128,7 +5129,7 @@ def hook():
                     bg(store.log_event, uid, "retush_entry", {"tag": src})
                     send_card_file(chat_id, "static/retush-masky.png", RETUSH_MAGNET_HELLO, retush_magnet_kb())  # обкладинка магніту, без «Студійне світло»
                     kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
-                elif src in (PRESET_TAG, PRESET_AD_TAG):
+                elif src == PRESET_TAG or src in PRESET_AD_TAGS:
                     bg(store.log_event, uid, "preset_entry", {"tag": src})
                     store.kv_set("preset_wait:" + str(uid), "1")     # файл після «Я підписалась»
                     _shema4_wait_clear(uid)                             # 22.10: останній лінк головний
