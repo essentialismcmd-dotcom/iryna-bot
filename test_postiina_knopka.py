@@ -263,7 +263,7 @@ bot.KANAL_KNOPKA_URL = _ku
 VYKLYKY.clear()
 msg("/start mk_" + KOD, 604)
 t = to(604)
-ok("гостя МК: MK_HELLO з постійною кнопкою", t and t[0].get("text") == bot.MK_HELLO
+ok("гостя МК: MK_HELLO з постійною кнопкою", t and t[0].get("text") == bot.MK_PAID_HELLO
    and t[0].get("reply_markup") == bot.PERSIST_KB)
 ok("гостя МК: рядка-носія нема", not nosii(604))
 ok("гостя МК: сповіщення «МК: видано» без кнопки", any((p.get("text") or "").startswith("МК: видано") for p in to(1))

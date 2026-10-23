@@ -702,7 +702,7 @@ def mk_link(raw):
 MK_CODE, MK_SEATS, MK_UNTIL = mk_link(os.getenv("MK_LINK", ""))
 MK_TAG = "mk_link"        # мітка в базі й подіях замість коду
 # Текст дослівно (13.10): гайд і курс входять у МК, тож не подарунок і без «платити нічого не треба».
-MK_HELLO = ("Дякую, що обрали мій майстер-клас! Гайд «Світло» і курс ретуші входять у нього і тепер "
+MK_PAID_HELLO = ("Дякую, що обрали мій майстер-клас! Гайд «Світло» і курс ретуші входять у нього і тепер "
             "ваші назавжди. Нижче гайд і перший урок курсу, решта уроків у кабінеті.")
 MK_AGAIN = "Гайд і курс уже у вас ♥️ Уроки нижче і в кабінеті."
 MK_SHUT = "Посилання вже не діє, але я отримала ваш запит і відкрию доступ вручну ♥️"
@@ -1882,7 +1882,9 @@ def give_gift(uid, text):
         log.warning("gift: нема файла магніту для %s", uid)
         return False
     send(uid, text)
-    kb = {"inline_keyboard": channel_rows()} if CHANNEL_URL else None
+    # 24.10 (розбір воронки): кнопка гайда одразу під схемами; без неї за годину купили 0 зі 143, з нею 5 з 51
+    rows = (channel_rows() if CHANNEL_URL else []) + guide_rows()
+    kb = {"inline_keyboard": rows} if rows else None
     ok = bool(api("sendDocument", retry=True, chat_id=uid, document=ref, reply_markup=kb))
     if ok:
         store.mark_magnet(uid)
@@ -1983,7 +1985,7 @@ def touch_run(now=None):
             n += 1 if ok else 0
         except Exception:
             log.exception("touch_d1 %s", uid)
-    for uid, _got in store.touch_candidates(GIFT_SINCE, TOUCH_D2[0], TOUCH_D2[1], skip, "touch_d2:", with_gift=True) or []:
+    for uid, _got in store.touch_candidates(GIFT_SINCE, TOUCH_D2[0], TOUCH_D2[1], skip, "touch_d2:", with_gift=True, any_tag=True) or []:
         try:
             if owned_keys(uid, real=True) or store.kv_get("hajd199:" + str(uid)) or not _touch_ok(uid):
                 continue
@@ -2622,7 +2624,7 @@ def mk_start(chat_id, uid, u, code):
     kabinet_mist.push_user(uid)
     ok_g = ok_c = True
     try:
-        send(chat_id, MK_HELLO)
+        send(chat_id, MK_PAID_HELLO)     # 24.10: окрема назва, бо друге MK_HELLO перекривало привітання ?start=mk
         if "t1" not in had:     # не give_guide: там підводка до продажу курсу
             ok_g = bool(guide_ref() and api("sendDocument", retry=True, chat_id=chat_id, document=guide_ref()))
         ok_c = course_owner_reply(chat_id, uid) if {"k1", "k2"} <= had else give_course(uid, "k12")

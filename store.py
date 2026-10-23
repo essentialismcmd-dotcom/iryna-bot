@@ -598,14 +598,16 @@ def gift_candidates(since_iso, after_h, skip_ids, skip_kv=None):
     return [r["user_id"] for r in rows or []]
 
 
-def touch_candidates(since_iso, lo_h, hi_h, skip_ids, skip_kv, with_gift=False):
+def touch_candidates(since_iso, lo_h, hi_h, skip_ids, skip_kv, with_gift=False, any_tag=False):
     """Дотики воронки (16.10): люди з міткою retush*, що зайшли після since, між lo_h і hi_h годин тому,
     без оплачених покупок, без 403 (kv blocked:), без вже зробленого дотику (kv skip_kv<id>).
-    with_gift: лише ті, хто вже отримав схеми світла (got_magnet_at). Повертає [(user_id, got_magnet_at)]."""
+    with_gift: лише ті, хто вже отримав схеми світла (got_magnet_at). Повертає [(user_id, got_magnet_at)].
+    any_tag (24.10, Д2): будь-яка мітка, бо preset, mc, shema2, shema4 дотиків не отримували зовсім."""
     gift = "and u.got_magnet_at is not null" if with_gift else ""
+    tag = "true" if any_tag else "(u.source_tag like 'retush%%' or u.source_tag in ('svitlo', 'profil', 'storis', 'svit'))"
     rows = q("""
         select u.user_id, u.got_magnet_at from users u
-        where (u.source_tag like 'retush%%' or u.source_tag in ('svitlo', 'profil', 'storis', 'svit')) and u.role = 'client'
+        where """ + tag + """ and u.role = 'client'
           and u.created_at >= %s
           and u.created_at < now() - make_interval(hours => %s)
           and u.created_at >= now() - make_interval(hours => %s)

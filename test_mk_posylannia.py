@@ -213,13 +213,13 @@ ok("видача: source_tag «mk»", all(p["source_tag"] == "mk" for p in r.val
 ok("видача: доступ гайд і обидва курси", bot.owned_keys(501, real=True) == {"t1", "k1", "k2"})
 ok("видача: кабінет отримав людину", 501 in PUSH)
 t = teksty(501)
-ok("видача: перше повідомлення MK_HELLO", t and t[0] == bot.MK_HELLO, t[0][:60] if t else "")
+ok("видача: перше повідомлення MK_HELLO", t and t[0] == bot.MK_PAID_HELLO, t[0][:60] if t else "")
 ok("видача: гайд документом", any(p.get("document") == "GUIDE" for p in sent("sendDocument", 501)))
 ok("видача: інтро курсу і перший урок кнопкою в кабінет",
    any("Готово, курс ваш" in x for x in t)
    and any(b.get("web_app", {}).get("url") == "https://kab.test/?p=1.1" for p in sent(chat=501) for b in knopky(p)))
 _order = [i for i, (m, p) in enumerate(VYKLYKY) if p.get("chat_id") == 501]
-_hello = next(i for i in _order if VYKLYKY[i][1].get("text") == bot.MK_HELLO)
+_hello = next(i for i in _order if VYKLYKY[i][1].get("text") == bot.MK_PAID_HELLO)
 _guide = next(i for i in _order if VYKLYKY[i][1].get("document") == "GUIDE")
 _intro = next(i for i in _order if "Готово, курс ваш" in (VYKLYKY[i][1].get("text") or ""))
 ok("видача: порядок вітання, гайд, курс", _hello < _guide < _intro)
@@ -318,7 +318,7 @@ mark_paid("IR" + bot.b36(510) + "-7")
 VYKLYKY.clear()
 msg("/start mk_" + KOD, 510)
 t = teksty(510)
-ok("вже мала курс: вітання, гайд, «Курс ретуші вже ваш»", t[0] == bot.MK_HELLO and bot.COURSE_OWNED in t
+ok("вже мала курс: вітання, гайд, «Курс ретуші вже ваш»", t[0] == bot.MK_PAID_HELLO and bot.COURSE_OWNED in t
    and not any("Готово, курс ваш" in x for x in t)
    and any(p.get("document") == "GUIDE" for p in sent("sendDocument", 510)), str(t))
 ok("вже мала курс: у сповіщенні", any("(вже мала: курс)" in p["text"] for p in staff("МК: видано")))
@@ -344,7 +344,7 @@ wipe_user(501)
 ok("skyd: МК-рядків нема, лічильник той самий", not any(mk_rows(501).values()) and DB["kv"]["mkn:" + KOD] == _was)
 VYKLYKY.clear()
 msg("/start mk_" + KOD, 501)
-ok("skyd: знову MK_HELLO і нове місце", teksty(501)[0] == bot.MK_HELLO and DB["kv"]["mkn:" + KOD] == str(int(_was) + 1))
+ok("skyd: знову MK_HELLO і нове місце", teksty(501)[0] == bot.MK_PAID_HELLO and DB["kv"]["mkn:" + KOD] == str(int(_was) + 1))
 
 
 # 13. Тиша кабінету для гостей МК, звичайні люди як раніше

@@ -115,7 +115,7 @@ start(821, "svitlox"); ok("невідома мітка: загальне HELLO",
 
 # дотики: Д1 для svitlo без файла без уроку; Д2 тим, хто має подарунок
 CAND = {"d1": [830, 831], "d2": [800, 801]}
-def _tc(since, lo, hi, skip, skip_kv, with_gift=False):
+def _tc(since, lo, hi, skip, skip_kv, with_gift=False, any_tag=False):
     return [(u, ("x" if with_gift else None)) for u in CAND["d2" if with_gift else "d1"] if not KV.get(skip_kv + str(u))]
 store.touch_candidates = _tc
 store.user_texts = lambda uid: ""
