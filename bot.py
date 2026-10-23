@@ -4283,6 +4283,24 @@ def events_page():
     return "<pre>" + "\n".join(out) + "</pre>"
 
 
+@app.get("/events-json/" + SECRET)
+def events_json():
+    """24.10 (Yaro: «подивитися їхній кожен крок»): увесь журнал подій JSON-ом, частинами по id.
+    ?after=<id>&limit=<до 5000>; далі брати after = останній id."""
+    try:
+        after = int(request.args.get("after", "0"))
+        limit = max(1, min(5000, int(request.args.get("limit", "5000"))))
+    except ValueError:
+        return "bad", 400
+    store.session_begin()
+    try:
+        rows = store.events_after(after, limit) or []
+    finally:
+        store.session_end()
+    return {"events": [{"id": r.get("id"), "t": str(r.get("created_at")), "uid": r.get("user_id"),
+                        "kind": r.get("kind"), "p": r.get("payload")} for r in rows]}
+
+
 @app.post("/zalyvka/" + SECRET)
 def zalyvka():
     """
