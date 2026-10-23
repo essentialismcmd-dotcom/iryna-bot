@@ -43,7 +43,7 @@ bot.kanal_member_fresh = lambda uid: (True, "так")
 GIFTS = []
 bot.give_gift = lambda uid, text: (GIFTS.append(uid), True)[1]
 PRESETS = []
-bot.give_preset = lambda chat_id: PRESETS.append(chat_id)
+bot.give_preset = lambda chat_id, keys=None: PRESETS.append(chat_id)
 
 U = {"id": 555, "first_name": "Alena"}
 # 1. прийшла по пресет, «Я підписалась»: пресет

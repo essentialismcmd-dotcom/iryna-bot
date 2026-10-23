@@ -1458,11 +1458,17 @@ PRESET_HELLO_SUB = (
     "Мій пресет «Колір 1» для Lightroom і Camera Raw: основа мого кольору одним кліком.\n"
     "Віддаю його підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
 )
-PRESET_HELLO = (                            # 21.10 Yaro: «по пресету надо інструкцію, бо я особисто не розумію, що з цим робити»
-    "Дякую, що ви з нами ♥️ Тримайте пресет «Колір 1», файл нижче.\n\n"
-    "Під що він: студійний портрет на імпульсному світлі, темний фон, кадр Марії з відео, знято на Fuji. "
-    "Гарантії, що на ваш кадр він ляже один в один, нема: інша камера, світло і шкіра дають інший відтінок, "
-    "щось доведеться підкрутити. Це основа, не чудо-таблетка."+"\n\n"
+# 23.10 (Yaro: «людина, яка переходить по одній з реклам, отримує той пресет, який на фотці… підписуємо, що
+# може підходити не під кожну фотку»): пресет на кожен кадр реклами. Файл кадру кладемо в static/ і дописуємо сюди;
+# поки файлу нема, мітка дає «Колір 1».
+PRESETS = {
+    "kolir1": {"file": PRESET_FILE, "name": "Колір 1", "kogo": "Марії",
+               "pid": "студійний портрет на імпульсному світлі, темний фон, кадр Марії з відео, знято на Fuji"},
+}
+PRESET_FOR_TAG = {"preset_a": ("madina",), "preset_b": ("eva",), "preset_d": ("madina", "eva", "kolir1")}
+PRESET_NO_GUARANTEE = ("Гарантії, що на ваш кадр він ляже один в один, нема: інша камера, світло і шкіра дають інший відтінок, "
+                       "щось доведеться підкрутити. Це основа, не чудо-таблетка.")
+PRESET_HOWTO = (
     "Це файл .xmp. Сам він не відкривається, його треба імпортувати, це хвилина:\n\n"
     "Телефон (Lightroom, безкоштовний): збережіть файл на телефон. У Lightroom відкрийте будь-яке фото → "
     "Presets → вкладка «Yours» («Мої») → три крапки → Import Presets → цей файл.\n\n"
@@ -1470,11 +1476,16 @@ PRESET_HELLO = (                            # 21.10 Yaro: «по пресету 
     "зверху три крапки → Import Profiles & Presets → оберіть цей файл. Пресет зʼявиться в групі User Presets; "
     "якщо не видно, згорніть і розгорніть список.\n\n"
     "Lightroom на компʼютері: Presets → «+» → Import Presets → цей файл.\n\n"
-    "Далі: відкрили фото → Presets → «Iryna Rul · Колір 1» → один клік."
+    "Далі: відкрили фото → Presets → «Iryna Rul · {nazva}» → один клік."
+)
+PRESET_HELLO = (                            # 21.10 Yaro: «по пресету надо інструкцію, бо я особисто не розумію, що з цим робити»
+    "Дякую, що ви з нами ♥️ Тримайте пресет «Колір 1», файл нижче.\n\n"
+    "Під що він: студійний портрет на імпульсному світлі, темний фон, кадр Марії з відео, знято на Fuji. "
+    + PRESET_NO_GUARANTEE + "\n\n" + PRESET_HOWTO.format(nazva="Колір 1")
 )
 PRESET_ALREADY = "Пресет уже у вас ♥️ Файл надсилала вище в цьому чаті."
 PRESET_AFTER = (
-    "Пресет дає колір. Він з мого кадру Марії, під мою камеру, світло і шкіру; на іншому кадрі ляже по-своєму, "
+    "Пресет дає колір. Він з мого кадру {kogo}, під мою камеру, світло і шкіру; на іншому кадрі ляже по-своєму, "
     "це основа, яку далі підганяють під себе. Шкіру, обʼєм і світло на цих кадрах я роблю руками, "
     "саме це розбираю в курсі ретуші.\n\n"
     "У каналі «Iryna Rul | для своїх» показую «до/після» з кожної зйомки."
@@ -1589,6 +1600,22 @@ def kanal_member_fresh(uid):
     return kanal_member(uid)
 
 
+def preset_keys_for(tag):
+    """Які пресети дає мітка: свої для кадрів реклами, якщо файл уже є, інакше «Колір 1»."""
+    k = [x for x in PRESET_FOR_TAG.get(tag, ()) if x in PRESETS]
+    return k or ["kolir1"]
+
+
+def preset_wait_keys(uid):
+    """Пресети, яких людина чекає: у kv «1» (старе, «Колір 1») або ключі через кому."""
+    try:
+        v = store.kv_get("preset_wait:" + str(uid)) or ""
+    except Exception:
+        v = ""
+    k = [x for x in str(v).split(",") if x in PRESETS]
+    return k or ["kolir1"]
+
+
 def preset_wait(uid):
     """Людина прийшла по пресет і ще не отримала його (мітка в kv, бо source_tag лишається першим)."""
     try:
@@ -1660,8 +1687,9 @@ def sub_check(chat_id, uid, u):
             if IRA_ID:      # 21.10, слово Yaro: Ірі коротке «підписалась», лише їй, лише раз на людину
                 _staff_send([IRA_ID], "Підписалась на канал: " + who(u), uid=uid, kind="sub")
         if preset_wait(uid):                      # 21.10: прийшла по пресет, віддаємо пресет, раз назавжди
-            if store.kv_claim("preset_given:" + str(uid)):
-                give_preset(chat_id)
+            keys = preset_wait_keys(uid)
+            if store.kv_claim("preset_given:" + str(uid) + ("" if keys == ["kolir1"] else ":" + ",".join(keys))):
+                give_preset(chat_id, keys)
                 store.log_event(uid, "preset", {"via": "sub"})
                 _preset_wait_clear(uid)
                 return
@@ -1796,20 +1824,42 @@ def give_magnet(chat_id):
     send_card(chat_id, CARD_MAGNIT, text, after_kb())
 
 
-def give_preset(chat_id):
+def preset_hello(keys):
+    if keys == ["kolir1"]:
+        return PRESET_HELLO
+    pr = [PRESETS[k] for k in keys]
+    if len(pr) == 1:
+        head = ("Дякую, що ви з нами ♥️ Тримайте пресет «%s», файл нижче.\n\nПід що він: %s. "
+                % (pr[0]["name"], pr[0]["pid"]) + PRESET_NO_GUARANTEE)
+        nazva = pr[0]["name"]
+    else:
+        head = ("Дякую, що ви з нами ♥️ Тримайте пресети з кадрів, які ви бачили у відео, файли нижче:\n"
+                + "\n".join("• «%s»: %s" % (p["name"], p["pid"]) for p in pr) + "\n\n"
+                + PRESET_NO_GUARANTEE.replace("він ляже", "кожен ляже") + " Пробуйте той, чиє світло ближче до вашого.")
+        nazva = "назва пресету"
+    return head + "\n\n" + PRESET_HOWTO.format(nazva=nazva)
+
+
+def give_preset(chat_id, keys=None):
     """21.10: магніт ретуші після підписки. Дякую, файл пресету з репозиторію, далі місток до курсу
-    (картка магніту, кнопки як після схем)."""
-    send(chat_id, PRESET_HELLO)
-    try:
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), PRESET_FILE), "rb") as f:
-            blob = f.read()
-    except Exception as e:
-        log.warning("preset file: %s", e)
-        blob = None
-    if not blob or not send_file(chat_id, "Iryna-Rul-Kolir-1.xmp", blob, caption="Iryna Rul · Колір 1 (.xmp)"):
-        send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
-        return
-    send_card(chat_id, CARD_MAGNIT, PRESET_AFTER, after_kb())
+    (картка магніту, кнопки як після схем). 23.10: keys = пресети з кадрів реклами, з якої прийшла людина."""
+    keys = [k for k in (keys or ["kolir1"]) if k in PRESETS] or ["kolir1"]
+    send(chat_id, preset_hello(keys))
+    for k in keys:
+        p = PRESETS[k]
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), p["file"]), "rb") as f:
+                blob = f.read()
+        except Exception as e:
+            log.warning("preset file %s: %s", k, e)
+            blob = None
+        if not blob or not send_file(chat_id, os.path.basename(p["file"]), blob, caption="Iryna Rul · %s (.xmp)" % p["name"]):
+            send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
+            return
+    after = PRESET_AFTER.format(kogo=PRESETS[keys[0]]["kogo"])
+    if len(keys) > 1:
+        after = after.replace("Пресет дає колір. Він з мого кадру %s" % PRESETS[keys[0]]["kogo"], "Пресети дають колір. Кожен з мого кадру")
+    send_card(chat_id, CARD_MAGNIT, after, after_kb())
 
 
 def give_gift(uid, text):
@@ -5131,7 +5181,8 @@ def hook():
                     kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
                 elif src == PRESET_TAG or src in PRESET_AD_TAGS:
                     bg(store.log_event, uid, "preset_entry", {"tag": src})
-                    store.kv_set("preset_wait:" + str(uid), "1")     # файл після «Я підписалась»
+                    pk = preset_keys_for(src)                           # 23.10: пресет з кадру цієї реклами
+                    store.kv_set("preset_wait:" + str(uid), "1" if pk == ["kolir1"] else ",".join(pk))     # файл після «Я підписалась»
                     _shema4_wait_clear(uid)                             # 22.10: останній лінк головний
                     send_card(chat_id, START_PIC, PRESET_HELLO_SUB, svitlo_kb(PRESET_TAG))
                 elif src == SHEMA4_TAG:
