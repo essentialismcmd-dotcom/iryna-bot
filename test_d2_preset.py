@@ -18,6 +18,6 @@ bot.touch_run(datetime(2026, 10, 24, 9, 0, tzinfo=timezone.utc))      # 12:00 К
 t = dict(sent)
 assert t[1].startswith("Як вам три схеми"), t
 assert t[2].startswith("Як вам схема з циклорамою"), t
-assert t[3] == bot.TOUCH_D2_PRESET, t
+assert t[3] == bot.TOUCH_D2_PRESET % bot._G and "ретуш" not in t[3], t   # 24.10: гайд про світло, без обіцянки ретуші
 assert "%" not in t[2] and "%" not in t[3]
 print("ok  Д2: схеми, схема 4, пресет")

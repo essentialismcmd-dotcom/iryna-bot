@@ -155,8 +155,9 @@ AFTER = (
 LEGACY_LOCK_DATA = ("lock:check", "lock:free")
 GUIDE_INTRO_HEAD = (
     "Повний гайд «Світло» ♥️\n\n"
-    "Усі мої робочі схеми, від чистої комерції до кольору.\n"
+    "Усі тринадцять моїх робочих схем, від чистої комерції до кольору.\n"
     "Кожна з розстановкою, налаштуваннями і кадром зі зйомки.\n\n"
+    "З відгуку покупниці: «Вау дуже гарний гайд, дякую»\n\n"   # 24.10 аудит 2: відгук біля ціни (vidhuky/VIDHUKY.md)
 )
 # Останній рядок за кількістю кнопок: «Три варіанти» лише коли тарифів більше одного.
 GUIDE_INTRO_MANY = {2: "Два варіанти, оберіть свій.", 3: "Три варіанти, оберіть свій."}
@@ -238,7 +239,13 @@ MK_TEXT = (
     "ви знімаєте самі, я поруч і виправляю. На виході кадри в портфоліо.\n\n"
     "Тисніть кнопку, і я напишу вам особисто: дати, місто, деталі."
 )
-MK_THANKS = "Записала ♥️ Напишу вам особисто найближчим часом."
+MK_THANKS = ("Записала ♥️ Щоб підібрати формат, два короткі питання: з якого ви міста "
+             "і що хочете розібрати на майстер-класі? Напишіть сюди, і я напишу вам особисто.")   # 24.10 аудит 2: кваліфікація до розмови
+# 24.10 (аудит 2): відповідь людини після «Є питання до Іри» чи заявки МК не йде в «напишіть в інстаграм»
+ASK_KURS = ("Пишіть сюди своє питання про курс ♥️ Наприклад, чи підійде вам, якщо ви тільки починаєте, "
+            "або що саме буде в уроках. Відповім сама.")
+ASK_GOT = "Дякую, отримала ♥️ Відповім вам тут особисто."
+ASK_HOURS = 24
 # 20.10 (слово Yaro): кнопка «Хочу на МК» в каналі більше не показує одразу картку з заявкою.
 # Спершу коротке привітання з кнопкою «Дізнатися детальніше»; лише її натиск (mk_open) є кроком цікавості,
 # а заявка (mk_want) лишається окремою кнопкою на картці. Так відсіюються випадкові натиски в каналі.
@@ -470,9 +477,12 @@ _K12Z = int(round(_K12 * (100 - KURS_ZNYZHKA) / 100.0))
 PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=(
     "Курс ретуші, " + str(_K12) + " грн\n"
     "Зараз знижка " + str(KURS_ZNYZHKA) + " %: " + str(_K12Z) + " грн\n\n"
+    "Після курсу ви самі доводите портрет до мого вигляду: шкіра без «пластику», обʼєм, колір.\n\n"
     "Усередині: 18 відео, близько 135 хвилин, 4 уроки: бʼюті-портрет, "
     "темний фон, фешн-колір, колір і пресети Іри. "
-    "Доступ назавжди. Увесь курс відкривається одразу після оплати."))
+    "Доступ назавжди. Увесь курс відкривається одразу після оплати.\n\n"
+    "З відгуку учениці: «Все структуровано та зрозуміло!»\n\n"
+    "Сумніваєтесь, чи підійде саме вам? Тисніть «Є питання до Іри»."))   # 24.10 аудит 2: результат і відгук біля ціни
 PRODUCTS["k12z"]["name"] = PRODUCTS["k12"]["name"] + " (знижка " + str(KURS_ZNYZHKA) + " %)"
 BY_CODE = {v["code"]: k for k, v in PRODUCTS.items()}
 
@@ -1321,10 +1331,29 @@ def pick_product(chat_id, uid, u, data, gate=True):
         body += ("\n\nПісля оплати курс відкриється тут, зазвичай протягом кількох хвилин."
                  if t["product"] == "course" else
                  "\n\nПісля оплати файл прийде сюди, зазвичай протягом кількох хвилин.")
-    send(chat_id, body, pay_kb(data, uid))
+    kb = pay_kb(data, uid)
+    if t["product"] == "course":                   # 24.10 аудит 2: 64 натиснули курс, 4 купили, питати не було як
+        kb["inline_keyboard"].insert(1, [{"text": "Є питання до Іри", "callback_data": "ask:kurs"}])
+    send(chat_id, body, kb)
     if lead_once(uid, "zayavka:" + data):
         notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
                give_kb(uid, data), uid=uid)
+
+
+def ask_set(uid, what):
+    try:
+        store.kv_set("ask:" + str(uid), "%s:%d" % (what, int(time.time())))
+    except Exception as e:
+        log.warning("ask_set %s: %s", uid, e)
+
+
+def ask_open(uid):
+    """Що людина нам зараз відповідає: «kurs» чи «mk», якщо питали за останні ASK_HOURS, інакше None."""
+    try:
+        what, ts = str(store.kv_get("ask:" + str(uid)) or "").split(":")
+        return what if time.time() - int(ts) < ASK_HOURS * 3600 else None
+    except Exception:
+        return None
 
 
 def mk_kb():
@@ -1413,8 +1442,9 @@ TOUCH_D1_LESSON = "Урок чекає на вас ♥️ 7 хвилин, кол
 TOUCH_STOP = "\n\nЯкщо не хочете таких повідомлень, напишіть «стоп»."                 # 24.10: відписка словом (PUSH_STOP_RE), раніше про неї ніде не казали
 TOUCH_D2_HAJD = ("Як вам три схеми? ♥️ Усі тринадцять, з розстановкою і кадром, у гайді «Світло», "
                  "%d грн, доступ назавжди." + TOUCH_STOP)                                  # Д2, ціна з GUIDE_PRICE
-TOUCH_D2_PRESET = ("Як вам пресет? Якщо на вашому кадрі ліг не так, спробуйте портрет зі студійним світлом, він під такий зроблений. "
-                   "А якщо хочете, щоб ваші кадри виглядали як мої від зйомки до ретуші, ось гайд ♥️" + TOUCH_STOP)   # 24.10, Д2 після пресета
+TOUCH_D2_PRESET = ("Як вам пресет? ♥️ Якщо на вашому кадрі ліг не так, спробуйте портрет зі студійним світлом, він під такий зроблений. "
+                   "Пресет дає колір, а картинку робить світло: усі тринадцять моїх схем, з розстановкою і кадром, "
+                   "у гайді «Світло», %d грн, доступ назавжди." + TOUCH_STOP)   # 24.10 аудит 2: гайд про світло, ретуші в ньому нема   # 24.10, Д2 після пресета
 TOUCH_D2_SHEMA4 = ("Як вам схема з циклорамою? ♥️ Усі тринадцять, з розстановкою і кадром, у гайді «Світло», "
                    "%d грн, доступ назавжди." + TOUCH_STOP)                                # 24.10, Д2 після схеми 4
 # Ворота ціни (п.4-6): Т9, запрошення без ціни; ціна лише після кнопки «Розкажіть про курс».
@@ -1491,6 +1521,19 @@ PRESET_HELLO = (                            # 21.10 Yaro: «по пресету 
     "Дякую, що ви з нами ♥️ Тримайте пресет «Колір 1», файл нижче.\n"
     "Під що він: студійний портрет на імпульсному світлі, темний фон, кадр Марії з відео."
 )
+PRESET_MORE = "Записала ♥️ Готую пак своїх пресетів під різне світло, напишу вам тут, щойно буде готовий."   # 24.10: попит на пак 599
+
+
+def preset_hello_sub(keys):
+    """Ворота пресета: назва того, що людина бачила в рекламі (до 24.10 завжди «Колір 1»)."""
+    if keys == ["kolir1"]:
+        return PRESET_HELLO_SUB
+    names = " і ".join("«%s»" % PRESETS[k]["name"] for k in keys)
+    return ("Привіт, це Іра ♥️\n"
+            "Мій пресет %s з кадру, який ви бачили у відео, для Lightroom і Camera Raw.\n"
+            "Віддаю його підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди." % names)
+
+
 PRESET_ALREADY = "Пресет уже у вас ♥️ Файл надсилала вище в цьому чаті."
 PRESET_AFTER = (
     "Пресет дає колір. Він з мого кадру {kogo}, під мою камеру, світло і шкіру; на іншому кадрі ляже по-своєму, "
@@ -1862,7 +1905,9 @@ def give_preset(chat_id, keys=None):
     after = PRESET_AFTER.format(kogo=PRESETS[keys[0]]["kogo"])
     if len(keys) > 1:
         after = after.replace("Пресет дає колір. Він з мого кадру %s" % PRESETS[keys[0]]["kogo"], "Пресети дають колір. Кожен з мого кадру")
-    send_card(chat_id, CARD_MAGNIT, after, after_kb())
+    kb = after_kb()
+    kb["inline_keyboard"].append([{"text": "Хочу ще пресети", "callback_data": "preset:more"}])
+    send_card(chat_id, CARD_MAGNIT, after, kb)
 
 
 def send_preset_files(chat_id, keys):
@@ -2017,8 +2062,25 @@ TOUCH_D2 = (44, 60)
 # Т2 і Т3 (через 7 днів, максимум три) додаємо після розбору, як люди відреагували на Т1.
 TOUCH_W1 = (120, 24 * 60)
 TOUCH_W1_FROM = datetime(2026, 10, 25, 7, 0, tzinfo=timezone.utc)   # старт неділя 10:00 Київ, як обіцяли Yaro
-TOUCH_W1_LEAD = "Привіт, це Іра ♥️ Ви брали в мене подарунок, тож тримайте ще один, без жодних умов." + TOUCH_STOP
+TOUCH_W1_LEAD = "Привіт, це Іра ♥️ Ви брали в мене подарунок, тож тримайте ще один." + TOUCH_STOP   # 24.10: без «без жодних умов», натяк, що раніше умови були
 TOUCH_W1_DAY = 25                         # 24.10: перший прогін накопичив ~66 людей, розтягуємо на кілька днів
+
+
+# 24.10 (аудит 2, продажі): хто відкрив картку курсу і не оплатив, через добу одне питання з кнопками заперечень
+TOUCH_KURS = (20, 36)
+TOUCH_KURS_TEXT = ("Добрий день ♥️ Вчора ви дивились мій курс ретуші. Якщо щось зупинило, скажіть, що саме, "
+                   "підкажу чесно." + TOUCH_STOP)
+KURS_DOROGO = ("Розумію ♥️ Тоді почніть зі світла: гайд «Світло», усі тринадцять схем з розстановкою і кадром, "
+               "%d грн, доступ назавжди. А курс почекає, коли буде час.")
+KURS_POTIM = "Добре ♥️ Курс доступний назавжди після оплати, тож дивитись можна у своєму темпі. Повертайтесь, коли буде зручно."
+
+
+def kurs_touch_kb():
+    return {"inline_keyboard": [
+        [{"text": "Не певна, чи підійде мені", "callback_data": "ask:kurs"}],
+        [{"text": "Зараз дорого", "callback_data": "kurs:dorogo"}],
+        [{"text": "Нема часу, потім", "callback_data": "kurs:potim"}],
+        [{"text": "Все гаразд, оплачу", "callback_data": "kurs:pay"}]]}
 
 
 def _touch_ok(uid):
@@ -2084,7 +2146,8 @@ def touch_run(now=None):
             elif store.kv_get("shema4_given:" + str(uid)):
                 text, what = TOUCH_D2_SHEMA4 % _G, "shema4"
             else:                                          # 24.10: лише пресет (реклама preset_*)
-                text, what = TOUCH_D2_PRESET, "preset"
+                text, what = TOUCH_D2_PRESET % _G, "preset"
+                kb = {"inline_keyboard": kb["inline_keyboard"] + [[{"text": "Хочу ще пресети", "callback_data": "preset:more"}]]}
             ok = send(uid, text, kb)
             if ok:
                 store.kv_set("hajd199:" + str(uid), "touch_d2")
@@ -2119,6 +2182,15 @@ def touch_run(now=None):
             n += 1 if ok else 0
         except Exception:
             log.exception("touch_w1 %s", uid)
+    for uid in store.kurs_pending(TOUCH_KURS[0], TOUCH_KURS[1], skip, "touch_kurs:") or []:
+        try:
+            if owned_keys(uid, real=True) or not _touch_ok(uid) or not store.kv_claim("touch_kurs:" + str(uid)):
+                continue
+            ok = send(uid, TOUCH_KURS_TEXT, kurs_touch_kb())
+            store.log_event(uid, "touch", {"step": "kurs", "ok": bool(ok)})
+            n += 1 if ok else 0
+        except Exception:
+            log.exception("touch_kurs %s", uid)
     return n
 
 
@@ -5330,9 +5402,14 @@ def hook():
                     pk = preset_keys_for(src)                           # 23.10: пресет з кадру цієї реклами
                     if free_again(chat_id, uid, ["p:" + k for k in pk]):
                         return "ok"                                     # 24.10: уже має, без воріт
+                    if pk == ["kolir1"] and preset_wait(uid) and preset_wait_keys(uid) != ["kolir1"]:
+                        pk = preset_wait_keys(uid)                      # 24.10: лінк ManyChat «preset» не затирає пресет з реклами
                     store.kv_set("preset_wait:" + str(uid), "1" if pk == ["kolir1"] else ",".join(pk))     # файл після «Я підписалась»
                     _shema4_wait_clear(uid)                             # 22.10: останній лінк головний
-                    send_card(chat_id, START_PIC, PRESET_HELLO_SUB, svitlo_kb(PRESET_TAG))
+                    if kanal_member_fresh(uid)[0] is True:
+                        sub_check(chat_id, uid, u)                      # 24.10: уже в каналі, ворота зайві
+                    else:
+                        send_card(chat_id, START_PIC, preset_hello_sub(pk), svitlo_kb(PRESET_TAG))
                 elif src == SHEMA4_TAG:
                     bg(store.log_event, uid, "shema4_entry", {"tag": src})
                     if free_again(chat_id, uid, ["shema4"]):
@@ -5424,6 +5501,11 @@ def hook():
                         send(chat_id, CLIENT_TEXT, empty_kb(uid))
                     else:
                         send(chat_id, OWNER_NONE, empty_kb(uid))
+                elif not is_file and ask_open(uid):
+                    what = ask_open(uid)                        # 24.10 аудит 2: людина відповідає на наше питання
+                    store.log_event(uid, "ask_answer", {"what": what})
+                    send(chat_id, ASK_GOT)
+                    notify_lead(("ПИТАННЯ ПО КУРСУ: " if what == "kurs" else "МК, ВІДПОВІДЬ: ") + who(u) + "\n" + text, uid=uid)
                 else:
                     # покупцю (курс чи гайд) під довільним текстом уроки, не «напишіть в інстаграм» (правка Б)
                     kb = lessons_kb(uid) if owned_keys(uid, real=True) else None
@@ -5484,8 +5566,28 @@ def hook():
             elif data == "mk":
                 store.log_event(uid, "mk_open")
                 send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
+            elif data == "ask:kurs":
+                store.log_event(uid, "ask_kurs")
+                ask_set(uid, "kurs")
+                send(chat_id, ASK_KURS)
+            elif data == "kurs:dorogo":
+                store.log_event(uid, "kurs_dorogo")
+                send(chat_id, KURS_DOROGO % _G, {"inline_keyboard": [[{"text": TIERS["t1"]["btn"], "callback_data": "guide"}]]}
+                     if GUIDE_SALE else None)
+            elif data == "kurs:pay":
+                store.log_event(uid, "kurs_pay")
+                if not course_owner_reply(chat_id, uid):
+                    pick_product(chat_id, uid, u, "k12", gate=False)
+            elif data == "kurs:potim":
+                store.log_event(uid, "kurs_potim")
+                send(chat_id, KURS_POTIM)
+            elif data == "preset:more":
+                if store.kv_claim("preset_more:" + str(uid)):
+                    store.log_event(uid, "preset_more")
+                send(chat_id, PRESET_MORE)
             elif data == "mk:want":
                 store.log_event(uid, "mk_want")
+                ask_set(uid, "mk")
                 send(chat_id, MK_THANKS, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
                 if lead_once(uid, "mk"):
                     notify_lead("ЗАЯВКА НА МК: " + who(u) + "\nНаписати особисто.", uid=uid)

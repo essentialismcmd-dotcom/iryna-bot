@@ -624,6 +624,25 @@ def touch_candidates(since_iso, lo_h, hi_h, skip_ids, skip_kv, with_gift=False, 
     return [(r["user_id"], r["got_magnet_at"]) for r in rows or []]
 
 
+def kurs_pending(lo_h, hi_h, skip_ids, skip_kv):
+    """Д-курс (24.10, аудит 2): обрали курс (покупка course зі статусом new) між lo_h і hi_h годин тому,
+    нічого не оплатили, без 403 і без зробленого дотику (kv skip_kv<id>). Повертає [user_id]."""
+    rows = q("""
+        select p.user_id from purchases p
+        where p.product = 'course' and p.status = 'new'
+          and not (p.user_id = any(%s))
+          and not exists (select 1 from purchases x where x.user_id = p.user_id
+                          and x.status in ('paid', 'delivered'))
+          and not exists (select 1 from kv where kv.k = 'blocked:' || p.user_id::text)
+          and not exists (select 1 from kv where kv.k = %s || p.user_id::text)
+        group by p.user_id
+        having max(p.created_at) < now() - make_interval(hours => %s)
+           and max(p.created_at) >= now() - make_interval(hours => %s)
+        order by max(p.created_at) limit 30
+    """, (list(skip_ids), skip_kv, lo_h, hi_h), fetch="all")
+    return [r["user_id"] for r in rows or []]
+
+
 def user_texts(uid):
     """Тексти, які людина писала боту (події message): для перевірки на «стоп»."""
     rows = q("select payload ->> 'text' as t from events where user_id = %s and kind = 'message'",
