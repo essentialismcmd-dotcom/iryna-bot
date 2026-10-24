@@ -1323,6 +1323,8 @@ def pick_product(chat_id, uid, u, data, gate=True):
         return
     code = order_code(uid, data)
     if data in ("k12", "k12z"):
+        if uid and not kurs_pershyi(uid):
+            send_kurs_album(chat_id)              # 25.10: вперше бачить курс, спершу до/після, потім ціна
         kurs_pershyi(uid, mark=True)              # 24.10: з цієї хвилини йдуть 48 год особистої ціни
     store.add_purchase(uid, t["product"], tier=data, order_code=code,
                        amount_uah=osobysta_tsina(uid, data) or t["uah"])
@@ -1336,11 +1338,46 @@ def pick_product(chat_id, uid, u, data, gate=True):
                  "\n\nПісля оплати файл прийде сюди, зазвичай протягом кількох хвилин.")
     kb = pay_kb(data, uid)
     if t["product"] == "course":                   # 24.10 аудит 2: 64 натиснули курс, 4 купили, питати не було як
-        kb["inline_keyboard"].insert(1, [{"text": "Написати Ірі", "callback_data": "ask:kurs"}])
+        kb["inline_keyboard"].insert(1, [{"text": "Написати Ірі", "url": IRA_DM_URL} if IRA_DM_URL else
+                                         {"text": "Написати Ірі", "callback_data": "ask:kurs"}])
     send(chat_id, body, kb)
     if lead_once(uid, "zayavka:" + data):
         notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
                give_kb(uid, data), uid=uid)
+
+
+# 25.10, слово Yaro: продає живий чат Іри (особисті, далі агент-асистент), бот лише видає й приймає оплату.
+IRA_DM_URL = os.getenv("IRA_DM_URL", "https://t.me/iryna_rul_studio").strip()
+KURS_ALBUM = ["static/kurs/kurs-%d.jpg" % i for i in (1, 2, 3, 4)]
+KURS_ALBUM_CAP = "Ретуш Іри: до і після. Шкіра лишається шкірою."
+
+
+def send_kurs_album(chat_id):
+    """Чотири пари до/після одним альбомом; перший раз заливаємо файлами, далі file_id з kv."""
+    try:
+        fids = (store.kv_get("pic:kurs_album") or "").split(",")
+        if len(fids) == len(KURS_ALBUM) and all(fids):
+            media = [{"type": "photo", "media": f} for f in fids]
+            media[0]["caption"] = KURS_ALBUM_CAP
+            if api("sendMediaGroup", retry=True, chat_id=chat_id, media=media):
+                return True
+        here = os.path.dirname(os.path.abspath(__file__))
+        files = {"p%d" % i: open(os.path.join(here, f), "rb") for i, f in enumerate(KURS_ALBUM)}
+        try:
+            media = [{"type": "photo", "media": "attach://p%d" % i} for i in range(len(KURS_ALBUM))]
+            media[0]["caption"] = KURS_ALBUM_CAP
+            j = requests.post(API + "/sendMediaGroup", data={"chat_id": chat_id, "media": json.dumps(media)},
+                              files=files, timeout=60).json()
+        finally:
+            for f in files.values():
+                f.close()
+        if j.get("ok"):
+            store.kv_set("pic:kurs_album", ",".join(m["photo"][-1]["file_id"] for m in j["result"]))
+            return True
+        log.warning("send_kurs_album: %s", j.get("description"))
+    except Exception as e:
+        log.warning("send_kurs_album: %s", e)
+    return False
 
 
 def ask_set(uid, what):

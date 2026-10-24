@@ -29,7 +29,7 @@ bot.cold = lambda uid: False
 bot.pick_product(7, 7, {"id": 7}, "k12z", gate=False)
 uid, text, kb = out[-1]
 rows = [r[0].get("callback_data") or r[0].get("url", "")[:5] for r in kb["inline_keyboard"]]
-assert rows[1] == "ask:kurs", rows
+assert kb["inline_keyboard"][1][0].get("url") == bot.IRA_DM_URL, rows
 assert "Все структуровано та зрозуміло!" in text and str(bot.PRODUCTS["k12z"]["uah"]) in text, text
 assert "dorogo" not in str(kb) and kv.get("kurs_pershyi:7"), kb
 
