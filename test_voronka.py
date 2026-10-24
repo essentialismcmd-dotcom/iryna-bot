@@ -118,13 +118,12 @@ ok("magnet з підпискою: Т3 + файл", texts(791)[:1] == [bot.GIFT_S
 V.clear(); cb(791, "magnet")
 ok("magnet вдруге: «уже у вас», без файла", texts(791) == [bot.SUB_ALREADY] and not docs(791), texts(791))
 
-# ---- невідомо (бот не адмін): людині «подивлюсь сама», персоналу кнопка подарунка
+# ---- невідомо (бот не адмін): з 24.10 файл одразу, персоналу сповіщення
 user_obj[790] = user(790); MEMBER[790] = "err"; V.clear()
 cb(790, "sub:check")
-ok("невідомо: Т «подивлюсь сама» з кнопками", texts(790) == [bot.SUB_UNKNOWN] and "Я підписалась" in names(msgs(790)[0]), texts(790))
-st = [p for m, p in V if m == "sendMessage" and p.get("chat_id") == 1]
-ok("персоналу сповіщення з «🎁 Подарунок»", st and "podar:790" in json.dumps(st[-1].get("reply_markup")), st)
-ok("файла не було", not docs(790))
+ok("невідомо (24.10): файл одразу, без «подивлюсь сама»", texts(790)[:1] == [bot.GIFT_SUB] and len(docs(790)) == 1, texts(790))
+st = [p for m, p in V if p.get("chat_id") == 1 and "text" in p]
+ok("персоналу сповіщення «без перевірки»", st and any("без перевірки" in (p.get("text") or "") for p in st), st)
 
 # ---- п.1: done уроку 1.5 з кабінету
 user_obj[778] = user(778); MEMBER[778] = "left"; V.clear()

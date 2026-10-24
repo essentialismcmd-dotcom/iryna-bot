@@ -9,12 +9,13 @@ store.touch_candidates = lambda *a, **k: [(1, "t"), (2, "t"), (3, "t"), (4, "t")
 store.kv_get = lambda k: kv.get(k)
 store.kv_claim = lambda k: k not in kv and not kv.__setitem__(k, "c")
 store.kv_prefix = lambda pre: [(k, v) for k, v in kv.items() if k.startswith(pre)]
+store.kv_take = lambda k, lim: True
 store.kv_set = lambda k, v: kv.__setitem__(k, v)
 store.log_event = lambda *a, **k: None
 store.user_texts = lambda uid: ""
 bot.owned_keys = lambda uid, real=False: []
 bot.send = lambda uid, text, kb=None: sent.append((uid, text)) or True
-bot.give_shema4 = lambda uid: got.append((uid, "shema4"))
+bot.give_shema4 = lambda uid, **k: got.append((uid, "shema4"))
 bot.give_preset = lambda uid, keys=None: got.append((uid, "preset"))
 bot.GIFT_FOR_SUB = True
 bot.touch_run(datetime(2026, 10, 25, 9, 0, tzinfo=timezone.utc))      # 12:00 Київ
