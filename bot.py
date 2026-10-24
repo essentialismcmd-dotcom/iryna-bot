@@ -1412,6 +1412,10 @@ GIFT_DONE = _GIFT_DONE_SUB if GIFT_FOR_SUB else _GIFT_DONE_AUTO
 TOUCH_D1_LESSON = "Урок чекає на вас ♥️ 7 хвилин, коли буде зручно"       # Д1, ще не додивилась
 TOUCH_D2_HAJD = ("Три схеми у вас. Усі тринадцять, з розстановкою і кадром, у гайді «Світло», "
                  "%d грн, доступ назавжди.")                                  # Д2, ціна з GUIDE_PRICE
+TOUCH_D2_PRESET = ("Як вам пресет? Якщо на вашому кадрі ліг не так, спробуйте фото з м'якшим світлом, він під це зроблений. "
+                   "А якщо хочете, щоб ваші кадри виглядали як мої від зйомки до ретуші, ось гайд ♥️")   # 24.10, Д2 після пресета
+TOUCH_D2_SHEMA4 = ("Схема з циклорамою у вас. Усі тринадцять, з розстановкою і кадром, у гайді «Світло», "
+                   "%d грн, доступ назавжди.")                                # 24.10, Д2 після схеми 4
 # Ворота ціни (п.4-6): Т9, запрошення без ціни; ціна лише після кнопки «Розкажіть про курс».
 ZAPR_TEXT = (
     "Хочу розповісти про свій курс ретуші ♥️ Він для тих, кого лякає Photoshop, а гарні кадри хочеться. "
@@ -1985,18 +1989,24 @@ def touch_run(now=None):
             n += 1 if ok else 0
         except Exception:
             log.exception("touch_d1 %s", uid)
-    for uid, _got in store.touch_candidates(GIFT_SINCE, TOUCH_D2[0], TOUCH_D2[1], skip, "touch_d2:", with_gift=True, any_tag=True) or []:
+    for uid, got in store.touch_candidates(GIFT_SINCE, TOUCH_D2[0], TOUCH_D2[1], skip, "touch_d2:", with_gift=True, any_tag=True) or []:
         try:
             if owned_keys(uid, real=True) or store.kv_get("hajd199:" + str(uid)) or not _touch_ok(uid):
                 continue
             if not store.kv_claim("touch_d2:" + str(uid)):
                 continue
             kb = {"inline_keyboard": [[{"text": TIERS["t1"]["btn"], "callback_data": "guide"}]]}
-            ok = send(uid, TOUCH_D2_HAJD % _G, kb)
+            if got:                                        # схеми є: як було
+                text, what = TOUCH_D2_HAJD % _G, "shemy"
+            elif store.kv_get("shema4_given:" + str(uid)):
+                text, what = TOUCH_D2_SHEMA4 % _G, "shema4"
+            else:                                          # 24.10: лише пресет (реклама preset_*)
+                text, what = TOUCH_D2_PRESET, "preset"
+            ok = send(uid, text, kb)
             if ok:
                 store.kv_set("hajd199:" + str(uid), "touch_d2")
             store.log_event(uid, "hajd199", {"via": "touch_d2", "ok": bool(ok)})
-            store.log_event(uid, "touch", {"step": "d2", "ok": bool(ok)})
+            store.log_event(uid, "touch", {"step": "d2", "after": what, "ok": bool(ok)})
             n += 1 if ok else 0
         except Exception:
             log.exception("touch_d2 %s", uid)

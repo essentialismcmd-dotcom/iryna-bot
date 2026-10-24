@@ -603,7 +603,9 @@ def touch_candidates(since_iso, lo_h, hi_h, skip_ids, skip_kv, with_gift=False, 
     без оплачених покупок, без 403 (kv blocked:), без вже зробленого дотику (kv skip_kv<id>).
     with_gift: лише ті, хто вже отримав схеми світла (got_magnet_at). Повертає [(user_id, got_magnet_at)].
     any_tag (24.10, Д2): будь-яка мітка, бо preset, mc, shema2, shema4 дотиків не отримували зовсім."""
-    gift = "and u.got_magnet_at is not null" if with_gift else ""
+    # 24.10: подарунок це й пресет чи схема 4 (preset_given:<id>[:ключі], shema4_given:<id>), інакше люди з реклами пресетів Д2 не мали
+    gift = """and (u.got_magnet_at is not null or exists (select 1 from kv where kv.k = 'shema4_given:' || u.user_id::text
+              or kv.k = 'preset_given:' || u.user_id::text or kv.k like 'preset_given:' || u.user_id::text || ':%%'))"""         if with_gift else ""
     tag = "true" if any_tag else "(u.source_tag like 'retush%%' or u.source_tag in ('svitlo', 'profil', 'storis', 'svit'))"
     rows = q("""
         select u.user_id, u.got_magnet_at from users u
