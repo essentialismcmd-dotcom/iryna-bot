@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import bot, store
 
 sent, kv = [], {"shema4_given:2": "1"}
-store.touch_candidates = lambda *a, **k: [(1, "t"), (2, None), (3, None)] if k.get("with_gift") else []
+store.touch_candidates = lambda *a, **k: [(1, "t"), (2, None), (3, None)] if k.get("with_gift") and a[1] == bot.TOUCH_D2[0] else []
 store.kv_get = lambda k: kv.get(k)
 store.kv_claim = lambda k: kv.setdefault(k, "c") == "c"
 store.kv_set = lambda k, v: kv.__setitem__(k, v)

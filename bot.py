@@ -1936,6 +1936,11 @@ def gift_late_run(now=None):
 
 TOUCH_D1 = (20, 36)      # годин після входу: нижня межа ~20 год; верхня 36, щоб ніч не з'їла вікно (10:00-20:00 Київ)
 TOUCH_D2 = (44, 60)
+# 24.10, Yaro «раз на тиждень корисне… по-любому так робимо»: Т1 через 5+ днів тим, хто взяв подарунок і не купив.
+# Корисне замість «купи»: схема 4, якщо її нема, інакше пресет; продаж лише карткою гайда після файлу.
+# Т2 і Т3 (через 7 днів, максимум три) додаємо після розбору, як люди відреагували на Т1.
+TOUCH_W1 = (120, 24 * 60)
+TOUCH_W1_LEAD = "Привіт, це Іра ♥️ Давно не писала, тож маю для вас ще один подарунок."
 
 
 def _touch_ok(uid):
@@ -2010,6 +2015,30 @@ def touch_run(now=None):
             n += 1 if ok else 0
         except Exception:
             log.exception("touch_d2 %s", uid)
+    for uid, got in store.touch_candidates(GIFT_SINCE, TOUCH_W1[0], TOUCH_W1[1], skip, "touch_w1:", with_gift=True, any_tag=True) or []:
+        try:
+            if owned_keys(uid, real=True) or not _touch_ok(uid):
+                continue
+            if not store.kv_get("shema4_given:" + str(uid)):
+                what = "shema4"
+            elif not store.kv_get("preset_given:" + str(uid)):
+                what = "preset"
+            else:
+                what = None                                # усе корисне вже має: Т1 пропускаємо, щоб не займала чергу
+            if not store.kv_claim("touch_w1:" + str(uid)):
+                continue
+            if not what:
+                store.log_event(uid, "touch", {"step": "w1", "after": "nothing"})
+                continue
+            ok = send(uid, TOUCH_W1_LEAD)
+            if ok and what == "shema4" and store.kv_claim("shema4_given:" + str(uid)):
+                give_shema4(uid)
+            elif ok and what == "preset" and store.kv_claim("preset_given:" + str(uid)):
+                give_preset(uid, ["kolir1"])
+            store.log_event(uid, "touch", {"step": "w1", "after": what, "ok": bool(ok)})
+            n += 1 if ok else 0
+        except Exception:
+            log.exception("touch_w1 %s", uid)
     return n
 
 
