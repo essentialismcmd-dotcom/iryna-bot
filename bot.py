@@ -1348,7 +1348,7 @@ def pick_product(chat_id, uid, u, data, gate=True):
 
 # 25.10, слово Yaro: продає живий чат Іри (особисті, далі агент-асистент), бот лише видає й приймає оплату.
 IRA_DM_URL = os.getenv("IRA_DM_URL", "https://t.me/iryna_rul_studio").strip()
-KURS_ALBUM = ["static/kurs/kurs-%d.jpg" % i for i in (1, 2, 3)]
+KURS_ALBUM = ["static/kurs/kurs-%d.jpg" % i for i in (1, 2, 3, 4, 5)]
 KURS_ALBUM_CAP = "Ретуш Іри: до і після. Шкіра лишається шкірою."
 
 
