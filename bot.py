@@ -1940,6 +1940,7 @@ TOUCH_D2 = (44, 60)
 # Корисне замість «купи»: схема 4, якщо її нема, інакше пресет; продаж лише карткою гайда після файлу.
 # Т2 і Т3 (через 7 днів, максимум три) додаємо після розбору, як люди відреагували на Т1.
 TOUCH_W1 = (120, 24 * 60)
+TOUCH_W1_FROM = datetime(2026, 10, 25, 7, 0, tzinfo=timezone.utc)   # старт неділя 10:00 Київ, як обіцяли Yaro
 TOUCH_W1_LEAD = "Привіт, це Іра ♥️ Давно не писала, тож маю для вас ще один подарунок."
 
 
@@ -2015,7 +2016,7 @@ def touch_run(now=None):
             n += 1 if ok else 0
         except Exception:
             log.exception("touch_d2 %s", uid)
-    for uid, got in store.touch_candidates(GIFT_SINCE, TOUCH_W1[0], TOUCH_W1[1], skip, "touch_w1:", with_gift=True, any_tag=True) or []:
+    for uid, got in (now >= TOUCH_W1_FROM and store.touch_candidates(GIFT_SINCE, TOUCH_W1[0], TOUCH_W1[1], skip, "touch_w1:", with_gift=True, any_tag=True)) or []:
         try:
             if owned_keys(uid, real=True) or not _touch_ok(uid):
                 continue
