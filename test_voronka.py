@@ -103,7 +103,7 @@ ok("kv gift:777 і sub_ok:777", KV.get("gift:777") and KV.get("sub_ok:777"))
 
 V.clear()
 cb(777, "sub:check")
-ok("вдруге: «уже у вас», другого файла нема", texts(777) == [bot.SUB_ALREADY] and not docs(777), texts(777))
+ok("вдруге (24.10): «уже ваш» і той самий файл ще раз", texts(777)[:1] == [bot.FREE_AGAIN] and len(docs(777)) == 1, texts(777))
 
 # ---- п.1: кнопка «Забрати три схеми світла» (голий /start, «Мої матеріали») теж за підписку
 user_obj[791] = user(791, tag=""); MEMBER[791] = "left"; V.clear()
@@ -116,7 +116,7 @@ V.clear(); MEMBER[791] = "member"
 cb(791, "magnet")
 ok("magnet з підпискою: Т3 + файл", texts(791)[:1] == [bot.GIFT_SUB] and len(docs(791)) == 1 and 791 in MAGNET, texts(791))
 V.clear(); cb(791, "magnet")
-ok("magnet вдруге: «уже у вас», без файла", texts(791) == [bot.SUB_ALREADY] and not docs(791), texts(791))
+ok("magnet вдруге (24.10): «уже ваш» і файл ще раз", texts(791)[:1] == [bot.FREE_AGAIN] and len(docs(791)) == 1, texts(791))
 
 # ---- невідомо (бот не адмін): з 24.10 файл одразу, персоналу сповіщення
 user_obj[790] = user(790); MEMBER[790] = "err"; V.clear()

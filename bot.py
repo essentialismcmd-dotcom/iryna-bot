@@ -1707,8 +1707,8 @@ def sub_check(chat_id, uid, u):
                 store.log_event(uid, "preset", {"via": "sub"})
                 _preset_wait_clear(uid)
                 return
-            # 22.10: пресет уже має (Alena 465273166 тиснула «Забрати три схеми» 6 разів і чула про пресет):
-            # мітку знімаємо і йдемо далі до схем
+            # 22.10: пресет уже має (Alena 465273166 тиснула «Забрати три схеми» 6 разів і чула про пресет);
+            # мітку знімаємо і йдемо далі до схем (повторний лінк з пресетом на руках сюди вже не доходить, free_again у /start)
             _preset_wait_clear(uid)
         if shema4_wait(uid):                      # 22.10: прийшла по схему 4 (циклорама), раз назавжди
             if store.kv_claim("shema4_given:" + str(uid)):
@@ -1717,7 +1717,7 @@ def sub_check(chat_id, uid, u):
                 _shema4_wait_clear(uid)
                 return
             _shema4_wait_clear(uid)                # уже має: далі до трьох схем
-        if not give_gift(uid, GIFT_SUB):
+        if not give_gift(uid, GIFT_SUB) and not free_again(chat_id, uid, ["shemy"]):
             send(chat_id, SUB_ALREADY)
         return
     if inn is False:
@@ -1856,6 +1856,16 @@ def give_preset(chat_id, keys=None):
     (картка магніту, кнопки як після схем). 23.10: keys = пресети з кадрів реклами, з якої прийшла людина."""
     keys = [k for k in (keys or ["kolir1"]) if k in PRESETS] or ["kolir1"]
     send(chat_id, preset_hello(keys))
+    if not send_preset_files(chat_id, keys):
+        return
+    send(chat_id, preset_howto(keys))
+    after = PRESET_AFTER.format(kogo=PRESETS[keys[0]]["kogo"])
+    if len(keys) > 1:
+        after = after.replace("Пресет дає колір. Він з мого кадру %s" % PRESETS[keys[0]]["kogo"], "Пресети дають колір. Кожен з мого кадру")
+    send_card(chat_id, CARD_MAGNIT, after, after_kb())
+
+
+def send_preset_files(chat_id, keys):
     for k in keys:
         p = PRESETS[k]
         try:
@@ -1866,12 +1876,77 @@ def give_preset(chat_id, keys=None):
             blob = None
         if not blob or not send_file(chat_id, os.path.basename(p["file"]), blob, caption="Iryna Rul · %s (.xmp)" % p["name"]):
             send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
-            return
-    send(chat_id, preset_howto(keys))
-    after = PRESET_AFTER.format(kogo=PRESETS[keys[0]]["kogo"])
-    if len(keys) > 1:
-        after = after.replace("Пресет дає колір. Він з мого кадру %s" % PRESETS[keys[0]]["kogo"], "Пресети дають колір. Кожен з мого кадру")
-    send_card(chat_id, CARD_MAGNIT, after, after_kb())
+            return False
+    return True
+
+
+# 24.10 (Yaro: «в мої матеріали безкоштовні продукти теж треба додати»; аудит: 105 повернень по тому самому лінку
+# бачили підписку вдруге і «подарунок уже у вас» без кнопок): безкоштовне видно в «Мої матеріали», повтор
+# мітки чи «Я підписалась» з подарунком на руках дає файл ще раз, без воріт.
+FREE_AGAIN = "Цей подарунок уже ваш ♥️ Надсилаю ще раз, а все ваше завжди лежить у «Мої матеріали»."
+
+
+def free_owned(uid):
+    """Безкоштовне, що людина вже має: shemy (три схеми), shema4, p:<ключ пресету>."""
+    out = []
+    try:
+        u = store.get_user(uid) or {}
+        if u.get("got_magnet_at"):
+            out.append("shemy")
+        if store.kv_get("shema4_given:" + str(uid)):
+            out.append("shema4")
+        keys = ["kolir1"] if store.kv_get("preset_given:" + str(uid)) else []
+        for k, _v in store.kv_prefix("preset_given:" + str(uid) + ":") or []:
+            keys += [x for x in k.rsplit(":", 1)[1].split(",") if x in PRESETS]
+        out += ["p:" + k for k in dict.fromkeys(keys)]
+    except Exception as e:
+        log.warning("free_owned %s: %s", uid, e)
+    return out
+
+
+def free_name(w):
+    if w == "shemy":
+        return "Три схеми світла"
+    if w == "shema4":
+        return "Схема 4 · циклорама"
+    return "Пресет «%s»" % PRESETS[w[2:]]["name"]
+
+
+def moi_kb(uid):
+    """«Мої матеріали»: куплене (lessons_kb) і безкоштовне."""
+    rows = list((lessons_kb(uid) or {}).get("inline_keyboard") or [])
+    rows += [[{"text": free_name(w), "callback_data": "my:free:" + w}] for w in free_owned(uid)]
+    return {"inline_keyboard": rows} if rows else None
+
+
+def resend_free(chat_id, uid, w):
+    """Безкоштовне ще раз, без воріт підписки. False = такого в людини нема."""
+    if w not in free_owned(uid):
+        return False
+    store.log_event(uid, "free_again", {"what": w})
+    if w == "shemy":
+        rows = guide_rows()
+        ref = magnet_ref()
+        if not ref or not api("sendDocument", retry=True, chat_id=chat_id, document=ref,
+                              reply_markup={"inline_keyboard": rows} if rows else None):
+            send(chat_id, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
+    elif w == "shema4":
+        give_shema4(chat_id, hello=False)
+    elif send_preset_files(chat_id, [w[2:]]):
+        rows = guide_rows()
+        send(chat_id, preset_howto([w[2:]]), {"inline_keyboard": rows} if rows else None)
+    return True
+
+
+def free_again(chat_id, uid, ws):
+    """Повторний вхід з подарунком на руках: одне «вже ваш» і файли. True = віддали, ворота не потрібні."""
+    have = free_owned(uid)
+    if not ws or not all(w in have for w in ws):
+        return False
+    send(chat_id, FREE_AGAIN)
+    for w in ws:
+        resend_free(chat_id, uid, w)
+    return True
 
 
 def give_gift(uid, text):
@@ -5188,7 +5263,7 @@ def hook():
 
             if text.startswith("/moi") or text.strip() == "Мої матеріали":
                 store.touch_user(u)
-                kb = lessons_kb(uid)
+                kb = moi_kb(uid)
                 send(chat_id, MOI_TEXT if kb else moi_empty(uid), kb or empty_kb(uid))
                 return "ok"
 
@@ -5253,11 +5328,15 @@ def hook():
                 elif src == PRESET_TAG or src in PRESET_AD_TAGS:
                     bg(store.log_event, uid, "preset_entry", {"tag": src})
                     pk = preset_keys_for(src)                           # 23.10: пресет з кадру цієї реклами
+                    if free_again(chat_id, uid, ["p:" + k for k in pk]):
+                        return "ok"                                     # 24.10: уже має, без воріт
                     store.kv_set("preset_wait:" + str(uid), "1" if pk == ["kolir1"] else ",".join(pk))     # файл після «Я підписалась»
                     _shema4_wait_clear(uid)                             # 22.10: останній лінк головний
                     send_card(chat_id, START_PIC, PRESET_HELLO_SUB, svitlo_kb(PRESET_TAG))
                 elif src == SHEMA4_TAG:
                     bg(store.log_event, uid, "shema4_entry", {"tag": src})
+                    if free_again(chat_id, uid, ["shema4"]):
+                        return "ok"
                     store.kv_set("shema4_wait:" + str(uid), "1")     # файл після «Я підписалась»
                     _preset_wait_clear(uid)                             # 22.10: 5413676351 прийшла по схему, а дістала пресет
                     send_card(chat_id, START_PIC, SHEMA4_HELLO_SUB, svitlo_kb(SHEMA4_TAG))
@@ -5265,7 +5344,8 @@ def hook():
                     # 16.10: реклама (svitlo) і шапка Instagram (profil): привіт про три схеми, «Канал» + «Я підписалась»,
                     # файл після sub:check; без уроку ретуші і ціни, далі Д2 (гайд 199) як у тих, хто має подарунок
                     bg(store.log_event, uid, "svitlo_entry", {"tag": src})
-                    send_card(chat_id, START_PIC, SVITLO_HELLOS[src], svitlo_kb(src))
+                    if not free_again(chat_id, uid, ["shemy"]):
+                        send_card(chat_id, START_PIC, SVITLO_HELLOS[src], svitlo_kb(src))
                 elif src == HAJD_TAG:
                     bg(store.log_event, uid, "guide_entry", {"tag": src})
                     if not GUIDE_SALE:
@@ -5454,8 +5534,11 @@ def hook():
                 kabinet_mist.push_user(uid)
                 notify("ТЕСТ оплати: " + pname(key) + "\n" + who(u), uid=uid)
             elif data == "moi":
-                kb = lessons_kb(uid)
+                kb = moi_kb(uid)
                 send(chat_id, MOI_TEXT if kb else moi_empty(uid), kb or empty_kb(uid))
+            elif data.startswith("my:free:"):
+                if not resend_free(chat_id, uid, data[8:]):
+                    send(chat_id, moi_empty(uid), empty_kb(uid))
             elif data == "my:guide":
                 if "t1" in owned_keys(uid) and guide_ref():
                     api("sendDocument", chat_id=chat_id, document=guide_ref())
