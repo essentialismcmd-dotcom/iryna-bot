@@ -1355,7 +1355,7 @@ KURS_ALBUM_CAP = "Ретуш Іри: до і після. Шкіра лишаєт
 def send_kurs_album(chat_id):
     """Чотири пари до/після одним альбомом; перший раз заливаємо файлами, далі file_id з kv."""
     try:
-        fids = (store.kv_get("pic:kurs_album") or "").split(",")
+        fids = (store.kv_get("pic:kurs_album_navpil") or "").split(",")
         if len(fids) == len(KURS_ALBUM) and all(fids):
             media = [{"type": "photo", "media": f} for f in fids]
             media[0]["caption"] = KURS_ALBUM_CAP
@@ -1372,7 +1372,7 @@ def send_kurs_album(chat_id):
             for f in files.values():
                 f.close()
         if j.get("ok"):
-            store.kv_set("pic:kurs_album", ",".join(m["photo"][-1]["file_id"] for m in j["result"]))
+            store.kv_set("pic:kurs_album_navpil", ",".join(m["photo"][-1]["file_id"] for m in j["result"]))
             return True
         log.warning("send_kurs_album: %s", j.get("description"))
     except Exception as e:
