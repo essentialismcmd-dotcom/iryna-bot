@@ -2022,8 +2022,8 @@ def touch_run(now=None):
                 continue
             if not store.kv_get("shema4_given:" + str(uid)):
                 what = "shema4"
-            elif not store.kv_get("preset_given:" + str(uid)):
-                what = "preset"
+            elif not (store.kv_get("preset_given:" + str(uid)) or store.kv_prefix("preset_given:" + str(uid) + ":")):
+                what = "preset"            # пресет з реклами («Марія», «Єва») теж рахується
             else:
                 what = None                                # усе корисне вже має: Т1 пропускаємо, щоб не займала чергу
             if not store.kv_claim("touch_w1:" + str(uid)):

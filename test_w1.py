@@ -4,10 +4,11 @@ os.environ.setdefault("BOT_TOKEN", "x")
 from datetime import datetime, timezone
 import bot, store
 
-sent, kv, got = [], {"shema4_given:2": "1", "shema4_given:3": "1", "preset_given:3": "1", "touch_w1:4": "1"}, []
-store.touch_candidates = lambda *a, **k: [(1, "t"), (2, "t"), (3, "t"), (4, "t")] if a[1] == bot.TOUCH_W1[0] else []
+sent, kv, got = [], {"shema4_given:2": "1", "shema4_given:3": "1", "preset_given:3": "1", "touch_w1:4": "1", "shema4_given:5": "1", "preset_given:5:mariia": "1"}, []
+store.touch_candidates = lambda *a, **k: [(1, "t"), (2, "t"), (3, "t"), (4, "t"), (5, "t")] if a[1] == bot.TOUCH_W1[0] else []
 store.kv_get = lambda k: kv.get(k)
 store.kv_claim = lambda k: k not in kv and not kv.__setitem__(k, "c")
+store.kv_prefix = lambda pre: [(k, v) for k, v in kv.items() if k.startswith(pre)]
 store.kv_set = lambda k, v: kv.__setitem__(k, v)
 store.log_event = lambda *a, **k: None
 store.user_texts = lambda uid: ""
