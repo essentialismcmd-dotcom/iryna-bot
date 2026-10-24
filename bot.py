@@ -474,15 +474,15 @@ for _k, _c in (("k1", "4"), ("k2", "5"), ("k12", "6")):
 # оплату звіряли саме зі зниженою сумою; видається як звичайний курс k12.
 KURS_ZNYZHKA = 10
 _K12Z = int(round(_K12 * (100 - KURS_ZNYZHKA) / 100.0))
-PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=(
-    "Курс ретуші, " + str(_K12) + " грн\n"
-    "Зараз знижка " + str(KURS_ZNYZHKA) + " %: " + str(_K12Z) + " грн\n\n"
-    "Після курсу ви самі доводите портрет до мого вигляду: шкіра без «пластику», обʼєм, колір.\n\n"
-    "Усередині: 18 відео, близько 135 хвилин, 4 уроки: бʼюті-портрет, "
-    "темний фон, фешн-колір, колір і пресети Іри. "
-    "Доступ назавжди. Увесь курс відкривається одразу після оплати.\n\n"
-    "З відгуку учениці: «Все структуровано та зрозуміло!»\n\n"
-    "Сумніваєтесь, чи підійде саме вам? Тисніть «Є питання до Іри»."))   # 24.10 аудит 2: результат і відгук біля ціни
+# 24.10, слова Іри і Yaro: продаємо результат (15 хвилин, без ручного dodge & burn), без вічної «знижки зараз»;
+# рядок ціни дописує kurs_tsina_tekst: особиста 2970 на KURS_VIKNO_H від першої картки, залік гайда.
+KURS_CARD = ("Ретуш портрета за 15 хвилин\n\n"
+             "Швидка спрощена ретуш без ручного dodge & burn. Текстура шкіри зберігається і стає кращою, "
+             "шкіра лишається шкірою.\n\n"
+             "Усередині: 18 відео, близько 135 хвилин: бʼюті-портрет, темний фон, фешн-колір, колір і мої пресети. "
+             "Доступ назавжди, курс відкривається одразу після оплати.\n\n"
+             "«Все структуровано та зрозуміло!» (з відгуку учениці)")
+PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=KURS_CARD + "\n\nЦіна курсу " + str(_K12) + " грн.")
 PRODUCTS["k12z"]["name"] = PRODUCTS["k12"]["name"] + " (знижка " + str(KURS_ZNYZHKA) + " %)"
 BY_CODE = {v["code"]: k for k, v in PRODUCTS.items()}
 
@@ -1322,18 +1322,21 @@ def pick_product(chat_id, uid, u, data, gate=True):
         send_zapr(chat_id, uid)
         return
     code = order_code(uid, data)
+    if data in ("k12", "k12z"):
+        kurs_pershyi(uid, mark=True)              # 24.10: з цієї хвилини йдуть 48 год особистої ціни
     store.add_purchase(uid, t["product"], tier=data, order_code=code,
                        amount_uah=osobysta_tsina(uid, data) or t["uah"])
     store.log_event(uid, "tier_pick", {"tier": data, "code": code})
     # 19.10, слово Yaro: людині нічого вписувати не треба, оплату бот звіряє сам; без PAY_URL код лишається
-    body = t["text"] if PAY_URL else t["text"] + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
+    text = KURS_CARD + "\n\n" + kurs_tsina_tekst(uid) if data in ("k12", "k12z") and uid else t["text"]
+    body = text if PAY_URL else text + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
     if PAY_URL:
         body += ("\n\nПісля оплати курс відкриється тут, зазвичай протягом кількох хвилин."
                  if t["product"] == "course" else
                  "\n\nПісля оплати файл прийде сюди, зазвичай протягом кількох хвилин.")
     kb = pay_kb(data, uid)
     if t["product"] == "course":                   # 24.10 аудит 2: 64 натиснули курс, 4 купили, питати не було як
-        kb["inline_keyboard"].insert(1, [{"text": "Є питання до Іри", "callback_data": "ask:kurs"}])
+        kb["inline_keyboard"].insert(1, [{"text": "Написати Ірі", "callback_data": "ask:kurs"}])
     send(chat_id, body, kb)
     if lead_once(uid, "zayavka:" + data):
         notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
@@ -1777,15 +1780,83 @@ def lesson_done_gift(uid, name):
     send(uid, GIFT_DONE_NOSUB, sub_kb())
 
 
-def osobysta_tsina(uid, key):
-    """Особиста ціна курсу (19.10, слово Yaro): /tsina кладе kv tsina:<id>; для k12/k12z важить більше за PRODUCTS."""
+KURS_VIKNO_H = int(os.getenv("KURS_VIKNO_H", "48"))   # 24.10, слово Yaro: особиста знижка 48 год від першої картки
+
+
+def kurs_pershyi(uid, mark=False):
+    """Коли людина вперше побачила картку курсу (unix-час) або None; mark=True ставить зараз, якщо ще нема."""
+    try:
+        v = store.kv_get("kurs_pershyi:" + str(uid))
+        if v:
+            return int(v)
+        if mark:
+            store.kv_set("kurs_pershyi:" + str(uid), str(int(time.time())))
+            return int(time.time())
+    except Exception as e:
+        log.warning("kurs_pershyi %s: %s", uid, e)
+    return None
+
+
+def kurs_do(uid):
+    """До якого часу (unix) діє особиста знижка. Картки ще не було чи база мовчить: вікно від цієї хвилини."""
+    t = kurs_pershyi(uid) or int(time.time())
+    return t + KURS_VIKNO_H * 3600
+
+
+def kurs_zalik(uid):
+    """24.10, слово Yaro: оплачений гайд зараховується в курс, не більше за нинішню ціну гайда."""
+    try:
+        return min(_G, sum(int(p.get("amount_uah") or 0) for p in (store.purchases_of(uid) or [])
+                           if (p.get("tier") or "") in ("t1", "t2", "t3")))
+    except Exception:
+        return 0
+
+
+_MIS = ("січня", "лютого", "березня", "квітня", "травня", "червня", "липня", "серпня",
+        "вересня", "жовтня", "листопада", "грудня")
+
+
+def kurs_do_tekst(uid):
+    """«23:00, 26 жовтня» за Києвом: кінець особистої ціни, округлений до години вгору."""
+    do = kurs_do(uid)
+    if not do:
+        return ""
+    k = kyiv_now(datetime.fromtimestamp(do + 3599, timezone.utc))
+    return "%02d:00, %d %s" % (k.hour, k.day, _MIS[k.month - 1])
+
+
+def kurs_tsina_tekst(uid):
+    """Рядки ціни під карткою курсу: особиста ціна з годиною кінця і залік гайда."""
+    if store.kv_get("tsina:" + str(uid)):
+        return "Ваша ціна %d грн." % osobysta_tsina(uid, "k12z")
+    zalik = kurs_zalik(uid)
+    vikno = time.time() < kurs_do(uid)
+    if vikno:
+        s = "Ціна курсу %d грн. Для вас %d грн до %s." % (_K12, _K12Z, kurs_do_tekst(uid))
+    else:
+        s = "Ціна курсу %d грн." % _K12
+    if zalik:
+        s += "\n\nГайд «Світло» у вас уже є, його %d грн зараховуються: до сплати %d грн." % (zalik, osobysta_tsina(uid, "k12z"))
+    return s
+
+
+def osobysta_tsina(uid, key, grace=0):
+    """Особиста ціна курсу. kv tsina:<id> (/tsina, 19.10) важить більше за все; інакше 24.10:
+    2970 у вікні KURS_VIKNO_H від першої картки, потім 3300, мінус залік за гайд.
+    grace (с): для звірки оплати, щоб посилання з вікна, оплачене трохи пізніше, пройшло."""
     if key not in ("k12", "k12z") or not uid:
         return None
     try:
         v = store.kv_get("tsina:" + str(uid))
-        return int(v) if v else None
+        if v:
+            return int(v)
     except Exception:
-        return None
+        pass
+    if key != "k12z":
+        return None                               # повний k12 без вікна і заліку, на проді його й нема
+    do = kurs_do(uid)
+    base = _K12Z if time.time() < do + grace else _K12
+    return base - kurs_zalik(uid)
 
 
 def pay_url(uid, key):
@@ -2066,10 +2137,10 @@ TOUCH_W1_LEAD = "Привіт, це Іра ♥️ Ви брали в мене п
 TOUCH_W1_DAY = 25                         # 24.10: перший прогін накопичив ~66 людей, розтягуємо на кілька днів
 
 
-# 24.10 (аудит 2, продажі): хто відкрив картку курсу і не оплатив, через добу одне питання з кнопками заперечень
+# 24.10 (аудит 2, продажі): хто відкрив картку курсу і не оплатив, через добу одне нагадування.
+# Того ж вечора, слово Yaro: без кнопок «дорого / не впевнена», лише строк особистої ціни і кнопка курсу.
 TOUCH_KURS = (20, 36)
-TOUCH_KURS_TEXT = ("Добрий день ♥️ Вчора ви дивились мій курс ретуші. Якщо щось зупинило, скажіть, що саме, "
-                   "підкажу чесно." + TOUCH_STOP)
+TOUCH_KURS_TEXT = ("Добрий день ♥️ Нагадую: ваша ціна на курс ретуші %d грн діє до %s, потім %d грн." + TOUCH_STOP)
 KURS_DOROGO = ("Розумію ♥️ Тоді почніть зі світла: гайд «Світло», усі тринадцять схем з розстановкою і кадром, "
                "%d грн, доступ назавжди. А курс почекає, коли буде час.")
 KURS_POTIM = "Добре ♥️ Курс доступний назавжди після оплати, тож дивитись можна у своєму темпі. Повертайтесь, коли буде зручно."
@@ -2077,10 +2148,7 @@ KURS_POTIM = "Добре ♥️ Курс доступний назавжди п�
 
 def kurs_touch_kb():
     return {"inline_keyboard": [
-        [{"text": "Не певна, чи підійде мені", "callback_data": "ask:kurs"}],
-        [{"text": "Зараз дорого", "callback_data": "kurs:dorogo"}],
-        [{"text": "Нема часу, потім", "callback_data": "kurs:potim"}],
-        [{"text": "Все гаразд, оплачу", "callback_data": "kurs:pay"}]]}
+        [{"text": "Відкрити курс", "callback_data": "kurs:pay"}]]}
 
 
 def _touch_ok(uid):
@@ -2186,7 +2254,11 @@ def touch_run(now=None):
         try:
             if owned_keys(uid, real=True) or not _touch_ok(uid) or not store.kv_claim("touch_kurs:" + str(uid)):
                 continue
-            ok = send(uid, TOUCH_KURS_TEXT, kurs_touch_kb())
+            do = kurs_do(uid)
+            if store.kv_get("tsina:" + str(uid)) or not kurs_pershyi(uid) or time.time() > do - 3 * 3600:
+                continue                          # своя ціна або строк уже минає: нагадувати нема про що
+            ok = send(uid, TOUCH_KURS_TEXT % (osobysta_tsina(uid, "k12z"), kurs_do_tekst(uid),
+                                              _K12 - kurs_zalik(uid)), kurs_touch_kb())
             store.log_event(uid, "touch", {"step": "kurs", "ok": bool(ok)})
             n += 1 if ok else 0
         except Exception:
@@ -3666,7 +3738,8 @@ def claim_nechyia(uid, key):
         d = json.loads(raw)
         if uid not in d.get("uids", []) or time.time() - float(d.get("time") or 0) > NECHYIA_WIN:
             return False
-        if (osobysta_tsina(uid, key) or PRODUCTS.get(key, {}).get("uah", 0)) != d.get("uah"):
+        if d.get("uah") not in (osobysta_tsina(uid, key) or PRODUCTS.get(key, {}).get("uah", 0),
+                                osobysta_tsina(uid, key, grace=86400)):
             return False
         if not store.kv_claim("tx_nechyia_" + str(d.get("id"))):
             return False
@@ -3680,7 +3753,7 @@ def claim_nechyia(uid, key):
 
 def _pay_issue(uid, key, code, amount, how=""):
     """Оплата впізнана: записати, видати, сказати адміну. amount у копійках."""
-    need = (osobysta_tsina(uid, key) or PRODUCTS.get(key, {}).get("uah", 0)) * 100
+    need = (osobysta_tsina(uid, key, grace=86400) or PRODUCTS.get(key, {}).get("uah", 0)) * 100
     if amount < need * 0.9:
         store.log_event(uid, "pay_short", {"code": code, "uah": amount // 100})
         notify("Оплата " + str(amount // 100) + " грн за кодом " + code

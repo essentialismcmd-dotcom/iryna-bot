@@ -31,6 +31,7 @@ uid, text, kb = out[-1]
 rows = [r[0].get("callback_data") or r[0].get("url", "")[:5] for r in kb["inline_keyboard"]]
 assert rows[1] == "ask:kurs", rows
 assert "Все структуровано та зрозуміло!" in text and str(bot.PRODUCTS["k12z"]["uah"]) in text, text
+assert "dorogo" not in str(kb) and kv.get("kurs_pershyi:7"), kb
 
 # питання відкрите 24 год, потім ні
 assert bot.ask_open(7) is None
@@ -39,7 +40,8 @@ assert bot.ask_open(7) == "kurs"
 kv["ask:7"] = "mk:%d" % (time.time() - 25 * 3600)
 assert bot.ask_open(7) is None
 
-# Д-курс: один раз, з кнопками заперечень
+# Д-курс: один раз, лише строк особистої ціни і кнопка курсу
+kv["kurs_pershyi:9"] = str(int(time.time()) - 24 * 3600)
 out.clear()
 store.kurs_pending = lambda lo, hi, skip, pre: [9]
 store.touch_candidates = lambda *a, **k: []
@@ -48,8 +50,8 @@ bot._touch_ok = lambda uid: True
 now = datetime(2026, 10, 26, 10, 0, tzinfo=timezone.utc)     # 12:00 Київ
 bot.touch_run(now)
 bot.touch_run(now)
-assert len(out) == 1 and out[0][1] == bot.TOUCH_KURS_TEXT, out
+assert len(out) == 1 and str(bot._K12Z) in out[0][1] and str(bot._K12) in out[0][1], out
 cb = [r[0]["callback_data"] for r in out[0][2]["inline_keyboard"]]
-assert cb == ["ask:kurs", "kurs:dorogo", "kurs:potim", "kurs:pay"], cb
+assert cb == ["kurs:pay"], cb
 assert "%" not in bot.KURS_DOROGO % bot._G
 print("ok  аудит 2: пресет з назвою, питання до Іри, Д-курс")

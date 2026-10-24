@@ -59,10 +59,10 @@ def btns(p):
 for cmd in ("/start kurs", "/kurs"):
     out = msg(cmd)
     t = (out[0].get("text") or out[0].get("caption") or "") if out else ""
-    ok(cmd + ": одне повідомлення з карткою курсу", len(out) == 1 and "Курс ретуші, 3300 грн" in t, t[:60])
-    ok(cmd + ": що всередині", all(x in t for x in ("18 відео", "135 хвилин", "4 уроки",
+    ok(cmd + ": одне повідомлення з карткою курсу", len(out) == 1 and "Ретуш портрета за 15 хвилин" in t, t[:60])
+    ok(cmd + ": що всередині", all(x in t for x in ("18 відео", "135 хвилин",
        "бʼюті-портрет", "темний фон", "фешн-колір", "пресети", "Доступ назавжди",
-       "Увесь курс відкривається одразу після оплати")))
+       "курс відкривається одразу після оплати")))
     ok(cmd + ": код платежу -7 (знижка всім) у посиланні, без «впишіть»", "впишіть" not in t
        and any("-7" in (b.get("url") or "") for b in btns(out[0])), t[-60:].replace(chr(10), " "))
     ok(cmd + ": без Stars", "Stars" not in t and "star" not in t.lower())
@@ -73,7 +73,7 @@ ok("меню: є /kurs «Курс ретуші»", {"command": "kurs", "descript
 # знижка 10 % для першої покупниці (08.10): ?start=kurs10
 out = msg("/start kurs10")
 t = (out[0].get("text") or "") if out else ""
-ok("kurs10: картка з ціною і знижкою", len(out) == 1 and "3300 грн" in t and "знижка 10 %: 2970 грн" in t, t[:90])
+ok("kurs10: картка з ціною і знижкою", len(out) == 1 and "3300 грн" in t and "2970 грн до " in t, t[:90])
 ok("kurs10: код платежу -7 у посиланні", out and any("-7" in (b.get("url") or "") for b in btns(out[0])))
 u = [b.get("url") or "" for b in btns(out[0])] if out else []
 ok("kurs10: банка на 2970", any("a=2970" in x for x in u), str(u))
