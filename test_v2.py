@@ -101,7 +101,7 @@ ok("три тарифи: «Три варіанти» і три кнопки",
    any("Три варіанти, оберіть свій." in x for x in komu(777)) and len(knopky()) == 3, str(knopky()))
 bot.GUIDE_TIERS[:] = _tiers
 VYKLYKY.clear(); msg("МК")
-ok("МК: текст і кнопка заявки", any("майстер-клас" in x for x in komu(777)) and knopky() == ["Хочу на майстер-клас"])
+ok("МК: текст і кнопка в особисті Іри (25.10)", any("майстер-клас" in x for x in komu(777)) and knopky() == ["Написати Ірі в особисті"])
 ok("МК без ціни в тексті", not any("$" in x or "грн" in x for x in komu(777)))
 VYKLYKY.clear(); cb("mk:want")
 ok("заявка на МК: людині подяка", any("Записала" in x for x in komu(777)))
