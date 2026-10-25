@@ -608,12 +608,16 @@ def touch_candidates(since_iso, lo_h, hi_h, skip_ids, skip_kv, with_gift=False, 
     gift = """and (u.got_magnet_at is not null or exists (select 1 from kv where kv.k = 'shema4_given:' || u.user_id::text
               or kv.k = 'preset_given:' || u.user_id::text or kv.k like 'preset_given:' || u.user_id::text || ':%%'))"""         if with_gift else ""
     tag = "true" if any_tag else "(u.source_tag like 'retush%%' or u.source_tag in ('svitlo', 'profil', 'storis', 'svit'))"
+    # 25.10: Д2 рахуємо від подарунка; хто взяв схеми на 3-й день, від першого входу вікно вже минуло і Д2 не приходив
+    vid = """coalesce(u.got_magnet_at, (select min(kv.updated_at) from kv where kv.k = 'shema4_given:' || u.user_id::text
+              or kv.k = 'preset_given:' || u.user_id::text or kv.k like 'preset_given:' || u.user_id::text || ':%%'),
+              u.created_at)""" if with_gift else "u.created_at"
     rows = q("""
         select u.user_id, u.got_magnet_at from users u
         where """ + tag + """ and u.role = 'client'
           and u.created_at >= %s
-          and u.created_at < now() - make_interval(hours => %s)
-          and u.created_at >= now() - make_interval(hours => %s)
+          and """ + vid + """ < now() - make_interval(hours => %s)
+          and """ + vid + """ >= now() - make_interval(hours => %s)
           and not (u.user_id = any(%s))
           and not exists (select 1 from purchases p where p.user_id = u.user_id
                           and p.status in ('paid', 'delivered'))

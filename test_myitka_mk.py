@@ -113,8 +113,8 @@ ZLAMANE_FOTO.clear()
 
 # 5. інші мітки не зачеплені
 msg("/start kanal")
-ok("/start kanal: як раніше HELLO з магнітом", pobachene() and pobachene()[0][2] == bot.HELLO
-   and pobachene()[0][3] == bot.magnet_kb())
+ok("/start kanal: привіт схем з каналом і «Я підписалась» (25.10)", pobachene() and pobachene()[0][2] == bot.SVITLO_HELLO
+   and pobachene()[0][3] == bot.svitlo_kb("svitlo"))
 
 # 6. /stats: мітка mk окремим рядком
 bot.store.ON = True

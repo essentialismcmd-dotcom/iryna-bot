@@ -74,7 +74,8 @@ KV.clear(); KV["shema4_wait:777"] = "1"
 kb = bot._sub_kb_for(777)
 check("клавіатура з «Я підписалась»", "sub:check" in str(kb))
 
-# 4. старт ?start=shema4 ставить мітку і шле привіт Іри
+# 4. старт ?start=shema4 ставить мітку і шле привіт Іри (25.10: людина ще не в каналі, інакше файл одразу)
+bot.kanal_member_fresh = lambda uid: (False, "ні")
 CALLS.clear(); KV.clear()
 SENT = []
 bot.send_card = lambda chat_id, pic, text, kb=None, **k: SENT.append((chat_id, text, kb))

@@ -232,6 +232,10 @@ KEYWORDS = {
     "мк": "mk", "майстерклас": "mk", "майстер-клас": "mk",
     "курс": "retush", "ретуш": "retush", "ретушь": "retush",
     "зйомка": "shoot", "зйомку": "shoot",
+    # 25.10: люди з ManyChat пишуть слово й у бот, а отримували «напишіть в інстаграм»
+    "пресет": "preset", "пресети": "preset", "preset": "preset",
+    "схеми": "svitlo", "схема": "svitlo", "схем": "svitlo",
+    "циклорама": "shema4",
 }
 MK_TEXT = (
     "Індивідуальний майстер-клас зі світла ♥️\n\n"
@@ -1517,6 +1521,7 @@ PROFIL_HELLO = (
     "Ви прийшли з мого профілю, тут добірка «Три схеми світла з одного сетапу»: три різні картинки за одну зйомку.\n"
     "Віддаю її підписникам каналу «для своїх». Підпишіться, натисніть «Я підписалась», і файл прийде сюди."
 )
+SVITLO_PREFIXES = ("svitlo", "shema2", "mc", "storis", "profil", "koment")   # 25.10: нові мітки ManyChat і реклами йдуть тим самим шляхом
 SVITLO_HELLOS = {"svitlo": SVITLO_HELLO, "profil": PROFIL_HELLO, "storis": SVITLO_HELLO, "svit": SVITLO_HELLO, "shema2": SVITLO_HELLO, "koment": SVITLO_HELLO, "mc": SVITLO_HELLO, "mck": SVITLO_HELLO}
 # 17.10: реклама гайда (креатив Іри 299), ?start=hajd299 одразу дає картку гайда з тарифами, як слово «гайд»;
 # окрема мітка, щоб у /lyudy порівняти з svitlo (вхід, канал, покупка)
@@ -1547,8 +1552,8 @@ PRESETS = {
 }
 # 24.10 Yaro: Мадіну прибрали («там точно не в один клік»); preset_a і preset_d без свого кадру
 PRESET_FOR_TAG = {"preset_b": ("eva",), "preset_c": ("maria",), "preset_e": ("maria",), "preset_f": ("eva",)}
-PRESET_NO_GUARANTEE = ("На іншому кадрі він ляже по-своєму, тож пробуйте різні: у каналі «для своїх» "
-                       "я ділюся пресетами з інших зйомок.")   # 24.10: одне речення замість «не чудо-таблетка» в момент подарунка   # 24.10 Yaro: «потрібно пробувати різні пресети… спонукати залишатися в каналі»
+PRESET_NO_GUARANTEE = ("На іншому кадрі він ляже по-своєму, тож пробуйте різні. "
+                       "Напишіть мені, під який кадр хочете наступний.")   # 25.10: пресет-постів у каналі нема   # 24.10: одне речення замість «не чудо-таблетка» в момент подарунка   # 24.10 Yaro: «потрібно пробувати різні пресети… спонукати залишатися в каналі»
 PRESET_HOWTO = (                            # 24.10: окремим повідомленням після файла, телефон першим
     "Як поставити, це хвилина:\n\n"
     "📱 Lightroom на телефоні (безкоштовний): збережіть файл вище. Відкрийте фото → Presets → «Yours» → "
@@ -1561,7 +1566,7 @@ PRESET_HELLO = (                            # 21.10 Yaro: «по пресету 
     "Дякую, що ви з нами ♥️ Тримайте пресет «Колір 1», файл нижче.\n"
     "Під що він: студійний портрет на імпульсному світлі, темний фон, кадр Марії з відео."
 )
-PRESET_MORE = "Записала ♥️ Готую пак своїх пресетів під різне світло, напишу вам тут, щойно буде готовий."   # 24.10: попит на пак 599
+PRESET_MORE = "Записала ♥️ Іра напише вам особисто."   # 25.10: пака ще нема, обіцянки «скоро» не даємо   # 24.10: попит на пак 599
 
 
 def preset_hello_sub(keys):
@@ -1603,6 +1608,11 @@ SVITLO_REMIND = (                           # Д1 для svitlo/profil без ф
     "Доброго дня ♥️ Три схеми світла чекають: підпишіться на канал «для своїх» і натисніть "
     "«Я підписалась», файл прийде сюди."
 )
+
+PRESET_REMIND = ("Доброго дня ♥️ Пресет чекає: підпишіться на канал «для своїх» і натисніть "
+                 "«Я підписалась», файл прийде сюди.")
+SHEMA4_REMIND = ("Доброго дня ♥️ Схема з циклорамою чекає: підпишіться на канал «для своїх» і натисніть "
+                 "«Я підписалась», файл прийде сюди.")
 
 
 def svitlo_tag(uid):
@@ -1765,7 +1775,9 @@ def _sub_kb_for(uid):
     if shema4_wait(uid):
         return svitlo_kb(SHEMA4_TAG)
     t = svitlo_tag(uid)
-    return svitlo_kb(t) if t else sub_kb()
+    if t or not ((store.get_user(uid) or {}).get("source_tag") or "").startswith("retush"):
+        return svitlo_kb(t or "svitlo")          # 25.10: без мітки вели на запрошення ретуші
+    return sub_kb()
 
 
 def sub_check(chat_id, uid, u):
@@ -1800,12 +1812,57 @@ def sub_check(chat_id, uid, u):
                 _shema4_wait_clear(uid)
                 return
             _shema4_wait_clear(uid)                # уже має: далі до трьох схем
-        if not give_gift(uid, GIFT_SUB) and not free_again(chat_id, uid, ["shemy"]):
-            send(chat_id, SUB_ALREADY)
+        if (not give_gift(uid, GIFT_SUB) and not free_again(chat_id, uid, ["shemy"])
+                and (store.get_user(uid) or {}).get("got_magnet_at")):
+            send(chat_id, SUB_ALREADY)            # 25.10: лише коли файл справді пішов
         return
     if inn is False:
         send(chat_id, SUB_NO, _sub_kb_for(uid))
         return
+
+
+def slovo_podarunok(chat_id, uid, u, k):
+    """25.10: слово «пресет / схеми / циклорама» в чаті бота дає той самий подарунок, що й посилання ManyChat."""
+    have = {"preset": ["p:kolir1"], "svitlo": ["shemy"], "shema4": ["shema4"]}[k]
+    if free_again(chat_id, uid, have):
+        return
+    if k == "preset" and not preset_wait(uid):
+        store.kv_set("preset_wait:" + str(uid), "1")
+    if k == "shema4":
+        store.kv_set("shema4_wait:" + str(uid), "1")
+    if kanal_member_fresh(uid)[0] is True:
+        sub_check(chat_id, uid, u)
+        return
+    hello = {"preset": preset_hello_sub(preset_wait_keys(uid)), "svitlo": SVITLO_HELLO, "shema4": SHEMA4_HELLO_SUB}[k]
+    send_card(chat_id, START_PIC, hello, svitlo_kb({"preset": PRESET_TAG, "svitlo": "svitlo", "shema4": SHEMA4_TAG}[k]))
+
+
+def kanal_vstup(cm):
+    """25.10 (аудит воронки): людина вступила в канал повз «Я підписалась» (кнопка «Канал», інстаграм) і файлу не мала.
+    Telegram шле chat_member, бо бот адмін каналу; хто вже стартував бота й чекає подарунок, отримує його сам."""
+    ch = cm.get("chat") or {}
+    if CHANNEL_ID not in (str(ch.get("id")), "@" + str(ch.get("username") or "")):
+        return
+    new, old = cm.get("new_chat_member") or {}, cm.get("old_chat_member") or {}
+    ins = lambda x: x.get("status") in ("member", "administrator", "creator") or (x.get("status") == "restricted" and x.get("is_member"))
+    if not ins(new) or ins(old):
+        return
+    u = new.get("user") or {}
+    uid = u.get("id")
+    if not uid or u.get("is_bot") or uid in staff_ids():
+        return
+    try:
+        rec = store.get_user(uid)
+        if not rec:
+            return                                # бота не стартувала: написати першими не можемо
+        store.log_event(uid, "kanal_join")
+        if not (preset_wait(uid) or shema4_wait(uid)) and (rec.get("got_magnet_at") or store.kv_get("gift:" + str(uid))):
+            return
+        lock = _user_lock(uid, "sub:check")
+        with lock or threading.Lock():
+            sub_check(uid, uid, u)
+    except Exception:
+        log.exception("kanal_vstup %s", uid)
 
 
 def lesson_done_gift(uid, name):
@@ -2113,10 +2170,13 @@ def give_gift(uid, text):
     ref = magnet_ref()
     if not ref:
         log.warning("gift: нема файла магніту для %s", uid)
+        _gift_fail(uid)
         return False
     send(uid, text)
     # 24.10 (розбір воронки): кнопка гайда одразу під схемами; без неї за годину купили 0 зі 143, з нею 5 з 51
     rows = (channel_rows() if CHANNEL_URL else []) + guide_rows()
+    if courses_sale():                    # 25.10: курс у першій сесії лишається (VORONKA), на цьому шляху його не було
+        rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
     kb = {"inline_keyboard": rows} if rows else None
     ok = bool(api("sendDocument", retry=True, chat_id=uid, document=ref, reply_markup=kb))
     if ok:
@@ -2125,7 +2185,15 @@ def give_gift(uid, text):
         kabinet_mist.push_user(uid)
     else:
         log.warning("gift: PDF не пішов до %s", uid)
+        _gift_fail(uid)
     return ok
+
+
+def _gift_fail(uid):
+    """25.10: позначка «видано» лишалась, і наступний натиск казав «файл надсилала вище», хоча нічого не прийшло."""
+    store.kv_del("gift:" + str(uid))
+    send(uid, "Файл тимчасово недоступний, напишіть Ірині в дірект ♥️")
+    notify("ПОДАРУНОК НЕ ПІШОВ: " + who(store.get_user(uid) or {"id": uid}), uid=uid)
 
 
 def kyiv_now(now=None):
@@ -2209,15 +2277,18 @@ def touch_run(now=None):
         return 0
     skip = [i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i]
     n = 0
-    for uid, got in store.touch_candidates(GIFT_SINCE, TOUCH_D1[0], TOUCH_D1[1], skip, "touch_d1:") or []:
+    for uid, got in store.touch_candidates(GIFT_SINCE, TOUCH_D1[0], TOUCH_D1[1], skip, "touch_d1:", any_tag=True) or []:
         try:
             if owned_keys(uid, real=True) or not _touch_ok(uid):
                 continue
             stag = svitlo_tag(uid)
+            if not stag and not ((store.get_user(uid) or {}).get("source_tag") or "").startswith("retush"):
+                # 25.10: mc, shema2, preset*, shema4, без мітки Д1 не отримували ніколи (понад половина стартів)
+                stag = PRESET_TAG if preset_wait(uid) else SHEMA4_TAG if shema4_wait(uid) else "svitlo"
             if stag:                                       # svitlo/profil: уроку нема, лише нагадування про файл
-                if got or store.kv_get("gift:" + str(uid)) or not store.kv_claim("touch_d1:" + str(uid)):
+                if got or free_owned(uid) or store.kv_get("gift:" + str(uid)) or not store.kv_claim("touch_d1:" + str(uid)):
                     continue
-                ok = send(uid, SVITLO_REMIND, svitlo_kb(stag))
+                ok = send(uid, {PRESET_TAG: PRESET_REMIND, SHEMA4_TAG: SHEMA4_REMIND}.get(stag, SVITLO_REMIND), svitlo_kb(stag))
                 store.log_event(uid, "touch", {"step": "d1", "tag": stag, "ok": bool(ok)})
                 n += 1 if ok else 0
                 continue
@@ -2438,7 +2509,8 @@ def give_guide(uid, tier):
     ref = guide_ref()
     if not ref:
         return False
-    if not api("sendDocument", chat_id=uid, document=ref):
+    if not api("sendDocument", chat_id=uid, document=ref,
+               caption="Оплату отримала ♥️ Гайд «Світло» ваш назавжди, він же лежить у «Мої матеріали»."):
         return False
     extra = TIERS.get(tier, {}).get("extra")
     if extra:
@@ -3795,6 +3867,8 @@ def _pay_issue(uid, key, code, amount, how=""):
         store.log_event(uid, "pay_short", {"code": code, "uah": amount // 100})
         notify("Оплата " + str(amount // 100) + " грн за кодом " + code
                + ", а треба " + str(need // 100) + " грн. " + pname(key) + ": не видано.", uid=uid)
+        send(uid, "Оплату %d грн бачу ♥️ Для «%s» треба %d грн, Іра напише вам тут, щоб закрити різницю."
+             % (amount // 100, pname(key), need // 100))
         return
     if key in PRODUCTS:
         # Оплата з кодом без натиснутого тарифу: рядка покупки нема, mark_paid
@@ -3817,6 +3891,7 @@ def _pay_issue(uid, key, code, amount, how=""):
         notify("Оплата " + str(amount // 100) + " грн, код " + code
                + ", але файл не пішов. " + pname(key) + ": " + ready_text(key),
                give_kb(uid, key), uid=uid, kind="pay")
+        send(uid, "Оплату отримала ♥️ Файл зараз не відправився, Іра надішле його вручну найближчим часом.")
 
 
 def mono_poll():
@@ -4324,7 +4399,7 @@ def kabinet_podiia():
 def setup():
     base = request.url_root.rstrip("/")
     r = api("setWebhook", url=base + "/" + SECRET,
-            allowed_updates=["message", "callback_query"])
+            allowed_updates=["message", "callback_query", "chat_member"])
     return "setWebhook: " + str(r)
 
 
@@ -5290,6 +5365,9 @@ def hook():
                   and not (IRA_ID and _from.get("id") == IRA_ID) else None)
     _held = None
     try:
+        if "chat_member" in upd:
+            kanal_vstup(upd["chat_member"])
+            return "ok"
         if "message" in upd:
             m = upd["message"]
             chat_id = m["chat"]["id"]
@@ -5460,6 +5538,8 @@ def hook():
             if text.startswith("/start"):
                 parts = text.split(None, 1)
                 src = parts[1].strip()[:64] if len(parts) > 1 else ""
+                if not src.lower().startswith("mk_"):
+                    src = src.lower()                   # 25.10: «Preset» з ManyChat падав у загальне привітання
                 # 12.10: мітка партнера retush_<імʼя> = шлях retush, джерело <імʼя> лишається в базі
                 raw_src, partner = src, ""
                 _pm = PARTNER_TAG_RE.fullmatch(src)
@@ -5507,7 +5587,7 @@ def hook():
                     bg(store.log_event, uid, "retush_entry", {"tag": src})
                     send_card_file(chat_id, "static/retush-masky.png", RETUSH_MAGNET_HELLO, retush_magnet_kb())  # обкладинка магніту, без «Студійне світло»
                     kabinet_mist.push_user(uid)   # людина в базі кабінету одразу
-                elif src == PRESET_TAG or src in PRESET_AD_TAGS:
+                elif src == PRESET_TAG or src in PRESET_AD_TAGS or src.startswith(PRESET_TAG):
                     bg(store.log_event, uid, "preset_entry", {"tag": src})
                     pk = preset_keys_for(src)                           # 23.10: пресет з кадру цієї реклами
                     if free_again(chat_id, uid, ["p:" + k for k in pk]):
@@ -5520,19 +5600,26 @@ def hook():
                         sub_check(chat_id, uid, u)                      # 24.10: уже в каналі, ворота зайві
                     else:
                         send_card(chat_id, START_PIC, preset_hello_sub(pk), svitlo_kb(PRESET_TAG))
-                elif src == SHEMA4_TAG:
+                elif src.startswith(SHEMA4_TAG):
                     bg(store.log_event, uid, "shema4_entry", {"tag": src})
                     if free_again(chat_id, uid, ["shema4"]):
                         return "ok"
                     store.kv_set("shema4_wait:" + str(uid), "1")     # файл після «Я підписалась»
                     _preset_wait_clear(uid)                             # 22.10: 5413676351 прийшла по схему, а дістала пресет
-                    send_card(chat_id, START_PIC, SHEMA4_HELLO_SUB, svitlo_kb(SHEMA4_TAG))
-                elif src in SVITLO_TAGS:
+                    if kanal_member_fresh(uid)[0] is True:
+                        sub_check(chat_id, uid, u)                      # 25.10: уже в каналі, ворота зайві
+                    else:
+                        send_card(chat_id, START_PIC, SHEMA4_HELLO_SUB, svitlo_kb(SHEMA4_TAG))
+                elif src in SVITLO_TAGS or src.startswith(SVITLO_PREFIXES):
                     # 16.10: реклама (svitlo) і шапка Instagram (profil): привіт про три схеми, «Канал» + «Я підписалась»,
                     # файл після sub:check; без уроку ретуші і ціни, далі Д2 (гайд 199) як у тих, хто має подарунок
                     bg(store.log_event, uid, "svitlo_entry", {"tag": src})
-                    if not free_again(chat_id, uid, ["shemy"]):
-                        send_card(chat_id, START_PIC, SVITLO_HELLOS[src], svitlo_kb(src))
+                    if free_again(chat_id, uid, ["shemy"]):
+                        pass
+                    elif kanal_member_fresh(uid)[0] is True:
+                        sub_check(chat_id, uid, u)                      # 25.10: уже в каналі, ворота зайві
+                    else:
+                        send_card(chat_id, START_PIC, SVITLO_HELLOS.get(src, SVITLO_HELLO), svitlo_kb(src))
                 elif src == HAJD_TAG:
                     bg(store.log_event, uid, "guide_entry", {"tag": src})
                     if not GUIDE_SALE:
@@ -5560,8 +5647,11 @@ def hook():
                         pick_product(chat_id, uid, u, "k12", gate=False)
                     else:
                         send_retush(chat_id)
-                else:
+                elif free_owned(uid) or kanal_member_fresh(uid)[0] is True:
                     send_card(chat_id, START_PIC, HELLO, magnet_kb())
+                else:
+                    # 25.10: голий /start обіцяв «надішлю файл» без кнопки каналу, а на натиск казав «не бачу вас у каналі»
+                    send_card(chat_id, START_PIC, SVITLO_HELLO, svitlo_kb("svitlo"))
             elif text.split("@")[0].strip() == "/kurs":
                 store.touch_user(u)
                 store.log_event(uid, "kurs_entry", {"tag": "cmd"})
@@ -5585,6 +5675,8 @@ def hook():
                         send_retush(chat_id, uid, u)
                 elif k == "mk":
                     send_card(chat_id, CARD_MK, MK_TEXT, mk_kb())
+                elif k in ("preset", "svitlo", "shema4"):
+                    slovo_podarunok(chat_id, uid, u, k)
                 else:
                     send(chat_id, SHOOT_TEXT)
                     if lead_once(uid, "shoot"):
@@ -5931,7 +6023,7 @@ def poll_loop(gen=None):
         try:
             j = requests.post(API + "/getUpdates", timeout=65, json={
                 "offset": _poll_offset[0], "timeout": 50,
-                "allowed_updates": ["message", "callback_query"]}).json()
+                "allowed_updates": ["message", "callback_query", "chat_member"]}).json()
             _poll_beat[0] = time.time()
             if not j.get("ok"):
                 if j.get("error_code") == 409 or "Conflict" in str(j.get("description")):
@@ -5993,7 +6085,7 @@ def poll_loop(gen=None):
             try:
                 requests.post(API + "/getUpdates", timeout=5, json={
                     "offset": _poll_offset[0], "timeout": 0, "limit": 1,
-                    "allowed_updates": ["message", "callback_query"]})
+                    "allowed_updates": ["message", "callback_query", "chat_member"]})
             except Exception as e:
                 log.warning("poll: підтвердження offset при зупинці: %s", e)
         log.info("poll: зупинено (SIGTERM), offset %s", _poll_offset[0])
@@ -6057,7 +6149,7 @@ def ensure_webhook():
             threading.Thread(target=poll_supervisor, daemon=True, name="poll-supervisor").start()
         else:
             r = api("setWebhook", url=BASE_URL + "/" + SECRET,
-                    allowed_updates=["message", "callback_query"])
+                    allowed_updates=["message", "callback_query", "chat_member"])
             log.info("вебхук поставлений: %s", r)
         api("setMyCommands", commands=PEOPLE_COMMANDS)
         clear_scoped_commands()

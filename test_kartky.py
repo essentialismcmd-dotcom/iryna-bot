@@ -79,8 +79,8 @@ def teksty(uid=777):
 msg("/start")
 f = foto()
 ok("/start: фото START_PIC", len(f) == 1 and f[0]["photo"] == "PIC_START")
-ok("/start: підпис це HELLO дослівно", f and f[0]["caption"] == bot.HELLO)
-ok("/start: кнопка магніта на фото", f and f[0]["reply_markup"] == bot.magnet_kb())
+ok("/start: підпис це SVITLO_HELLO (25.10: нова людина бачить канал і «Я підписалась»)", f and f[0]["caption"] == bot.SVITLO_HELLO)
+ok("/start: канал і «Я підписалась» на фото", f and f[0]["reply_markup"] == bot.svitlo_kb("svitlo"))
 ok("/start: окремого тексту нема", not teksty())
 
 msg("/start guide")
