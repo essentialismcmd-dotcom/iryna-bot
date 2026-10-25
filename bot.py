@@ -4828,6 +4828,18 @@ def navihator():
     return out
 
 
+@app.post("/navihator-pryb/" + SECRET)
+def navihator_pryb():
+    """Назва чату ZAKRIP_CHAT; ?mid=N ще й знімає закріп і видаляє пост N у ньому."""
+    out = "чат %s: %s" % (ZAKRIP_CHAT, (api_raw("getChat", chat_id=ZAKRIP_CHAT).get("result") or {}).get("title"))
+    mid = request.args.get("mid")
+    if mid:
+        u = api_raw("unpinChatMessage", chat_id=ZAKRIP_CHAT, message_id=int(mid))
+        d = api_raw("deleteMessage", chat_id=ZAKRIP_CHAT, message_id=int(mid))
+        out += ", закріп знято: %s, видалено: %s" % (u.get("ok") or u.get("description"), d.get("ok") or d.get("description"))
+    return out
+
+
 @app.get("/pidsumok/" + SECRET)
 def pidsumok_route():
     """Лише читання (23.10): той самий текст, що йде Ірі о 21:00, без надсилання; «нічого» без продажів за день."""
