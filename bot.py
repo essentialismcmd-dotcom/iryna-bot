@@ -4788,6 +4788,46 @@ def pc_kb_view(kb):
     return out
 
 
+# 25.10 (аудит воронки, слово Yaro «спочатку в чернетку»): закріп-навігатор з усіма продуктами, бо канал
+# не вів на жоден платний крок. Без цін (Yaro 21.10). Старий закріп «Хочу на МК» лишається в списку закріплених.
+NAV_TEXT = (
+    "Що в мене є для вас 🤍\n\n"
+    "Тут я показую, як знімаю і ретушую. А все, чим можна забрати це собі, зібрала в одному місці:\n\n"
+    "🔆 Гайд «Світло». Мої робочі схеми з імпульсним світлом, саме ними знімаю на студії. "
+    "Ставите світло як у мене вже на наступній зйомці.\n\n"
+    "🖥 Курс ретуші. Показую, як ретушую сама: шкіра чиста, але жива, з текстурою, а на портрет іде до 15 хвилин. "
+    "Бʼюті, темний фон, fashion і колір. Свою ретуш надсилаєте мені, і я пишу правки по вашій роботі.\n\n"
+    "📸 Майстер-клас зі мною в студії. Ставимо світло, знімаєте самі, розбираємо кадри одразу.\n\n"
+    "🎨 Пресет «Колір 1». Мій колір одним кліком, безкоштовно.\n\n"
+    "Усе відкривається в боті, натискайте на те, що ваше 👇"
+)
+NAV_KB = {"inline_keyboard": [
+    [{"text": "Гайд «Світло»", "url": "https://t.me/iryna_rul_bot?start=hajd299"}],
+    [{"text": "Курс ретуші", "url": "https://t.me/iryna_rul_bot?start=kurs"}],
+    [{"text": "Майстер-клас у студії", "url": "https://t.me/iryna_rul_bot?start=mk"}],
+    [{"text": "Пресет безкоштовно", "url": "https://t.me/iryna_rul_bot?start=preset"}],
+]}
+NAV_OPYS = "Фотограф Іра Руль. Світло, ретуш, колір. Гайд, курс ретуші, МК у студії і безкоштовний пресет: @iryna_rul_bot"
+
+
+@app.post("/navihator/" + SECRET)
+def navihator():
+    """Пост-навігатор з 4 кнопками і закріп. За замовчуванням у чернетку ZAKRIP_CHAT; ?de=kanal лише зі слова Yaro.
+    ?opys=1 ще й ставить опис цього чату."""
+    chat = CHANNEL_ID if request.args.get("de") == "kanal" else ZAKRIP_CHAT
+    r = api_raw("sendMessage", chat_id=chat, text=NAV_TEXT, reply_markup=NAV_KB,
+                link_preview_options={"is_disabled": True})
+    if not r.get("ok"):
+        return "не опубліковано: " + str(r.get("description")), 500
+    mid = r["result"]["message_id"]
+    p = api_raw("pinChatMessage", chat_id=chat, message_id=mid, disable_notification=True)
+    out = "пост %s у %s, закріп: %s" % (mid, chat, p.get("ok") or p.get("description"))
+    if request.args.get("opys"):
+        d = api_raw("setChatDescription", chat_id=chat, description=NAV_OPYS)
+        out += ", опис: %s" % (d.get("ok") or d.get("description"))
+    return out
+
+
 @app.get("/pidsumok/" + SECRET)
 def pidsumok_route():
     """Лише читання (23.10): той самий текст, що йде Ірі о 21:00, без надсилання; «нічого» без продажів за день."""
