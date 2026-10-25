@@ -2523,8 +2523,8 @@ def pidsumok_text():
 def prodazh_mark(target, uah, key="k12"):
     """Ручна видача як продаж (23.10, слово Yaro): kv prodazh:<код> = сума з картки, рядок покупки
     є чи створюється (paid+delivered, дата = зараз, якщо його не було). Повертає (код, текст для персоналу)."""
-    key = "t1" if key in ("t1", "gaid", "guide", "гайд") else "k12"
-    code = order_code(target, key)
+    key = "t1" if key in ("t1", "gaid", "guide", "гайд") else key if key == "k12z" else "k12"
+    code = order_code(target, key)   # k12z: кнопка «Видати вручну» під «оплатив, а файлу немає» видає за кодом k12z (25.10)
     row = store.get_purchase(code)
     if not row:
         store.ensure_purchase(target, PRODUCTS[key]["product"], tier=key, order_code=code, amount_uah=uah)
