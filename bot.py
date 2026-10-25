@@ -4986,6 +4986,11 @@ def vydaty_route():
     if not (g("id").isdigit() and g("uah").isdigit() and key in PRODUCTS):
         return {"ok": False, "error": "id і uah числами, key з PRODUCTS"}, 400
     uid = int(g("id"))
+    if g("uah") == "0":
+        # подарунок (25.10, Юлії гайд за затримку): лише видача, без рядка покупки, щоб не рахувалось продажем
+        ok = deliver(uid, key)
+        store.log_event(uid, "podarunok", {"key": key, "by": g("by"), "ok": ok})
+        return {"ok": ok, "podarunok": key}
     try:
         raw = store.kv_get("tx_nechyia")
         d = json.loads(raw) if raw else {}
