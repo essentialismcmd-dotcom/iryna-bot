@@ -1385,6 +1385,46 @@ def send_kurs_album(chat_id):
     return False
 
 
+# 25.10, слово Yaro: кнопка «Відгуки» в закріпі каналу веде сюди; картки зі скрінами з поста 24.10.
+VIDHUKY_ALBUM = ["static/vidhuky/%d.jpg" % i for i in (1, 2, 3, 4, 5)]
+VIDHUKY_CAP = "Що мені пишуть після зйомок, гайду «Світло» і курсу ♥️ Скріни як є, з Direct і Telegram."
+VIDHUKY_KB = {"inline_keyboard": [
+    [{"text": "Гайд «Світло»", "url": "https://t.me/iryna_rul_bot?start=hajd299"},
+     {"text": "Курс ретуші", "url": "https://t.me/iryna_rul_bot?start=kurs"}],
+    [{"text": "Майстер-клас", "url": "https://t.me/iryna_rul_bot?start=mk"},
+     {"text": "Пресет безкоштовно", "url": "https://t.me/iryna_rul_bot?start=preset"}],
+]}
+
+
+def send_vidhuky(chat_id):
+    """П'ять карток відгуків одним альбомом (як send_kurs_album), далі кнопки на продукти."""
+    try:
+        fids = (store.kv_get("pic:vidhuky_album") or "").split(",")
+        ok = False
+        if len(fids) == len(VIDHUKY_ALBUM) and all(fids):
+            media = [{"type": "photo", "media": f} for f in fids]
+            media[0]["caption"] = VIDHUKY_CAP
+            ok = bool(api("sendMediaGroup", retry=True, chat_id=chat_id, media=media))
+        if not ok:
+            here = os.path.dirname(os.path.abspath(__file__))
+            files = {"p%d" % i: open(os.path.join(here, f), "rb") for i, f in enumerate(VIDHUKY_ALBUM)}
+            try:
+                media = [{"type": "photo", "media": "attach://p%d" % i} for i in range(len(VIDHUKY_ALBUM))]
+                media[0]["caption"] = VIDHUKY_CAP
+                j = requests.post(API + "/sendMediaGroup", data={"chat_id": chat_id, "media": json.dumps(media)},
+                                  files=files, timeout=60).json()
+            finally:
+                for f in files.values():
+                    f.close()
+            if j.get("ok"):
+                store.kv_set("pic:vidhuky_album", ",".join(m["photo"][-1]["file_id"] for m in j["result"]))
+            else:
+                log.warning("send_vidhuky: %s", j.get("description"))
+    except Exception as e:
+        log.warning("send_vidhuky: %s", e)
+    send(chat_id, "Що з цього хочете собі? 👇", VIDHUKY_KB)
+
+
 def ask_set(uid, what):
     try:
         store.kv_set("ask:" + str(uid), "%s:%d" % (what, int(time.time())))
@@ -4792,21 +4832,27 @@ def pc_kb_view(kb):
 # 25.10 (аудит воронки, слово Yaro «спочатку в чернетку»): закріп-навігатор з усіма продуктами, бо канал
 # не вів на жоден платний крок. Без цін (Yaro 21.10). Старий закріп «Хочу на МК» лишається в списку закріплених.
 NAV_TEXT = (
-    "🎁 Ваш пресет і все для фотографів тут ❤️⠀⠀⠀⠀⠀⠀\n\n"
-    "Тут я показую, як знімаю і ретушую. А все, чим можна забрати це собі, зібрала в одному місці:\n\n"
-    "🔆 Гайд «Світло». Мої робочі схеми з імпульсним світлом, саме ними знімаю на студії. "
-    "Ставите світло як у мене вже на наступній зйомці.\n\n"
-    "🖥 Курс ретуші. Показую, як ретушую сама: шкіра чиста, але жива, з текстурою, а на портрет іде до 15 хвилин. "
-    "Бʼюті, темний фон, fashion і колір. Свою ретуш надсилаєте мені, і я пишу правки по вашій роботі.\n\n"
-    "📸 Майстер-клас зі мною в студії. Ставимо світло, знімаєте самі, розбираємо кадри одразу.\n\n"
-    "🎨 Пресет «Колір 1». Мій колір одним кліком, безкоштовно.\n\n"
-    "Усе відкривається в боті, натискайте на те, що ваше 👇"
+    "<b>🎁 Ваш пресет і все для фотографів тут ❤️</b>⠀⠀⠀⠀⠀⠀\n\n"
+    "Тут я показую, як знімаю і ретушую. Усе, що можна забрати собі, зібрала нижче.\n\n"
+    "<b>Гайд «Світло»</b>\n"
+    "<blockquote>Мої робочі схеми з імпульсним світлом, саме ними знімаю на студії. "
+    "Ставите світло як у мене вже на наступній зйомці.</blockquote>\n"
+    "<b>Курс ретуші</b>\n"
+    "<blockquote>Шкіра чиста, але жива, з текстурою, а на портрет іде до 15 хвилин. "
+    "Бʼюті, темний фон, fashion і колір. Свою ретуш надсилаєте мені, і я пишу правки по вашій роботі.</blockquote>\n"
+    "<b>Майстер-клас зі мною в студії</b>\n"
+    "<blockquote>Ставимо світло, знімаєте самі, розбираємо кадри одразу.</blockquote>\n"
+    "<b>Пресет «Колір 1»</b>, безкоштовно\n"
+    "<blockquote>Мій колір одним кліком.</blockquote>\n"
+    "Що пишуть ті, хто вже знімав і вчився, у кнопці <b>«Відгуки»</b>.\n"
+    "<i>Усе відкривається в боті 👇</i>"
 )
 NAV_KB = {"inline_keyboard": [
-    [{"text": "Гайд «Світло»", "url": "https://t.me/iryna_rul_bot?start=hajd299"}],
-    [{"text": "Курс ретуші", "url": "https://t.me/iryna_rul_bot?start=kurs"}],
-    [{"text": "Майстер-клас у студії", "url": "https://t.me/iryna_rul_bot?start=mk"}],
-    [{"text": "Пресет безкоштовно", "url": "https://t.me/iryna_rul_bot?start=preset"}],
+    [{"text": "Гайд «Світло»", "url": "https://t.me/iryna_rul_bot?start=hajd299"},
+     {"text": "Курс ретуші", "url": "https://t.me/iryna_rul_bot?start=kurs"}],
+    [{"text": "Майстер-клас", "url": "https://t.me/iryna_rul_bot?start=mk"},
+     {"text": "Пресет безкоштовно", "url": "https://t.me/iryna_rul_bot?start=preset"}],
+    [{"text": "Відгуки", "url": "https://t.me/iryna_rul_bot?start=vidhuky"}],
     [{"text": "НАПИСАТИ МЕНІ", "url": "https://t.me/iryna_rul_studio"}],
 ]}
 NAV_OPYS = "Фотограф Іра Руль. Світло, ретуш, колір. Гайд, курс ретуші, МК у студії і безкоштовний пресет: @iryna_rul_bot"
@@ -4819,7 +4865,7 @@ def navihator():
     # 25.10: ZAKRIP_CHAT на Render виявився справжнім каналом (-1004366151691), і «чернетка» пішла людям.
     # Тепер чернетка жорстко -1004303013438, а будь-який інший чат лише через ?de=kanal.
     chat = CHANNEL_ID if request.args.get("de") == "kanal" else CHERNETKA
-    r = api_raw("sendMessage", chat_id=chat, text=NAV_TEXT, reply_markup=NAV_KB,
+    r = api_raw("sendMessage", chat_id=chat, text=NAV_TEXT, reply_markup=NAV_KB, parse_mode="HTML",
                 link_preview_options={"is_disabled": True})
     if not r.get("ok"):
         return "не опубліковано: " + str(r.get("description")), 500
@@ -5671,6 +5717,9 @@ def hook():
                     else:
                         kb = tiers_kb()
                         send_card(chat_id, CARD_GUIDE, guide_intro(kb), kb)
+                elif src == "vidhuky":
+                    bg(store.log_event, uid, "vidhuky_entry", {"tag": src})
+                    send_vidhuky(chat_id)
                 elif src == "mk":
                     # мітка закріпу каналу (20.10): коротке привітання і «Дізнатися детальніше»;
                     # картка з кнопкою заявки лише після цього натиску (callback mk)
