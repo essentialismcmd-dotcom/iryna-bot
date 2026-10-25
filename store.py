@@ -504,6 +504,12 @@ def events_recent(limit=200):
              (limit,), fetch="all")
 
 
+def events_of(uid, limit=80):
+    """25.10: останні події однієї людини, старі першими (рядок «До цього» в сповіщенні)."""
+    rows = q("select * from events where user_id = %s order by id desc limit %s", (uid, limit), fetch="all") or []
+    return rows[::-1]
+
+
 def events_after(after_id=0, limit=5000):
     """24.10: повне вивантаження журналу частинами за id (розбір кожної людини покроково)."""
     return q("select * from events where id > %s order by id limit %s",

@@ -158,7 +158,7 @@ for ROZKLADKA, NOTIFY in (("Іра у NOTIFY_IDS", [ADMIN, IRA]), ("Іра ли�
     vv = cb(INCOG, "k12z")
     ok("акаунт Yaro, ЗАЯВКА: Іра нічого", not to(vv, IRA), str(to(vv, IRA))[:200])
     ok("акаунт Yaro, ЗАЯВКА: Yaro отримав",
-       any(t.startswith("ЗАЯВКА") for t in txt(vv, ADMIN)), str(txt(vv, ADMIN))[:200])
+       any(t.startswith("Дивиться") for t in txt(vv, ADMIN)), str(txt(vv, ADMIN))[:200])
     vv = cb(ADMIN, "k12z")
     ok("адмін, ЗАЯВКА: Іра нічого", not to(vv, IRA), str(to(vv, IRA))[:200])
 
@@ -178,7 +178,7 @@ for ROZKLADKA, NOTIFY in (("Іра у NOTIFY_IDS", [ADMIN, IRA]), ("Іра ли�
            len([t for t in txt(vv, IRA) if "а де урок?" in t]) == 1, str(txt(vv, IRA))[:200])
         vv = cb(kto, "k12z")
         ok(nazva + ", ЗАЯВКА: Іра отримала",
-           ROZKLADKA != "Іра у NOTIFY_IDS" or any(t.startswith("ЗАЯВКА") for t in txt(vv, IRA)),
+           ROZKLADKA != "Іра у NOTIFY_IDS" or any(t.startswith("Дивиться") for t in txt(vv, IRA)),
            str(txt(vv, IRA))[:200])
         vv = msg(kto, photo=[{"file_id": "F2", "file_unique_id": "u2"}], caption="ось")
         ok(nazva + ", фото: Іра отримала пересилку", any(m == "forwardMessage" for m, p in to(vv, IRA)),

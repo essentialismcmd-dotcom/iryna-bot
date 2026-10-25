@@ -1357,8 +1357,44 @@ def pick_product(chat_id, uid, u, data, gate=True):
     else:
         send(chat_id, body, kb)
     if lead_once(uid, "zayavka:" + data):
-        notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
+        # 25.10 Yaro: це не заявка, людина лише відкрила картку з ціною; і видно, що дивилась до цього
+        notify(("Дивиться курс: " if t["product"] == "course" else "Дивиться: ") + t["name"] + "\n" + who(u)
+               + "\nКод: " + code + shliakh(uid),
                give_kb(uid, data), uid=uid)
+
+
+# 25.10 Yaro: «щоб було видно, що людина дивилась відгуки, або світло»; людською мовою для Іри
+SHLIAKH_START = {"preset": "пресет", "vidhuky": "відгуки", "kurs": "курс", "mk": "майстер-клас",
+                 "profil": "урок «Світло»", "svitlo": "урок «Світло»", "magnit": "урок «Світло»"}
+SHLIAKH_KINDS = {"preset_entry": "пресет", "preset": "пресет", "vidhuky_entry": "відгуки",
+                 "guide_entry": "гайд «Світло»", "guide_open": "гайд «Світло»", "kurs_entry": "курс",
+                 "retush_open": "курс", "mk_entry": "майстер-клас", "mk_open": "майстер-клас",
+                 "svitlo_entry": "урок «Світло»", "magnet": "урок «Світло»", "lesson_gift": "безкоштовний урок",
+                 "retush_entry": "безкоштовний урок", "kanal_join": "підписка на канал",
+                 "touch": "нагадування бота", "staff_reply": "Іра писала", "message": "писала в бот",
+                 "pay_ok": "оплата"}
+
+
+def shliakh(uid, most=8):
+    """Рядок «До цього: пресет → відгуки → курс (у боті з 22.10)»; порожньо, якщо журналу нема."""
+    try:
+        rows = store.events_of(uid) or []
+    except Exception as e:
+        log.warning("shliakh %s: %s", uid, e)
+        return ""
+    steps = []
+    for r in rows:
+        k, p = r.get("kind"), r.get("payload") or {}
+        name = SHLIAKH_START.get(str(p.get("tag", "")).split("_")[0]) if k == "start" else SHLIAKH_KINDS.get(k)
+        if k == "start" and not name and str(p.get("tag", "")).startswith("hajd"):
+            name = "гайд «Світло»"
+        if name and (not steps or steps[-1] != name):
+            steps.append(name)
+    if not steps:
+        return ""
+    first = rows[0].get("created_at")
+    since = (" (у боті з %s)" % kyiv_now(first).strftime("%d.%m")) if first and len(rows) < 80 else ""
+    return "\nДо цього: " + " → ".join(steps[-most:]) + since
 
 
 # 25.10, слово Yaro: продає живий чат Іри (особисті, далі агент-асистент), бот лише видає й приймає оплату.

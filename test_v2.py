@@ -130,7 +130,7 @@ ok("вимкнено: після магніта нема кнопки курсу
 for d in ("retush", "q:new", "k1", "k2", "k12"):
     VYKLYKY.clear(); cb(d)
     ok("вимкнено: " + d + " веде на гайд і канал, без заявки",
-       knopky() == ["Хочу повний гайд «Світло»", "Канал «для своїх»"] and not any("ЗАЯВКА" in x for x in komu(1))
+       knopky() == ["Хочу повний гайд «Світло»", "Канал «для своїх»"] and not any(x.startswith(("ЗАЯВКА", "Дивиться")) for x in komu(1))
        and not any("грн" in x or "новий курс" in x for x in komu(777)), str(komu(777)) + str(knopky()))
 VYKLYKY.clear(); msg("курс")
 ok("вимкнено: слово КУРС на гайд і канал, без цін", knopky() == ["Хочу повний гайд «Світло»", "Канал «для своїх»"]
@@ -140,7 +140,7 @@ ok("вимкнено: після гайда без пропозиції курс
 ok("вимкнено: після гайда наступний крок канал", any("Гайд ваш" in x for x in komu(777)) and knopky() == ["Канал «для своїх»"], str(knopky()))
 VYKLYKY.clear(); cb("t2")
 ok("вимкнено: стара кнопка t2 показує чинний гайд, без заявки",
-   knopky() == ["Гайд, 900 грн"] and not any("ЗАЯВКА" in x for x in komu(1)) and not any("1200" in x for x in komu(777)), str(komu(777)))
+   knopky() == ["Гайд, 900 грн"] and not any(x.startswith(("ЗАЯВКА", "Дивиться")) for x in komu(1)) and not any("1200" in x for x in komu(777)), str(komu(777)))
 VYKLYKY.clear(); msg("просто питання про щось")
 ok("вимкнено: довільний текст дає наступний крок",
    knopky() == ["Забрати три схеми світла", "Хочу повний гайд «Світло»", "Канал «для своїх»"], str(knopky()))

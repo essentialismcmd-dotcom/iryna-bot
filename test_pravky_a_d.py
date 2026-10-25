@@ -88,8 +88,8 @@ ok("В МК: людині відповіли двічі", len(sent(chat=777)) ==
 ok("В МК: персоналу одна заявка", len([p for p in sent(chat=1) if "ЗАЯВКА НА МК" in p["text"]]) == 1)
 VYKLYKY.clear()
 cb("k12z", 778); cb("k12z", 778)
-ok("В курс: персоналу одна заявка", len([p for p in sent(chat=1) if "ЗАЯВКА" in p["text"]]) == 1)
-ok("В інша людина має власну заявку", (cb("k12z", 779), len([p for p in sent(chat=1) if "ЗАЯВКА" in p["text"]]))[1] == 2)
+ok("В курс: персоналу одна заявка", len([p for p in sent(chat=1) if p["text"].startswith("Дивиться")]) == 1)
+ok("В інша людина має власну заявку", (cb("k12z", 779), len([p for p in sent(chat=1) if p["text"].startswith("Дивиться")]))[1] == 2)
 
 # Б: постійна клавіатура
 VYKLYKY.clear()
