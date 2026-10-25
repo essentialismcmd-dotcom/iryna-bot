@@ -240,7 +240,7 @@ KEYWORDS = {
 MK_TEXT = (
     "Індивідуальний майстер-клас зі світла ♥️\n\n"
     "У студії, на імпульсному світлі: ставимо схеми під ваш запит, "
-    "ви знімаєте самі, я поруч і виправляю. На виході кадри в портфоліо.\n\n"
+    "створюємо нове портфоліо і розбираємо кадри одразу.\n\n"
     "Тисніть кнопку, і я напишу вам особисто: дати, місто, деталі."
 )
 MK_THANKS = ("Записала ♥️ Щоб підібрати формат, два короткі питання: з якого ви міста "
@@ -263,7 +263,7 @@ MK_HELLO = (
     "• нове дороге портфоліо\n"
     "• гайд «Світло» і моя платформа з уроками ретуші\n"
     "• контакти моїх ретушерів\n\n"
-    "Тисніть кнопку, розкажу про дати і деталі."
+    "Тисніть кнопку, і я напишу вам особисто: дати, місто, деталі."   # 25.10 адвокати: обіцяли дати, а давали повтор
 )
 MK_ALBUM = ["static/mk/mk-%d.jpg" % i for i in (1, 2, 3, 4)]
 SHOOT_TEXT = ("Про зйомку швидше в інстаграмі ♥️ @iryna_rul_photographer, "
@@ -492,6 +492,7 @@ KURS_CARD = ("Ретуш портрета за 15 хвилин\n\n"
              "Швидка спрощена ретуш без ручного dodge & burn. Текстура шкіри зберігається і стає кращою, "
              "шкіра лишається шкірою.\n\n"
              "Усередині: 18 відео, близько 135 хвилин: бʼюті-портрет, темний фон, фешн-колір, колір і мої пресети. "
+             "Свою ретуш надсилаєте мені, і я напишу, що поправити у вашій роботі.\n\n"
              "Доступ назавжди, курс відкривається одразу після оплати.")   # 25.10: відгук прибрано, як у гайді
 PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=KURS_CARD + "\n\nЦіна курсу " + str(_K12) + " грн.")
 PRODUCTS["k12z"]["name"] = PRODUCTS["k12"]["name"] + " (знижка " + str(KURS_ZNYZHKA) + " %)"
@@ -1352,7 +1353,7 @@ def pick_product(chat_id, uid, u, data, gate=True):
         kb["inline_keyboard"].insert(1, [{"text": "Написати Ірі", "url": IRA_DM_URL} if IRA_DM_URL else
                                          {"text": "Написати Ірі", "callback_data": "ask:kurs"}])
     if data in ("k12", "k12z") and len(body) <= 1024:
-        send_card_file(chat_id, "static/kurs-kartka.png", body, kb)   # 25.10 Іра: Єва до/після, як картка гайда
+        send_card_file(chat_id, "static/kurs-kartka2.png", body, kb)   # 25.10 Іра: Єва до/після, як картка гайда
     else:
         send(chat_id, body, kb)
     if lead_once(uid, "zayavka:" + data):
@@ -1395,13 +1396,14 @@ def send_kurs_album(chat_id):
 
 
 # 25.10, слово Yaro: кнопка «Відгуки» в закріпі каналу веде сюди; картки зі скрінами з поста 24.10.
-VIDHUKY_ALBUM = ["static/vidhuky/%d.jpg" % i for i in (1, 2, 3, 4, 5)]
-VIDHUKY_CAP = "Що мені пишуть після зйомок, гайду «Світло» і курсу ♥️ Скріни як є, з Direct і Telegram."
+# 25.10 Yaro: лише гайд, курс і МК, бо відгуки з фотосесій «не сильно канають» (osnova kanal/vidhuky_bot.py).
+VIDHUKY_ALBUM = ["static/vidhuky2/%d.jpg" % i for i in (1, 2, 3)]
+VIDHUKY_CAP = "Що пишуть після гайду «Світло» і курсу ретуші, і результат з майстер-класу ♥️"
 VIDHUKY_KB = {"inline_keyboard": [
-    [{"text": "Гайд «Світло»", "url": "https://t.me/iryna_rul_bot?start=hajd299"},
-     {"text": "Курс ретуші", "url": "https://t.me/iryna_rul_bot?start=kurs"}],
-    [{"text": "Майстер-клас", "url": "https://t.me/iryna_rul_bot?start=mk"},
-     {"text": "Пресет безкоштовно", "url": "https://t.me/iryna_rul_bot?start=preset"}],
+    [{"text": "Пресет безкоштовно", "url": "https://t.me/iryna_rul_bot?start=preset"},
+     {"text": "Гайд «Світло»", "callback_data": "guide"}],
+    [{"text": "Курс ретуші", "callback_data": "retush"},
+     {"text": "Майстер-клас", "callback_data": "mk"}],
 ]}
 
 
@@ -1437,8 +1439,10 @@ def send_album(chat_id, paths, cap, key):
 
 def send_vidhuky(chat_id):
     """П'ять карток відгуків одним альбомом, далі кнопки на продукти."""
-    send_album(chat_id, VIDHUKY_ALBUM, VIDHUKY_CAP, "pic:vidhuky_album")
-    send(chat_id, "Що з цього хочете собі? 👇", VIDHUKY_KB)
+    if send_album(chat_id, VIDHUKY_ALBUM, VIDHUKY_CAP, "pic:vidhuky2_album"):
+        send(chat_id, "Що з цього хочете собі? 👇", VIDHUKY_KB)
+    else:
+        send(chat_id, VIDHUKY_CAP + "\n\nКартки зараз не відкрились, напишіть мені, і я надішлю.", VIDHUKY_KB)
 
 
 def ask_set(uid, what):
@@ -1462,7 +1466,7 @@ def mk_kb():
 
 
 def mk_hello_kb():
-    return {"inline_keyboard": [[{"text": "Дізнатися детальніше", "callback_data": "mk"}]]}
+    return {"inline_keyboard": [[{"text": "Хочу на майстер-клас", "callback_data": "mk:want"}]]}
 
 
 def channel_rows():
@@ -4848,27 +4852,27 @@ def pc_kb_view(kb):
 # 25.10 (аудит воронки, слово Yaro «спочатку в чернетку»): закріп-навігатор з усіма продуктами, бо канал
 # не вів на жоден платний крок. Без цін (Yaro 21.10). Старий закріп «Хочу на МК» лишається в списку закріплених.
 NAV_TEXT = (
-    "<b>🎁 Ваш пресет і все для фотографів тут ❤️</b>⠀⠀⠀⠀⠀⠀\n\n"
+    "<b>🎁 Ваш пресет і все для фотографів тут ❤️</b>\u2800\u2800\u2800\u2800\u2800\u2800\n\n"
     "Тут я показую, як знімаю і ретушую. Усе, що можна забрати собі, зібрала нижче.\n\n"
+    "<b>Пресет «Колір 1»</b>, безкоштовно\n"
+    "<blockquote>Основа мого кольору одним кліком, для Lightroom і Camera Raw.</blockquote>\n"
     "<b>Гайд «Світло»</b>\n"
-    "<blockquote>Мої робочі схеми з імпульсним світлом, саме ними знімаю на студії. "
+    "<blockquote>Мої робочі схеми з імпульсним світлом, саме ними знімаю в студії. "
     "Ставите світло як у мене вже на наступній зйомці.</blockquote>\n"
     "<b>Курс ретуші</b>\n"
     "<blockquote>Шкіра чиста, але жива, з текстурою, а на портрет іде до 15 хвилин. "
-    "Бʼюті, темний фон, fashion і колір. Свою ретуш надсилаєте мені, і я пишу правки по вашій роботі.</blockquote>\n"
-    "<b>Майстер-клас зі мною в студії</b>\n"
+    "Бʼюті, темний фон, фешн і колір. Свою ретуш надсилаєте мені, і я напишу, що поправити у вашій роботі.</blockquote>\n"
+    "<b>Індивідуальний майстер-клас у студії</b>\n"
     "<blockquote>Ставимо світло, створюємо нове портфоліо, розбираємо кадри одразу.</blockquote>\n"
-    "<b>Пресет «Колір 1»</b>, безкоштовно\n"
-    "<blockquote>Мій колір одним кліком.</blockquote>\n"
-    "Що пишуть ті, хто вже знімав і вчився, у кнопці <b>«Відгуки учнів»</b>.\n"
+    "Що пишуть після гайду і курсу, у кнопці <b>«Відгуки»</b>.\n"
     "<i>Усе відкривається в боті 👇</i>"
 )
 NAV_KB = {"inline_keyboard": [
-    [{"text": "Гайд «Світло»", "url": "https://t.me/iryna_rul_bot?start=hajd299"},
-     {"text": "Курс ретуші", "url": "https://t.me/iryna_rul_bot?start=kurs"}],
-    [{"text": "Майстер-клас", "url": "https://t.me/iryna_rul_bot?start=mk"},
-     {"text": "Пресет безкоштовно", "url": "https://t.me/iryna_rul_bot?start=preset"}],
-    [{"text": "Відгуки учнів", "url": "https://t.me/iryna_rul_bot?start=vidhuky"}],
+    [{"text": "Пресет безкоштовно", "url": "https://t.me/iryna_rul_bot?start=preset"},
+     {"text": "Гайд «Світло»", "url": "https://t.me/iryna_rul_bot?start=hajd299"}],
+    [{"text": "Курс ретуші", "url": "https://t.me/iryna_rul_bot?start=kurs"},
+     {"text": "Майстер-клас", "url": "https://t.me/iryna_rul_bot?start=mk"}],
+    [{"text": "Відгуки", "url": "https://t.me/iryna_rul_bot?start=vidhuky"}],
     [{"text": "НАПИСАТИ МЕНІ", "url": "https://t.me/iryna_rul_studio"}],
 ]}
 NAV_OPYS = "Фотограф Іра Руль. Світло, ретуш, колір. Гайд, курс ретуші, МК у студії і безкоштовний пресет: @iryna_rul_bot"
@@ -5676,7 +5680,8 @@ def hook():
                     store.log_event(uid, "start", {"tag": _t})
                     # гість МК: своє сповіщення в mk_start; персонал про себе не сповіщає (13.10:
                     # ритуал /nova + /start з акаунта Yaro будив Іру «Новий у боті: YR…»)
-                    if rec.get("is_new", True) and raw != MK_TAG and uid not in staff_ids():
+                    if rec.get("is_new", True) and raw != MK_TAG and uid not in staff_ids() \
+                            and not (src == "kurs" and COURSE_BUNDLE_ONLY and courses_sale()):
                         notify("Новий у боті: " + who(u) + "\nМітка: " + (raw or "без мітки")
                                + (" (від " + PARTNERS.get(partner, partner) + ")" if partner else ""),
                                give_kb(uid, "k12", "Видати курс вручну") if src in ("retush", "kurs", "kurs10") else None,
@@ -5728,7 +5733,9 @@ def hook():
                         send_card(chat_id, START_PIC, SVITLO_HELLOS.get(src, SVITLO_HELLO), svitlo_kb(src))
                 elif src == HAJD_TAG:
                     bg(store.log_event, uid, "guide_entry", {"tag": src})
-                    if not GUIDE_SALE:
+                    if "t1" in owned_keys(uid, real=True):
+                        send(chat_id, "Гайд «Світло» уже ваш ♥️", {"inline_keyboard": [[{"text": "Відкрити гайд", "callback_data": "my:guide"}]]})
+                    elif not GUIDE_SALE:
                         send_paused(chat_id)
                     else:
                         kb = tiers_kb()
@@ -5740,7 +5747,8 @@ def hook():
                     # мітка закріпу каналу (20.10): коротке привітання і «Дізнатися детальніше»;
                     # картка з кнопкою заявки лише після цього натиску (callback mk)
                     bg(store.log_event, uid, "mk_entry", {"tag": src})
-                    send_album(chat_id, MK_ALBUM, None, "pic:mk_album")
+                    if store.kv_claim("mk_album:" + str(uid)):   # фото зі зйомки лише раз
+                        send_album(chat_id, MK_ALBUM, None, "pic:mk_album")
                     send(chat_id, MK_HELLO, mk_hello_kb())
                 elif src.startswith("mk_"):
                     mk_start(chat_id, uid, u, src[3:])
@@ -5859,6 +5867,8 @@ def hook():
                 # Стара кнопка «Гайд, 900 грн» у чаті: оплати нема, реквізитів не обіцяємо.
                 store.log_event(uid, "tier_off", {"tier": data})
                 send_paused(chat_id)
+            elif data == "guide" and "t1" in owned_keys(uid, real=True):
+                send(chat_id, "Гайд «Світло» уже ваш ♥️", {"inline_keyboard": [[{"text": "Відкрити гайд", "callback_data": "my:guide"}]]})
             elif data == "guide":
                 store.log_event(uid, "guide_open")
                 kb = tiers_kb()
