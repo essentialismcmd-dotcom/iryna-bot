@@ -49,6 +49,7 @@ def fake_post(url, json=None, data=None, files=None, timeout=None, **kw):
 requests.post = fake_post
 os.environ["FREE_LESSON"] = "1"   # 19.10: магніт уроку вимкнено за замовчуванням, тут перевіряємо його самого
 import bot
+bot.send_card_file = lambda chat_id, path, text, markup=None: bot.send(chat_id, text, markup)   # 25.10: картка курсу з фото, тексти перевіряємо як раніше
 
 bot.time.sleep = lambda s: None
 bot.bg = lambda fn, *a, **kw: fn(*a, **kw)          # фон синхронно: перевірка без гонок

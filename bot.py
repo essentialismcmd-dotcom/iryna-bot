@@ -157,8 +157,7 @@ LEGACY_LOCK_DATA = ("lock:check", "lock:free")
 GUIDE_INTRO_HEAD = (
     "Повний гайд «Світло» ♥️\n\n"
     "Усі тринадцять моїх робочих схем, від чистої комерції до кольору.\n"
-    "Кожна з розстановкою, налаштуваннями і кадром зі зйомки.\n\n"
-    "З відгуку покупниці: «Вау дуже гарний гайд, дякую»\n\n"   # 24.10 аудит 2: відгук біля ціни (vidhuky/VIDHUKY.md)
+    "Кожна з розстановкою, налаштуваннями і кадром зі зйомки.\n\n"   # 25.10 Іра: відгук прибрати, «наче сама собі написала»
 )
 # Останній рядок за кількістю кнопок: «Три варіанти» лише коли тарифів більше одного.
 GUIDE_INTRO_MANY = {2: "Два варіанти, оберіть свій.", 3: "Три варіанти, оберіть свій."}
@@ -254,11 +253,19 @@ ASK_HOURS = 24
 # 20.10 (слово Yaro): кнопка «Хочу на МК» в каналі більше не показує одразу картку з заявкою.
 # Спершу коротке привітання з кнопкою «Дізнатися детальніше»; лише її натиск (mk_open) є кроком цікавості,
 # а заявка (mk_want) лишається окремою кнопкою на картці. Так відсіюються випадкові натиски в каналі.
+# 25.10 Іра: «мало інфи, пустий текст», дала свій список «В МК входить», стиснули; фото зі зйомки МК 08.10.
 MK_HELLO = (
-    "Привіт, це Іра ♥️ Ви натиснули «Хочу на МК» у каналі.\n\n"
-    "Майстер-клас індивідуальний: студія, імпульсне світло, ви знімаєте самі, я поруч і виправляю.\n\n"
-    "Якщо справді цікаво, тисніть кнопку, розкажу детальніше."
+    "Індивідуальний майстер-клас з імпульсного світла ♥️\n\n"
+    "Що входить:\n"
+    "• зйомка в студії, теорія і практика\n"
+    "• професійна модель, макіяж, зачіска і образи від стиліста\n"
+    "• мої схеми світла і мій супровід до кадру, який ви хочете\n"
+    "• нове дороге портфоліо\n"
+    "• гайд «Світло» і моя платформа з уроками ретуші\n"
+    "• контакти моїх ретушерів\n\n"
+    "Тисніть кнопку, розкажу про дати і деталі."
 )
+MK_ALBUM = ["static/mk/mk-%d.jpg" % i for i in (1, 2, 3, 4)]
 SHOOT_TEXT = ("Про зйомку швидше в інстаграмі ♥️ @iryna_rul_photographer, "
               "там відповідаю одразу. Ваше повідомлення я теж бачу.")
 # Курсів у продажу нема (25.09): слово КУРС і старі кнопки курсу ведуть на
@@ -485,8 +492,7 @@ KURS_CARD = ("Ретуш портрета за 15 хвилин\n\n"
              "Швидка спрощена ретуш без ручного dodge & burn. Текстура шкіри зберігається і стає кращою, "
              "шкіра лишається шкірою.\n\n"
              "Усередині: 18 відео, близько 135 хвилин: бʼюті-портрет, темний фон, фешн-колір, колір і мої пресети. "
-             "Доступ назавжди, курс відкривається одразу після оплати.\n\n"
-             "«Все структуровано та зрозуміло!» (з відгуку учениці)")
+             "Доступ назавжди, курс відкривається одразу після оплати.")   # 25.10: відгук прибрано, як у гайді
 PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=KURS_CARD + "\n\nЦіна курсу " + str(_K12) + " грн.")
 PRODUCTS["k12z"]["name"] = PRODUCTS["k12"]["name"] + " (знижка " + str(KURS_ZNYZHKA) + " %)"
 BY_CODE = {v["code"]: k for k, v in PRODUCTS.items()}
@@ -1345,7 +1351,10 @@ def pick_product(chat_id, uid, u, data, gate=True):
     if t["product"] == "course":                   # 24.10 аудит 2: 64 натиснули курс, 4 купили, питати не було як
         kb["inline_keyboard"].insert(1, [{"text": "Написати Ірі", "url": IRA_DM_URL} if IRA_DM_URL else
                                          {"text": "Написати Ірі", "callback_data": "ask:kurs"}])
-    send(chat_id, body, kb)
+    if data in ("k12", "k12z") and len(body) <= 1024:
+        send_card_file(chat_id, "static/kurs-kartka.png", body, kb)   # 25.10 Іра: Єва до/після, як картка гайда
+    else:
+        send(chat_id, body, kb)
     if lead_once(uid, "zayavka:" + data):
         notify("ЗАЯВКА: " + t["name"] + "\n" + who(u) + "\nКод: " + code,
                give_kb(uid, data), uid=uid)
@@ -1396,32 +1405,39 @@ VIDHUKY_KB = {"inline_keyboard": [
 ]}
 
 
-def send_vidhuky(chat_id):
-    """П'ять карток відгуків одним альбомом (як send_kurs_album), далі кнопки на продукти."""
+def send_album(chat_id, paths, cap, key):
+    """Альбом з локальних файлів (як send_kurs_album): перший раз файлами, далі file_id з kv."""
     try:
-        fids = (store.kv_get("pic:vidhuky_album") or "").split(",")
-        ok = False
-        if len(fids) == len(VIDHUKY_ALBUM) and all(fids):
+        fids = (store.kv_get(key) or "").split(",")
+        if len(fids) == len(paths) and all(fids):
             media = [{"type": "photo", "media": f} for f in fids]
-            media[0]["caption"] = VIDHUKY_CAP
-            ok = bool(api("sendMediaGroup", retry=True, chat_id=chat_id, media=media))
-        if not ok:
-            here = os.path.dirname(os.path.abspath(__file__))
-            files = {"p%d" % i: open(os.path.join(here, f), "rb") for i, f in enumerate(VIDHUKY_ALBUM)}
-            try:
-                media = [{"type": "photo", "media": "attach://p%d" % i} for i in range(len(VIDHUKY_ALBUM))]
-                media[0]["caption"] = VIDHUKY_CAP
-                j = requests.post(API + "/sendMediaGroup", data={"chat_id": chat_id, "media": json.dumps(media)},
-                                  files=files, timeout=60).json()
-            finally:
-                for f in files.values():
-                    f.close()
-            if j.get("ok"):
-                store.kv_set("pic:vidhuky_album", ",".join(m["photo"][-1]["file_id"] for m in j["result"]))
-            else:
-                log.warning("send_vidhuky: %s", j.get("description"))
+            if cap:
+                media[0]["caption"] = cap
+            if api("sendMediaGroup", retry=True, chat_id=chat_id, media=media):
+                return True
+        here = os.path.dirname(os.path.abspath(__file__))
+        files = {"p%d" % i: open(os.path.join(here, f), "rb") for i, f in enumerate(paths)}
+        try:
+            media = [{"type": "photo", "media": "attach://p%d" % i} for i in range(len(paths))]
+            if cap:
+                media[0]["caption"] = cap
+            j = requests.post(API + "/sendMediaGroup", data={"chat_id": chat_id, "media": json.dumps(media)},
+                              files=files, timeout=60).json()
+        finally:
+            for f in files.values():
+                f.close()
+        if j.get("ok"):
+            store.kv_set(key, ",".join(m["photo"][-1]["file_id"] for m in j["result"]))
+            return True
+        log.warning("send_album %s: %s", key, j.get("description"))
     except Exception as e:
-        log.warning("send_vidhuky: %s", e)
+        log.warning("send_album %s: %s", key, e)
+    return False
+
+
+def send_vidhuky(chat_id):
+    """П'ять карток відгуків одним альбомом, далі кнопки на продукти."""
+    send_album(chat_id, VIDHUKY_ALBUM, VIDHUKY_CAP, "pic:vidhuky_album")
     send(chat_id, "Що з цього хочете собі? 👇", VIDHUKY_KB)
 
 
@@ -4841,7 +4857,7 @@ NAV_TEXT = (
     "<blockquote>Шкіра чиста, але жива, з текстурою, а на портрет іде до 15 хвилин. "
     "Бʼюті, темний фон, fashion і колір. Свою ретуш надсилаєте мені, і я пишу правки по вашій роботі.</blockquote>\n"
     "<b>Майстер-клас зі мною в студії</b>\n"
-    "<blockquote>Ставимо світло, знімаєте самі, розбираємо кадри одразу.</blockquote>\n"
+    "<blockquote>Ставимо світло, створюємо нове портфоліо, розбираємо кадри одразу.</blockquote>\n"
     "<b>Пресет «Колір 1»</b>, безкоштовно\n"
     "<blockquote>Мій колір одним кліком.</blockquote>\n"
     "Що пишуть ті, хто вже знімав і вчився, у кнопці <b>«Відгуки»</b>.\n"
@@ -5724,6 +5740,7 @@ def hook():
                     # мітка закріпу каналу (20.10): коротке привітання і «Дізнатися детальніше»;
                     # картка з кнопкою заявки лише після цього натиску (callback mk)
                     bg(store.log_event, uid, "mk_entry", {"tag": src})
+                    send_album(chat_id, MK_ALBUM, None, "pic:mk_album")
                     send(chat_id, MK_HELLO, mk_hello_kb())
                 elif src.startswith("mk_"):
                     mk_start(chat_id, uid, u, src[3:])

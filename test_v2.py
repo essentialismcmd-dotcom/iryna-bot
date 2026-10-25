@@ -42,6 +42,7 @@ def fake_post(url, json=None, data=None, files=None, timeout=None):
 
 requests.post = fake_post
 import bot
+bot.send_card_file = lambda chat_id, path, text, markup=None: bot.send(chat_id, text, markup)   # 25.10: картка курсу з фото, тексти перевіряємо як раніше
 
 app = bot.app.test_client()
 PADINNIA = []
