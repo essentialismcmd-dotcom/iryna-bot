@@ -4807,6 +4807,7 @@ NAV_KB = {"inline_keyboard": [
     [{"text": "Курс ретуші", "url": "https://t.me/iryna_rul_bot?start=kurs"}],
     [{"text": "Майстер-клас у студії", "url": "https://t.me/iryna_rul_bot?start=mk"}],
     [{"text": "Пресет безкоштовно", "url": "https://t.me/iryna_rul_bot?start=preset"}],
+    [{"text": "НАПИСАТИ МЕНІ", "url": "https://t.me/iryna_rul_studio"}],
 ]}
 NAV_OPYS = "Фотограф Іра Руль. Світло, ретуш, колір. Гайд, курс ретуші, МК у студії і безкоштовний пресет: @iryna_rul_bot"
 
