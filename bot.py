@@ -4958,8 +4958,11 @@ def navihator_pravka():
 def pidsumok_route():
     """Лише читання (23.10): той самий текст, що йде Ірі о 21:00, без надсилання; «нічого» без продажів за день."""
     rows = sales_rows()
+    text = pidsumok_text()
+    if text and request.args.get("send") == "1":
+        _staff_send(staff_ids(), text, kind="pay")   # 25.10, слово Yaro: підсумок йому й Ірі зараз, не чекаючи 21:00
     return {"den": _sales_line(rows, "today_n", "today_uah"), "vsoho": _sales_line(rows, "all_n", "all_uah"),
-            "text": pidsumok_text()}
+            "text": text, "sent": bool(text and request.args.get("send") == "1")}
 
 
 @app.post("/prodazh/" + SECRET)
