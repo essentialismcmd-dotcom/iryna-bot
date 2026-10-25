@@ -39,6 +39,7 @@ MAGNET_URL    = os.getenv("MAGNET_URL", "").strip()
 # може поставити лише бот у момент публікації, тож адмін шле боту /zakrip.
 # ZAKRIP_CHAT за замовчуванням чернетка каналу; оригінал лише окремим словом Yaro.
 ZAKRIP_CHAT   = os.getenv("ZAKRIP_CHAT", "").strip() or "-1004303013438"
+CHERNETKA     = "-1004303013438"  # «Iryna Rul | чернетка», 6 підписників
 # Кнопка закріпу (TYZHDEN-2026-10-05 рядок 72, слово Yaro «Хочу на МК»): веде на ?start=mk.
 ZAKRIP_URL    = os.getenv("ZAKRIP_URL", "").strip() or "https://t.me/iryna_rul_bot?start=mk"
 ZAKRIP_BTN    = os.getenv("ZAKRIP_BTN", "").strip() or "Хочу на майстер-клас"
@@ -4814,7 +4815,9 @@ NAV_OPYS = "Фотограф Іра Руль. Світло, ретуш, колі
 def navihator():
     """Пост-навігатор з 4 кнопками і закріп. За замовчуванням у чернетку ZAKRIP_CHAT; ?de=kanal лише зі слова Yaro.
     ?opys=1 ще й ставить опис цього чату."""
-    chat = CHANNEL_ID if request.args.get("de") == "kanal" else ZAKRIP_CHAT
+    # 25.10: ZAKRIP_CHAT на Render виявився справжнім каналом (-1004366151691), і «чернетка» пішла людям.
+    # Тепер чернетка жорстко -1004303013438, а будь-який інший чат лише через ?de=kanal.
+    chat = CHANNEL_ID if request.args.get("de") == "kanal" else CHERNETKA
     r = api_raw("sendMessage", chat_id=chat, text=NAV_TEXT, reply_markup=NAV_KB,
                 link_preview_options={"is_disabled": True})
     if not r.get("ok"):
@@ -4825,18 +4828,6 @@ def navihator():
     if request.args.get("opys"):
         d = api_raw("setChatDescription", chat_id=chat, description=NAV_OPYS)
         out += ", опис: %s" % (d.get("ok") or d.get("description"))
-    return out
-
-
-@app.post("/navihator-pryb/" + SECRET)
-def navihator_pryb():
-    """Назва чату ZAKRIP_CHAT; ?mid=N ще й знімає закріп і видаляє пост N у ньому."""
-    out = "чат %s: %s" % (ZAKRIP_CHAT, (api_raw("getChat", chat_id=ZAKRIP_CHAT).get("result") or {}).get("title"))
-    mid = request.args.get("mid")
-    if mid:
-        u = api_raw("unpinChatMessage", chat_id=ZAKRIP_CHAT, message_id=int(mid))
-        d = api_raw("deleteMessage", chat_id=ZAKRIP_CHAT, message_id=int(mid))
-        out += ", закріп знято: %s, видалено: %s" % (u.get("ok") or u.get("description"), d.get("ok") or d.get("description"))
     return out
 
 
