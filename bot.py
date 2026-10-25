@@ -265,7 +265,7 @@ MK_HELLO = (
     "• контакти моїх ретушерів\n\n"
     "Якщо цікаво, напишіть мені в особисті, розкажу про дати і деталі 👇"   # 25.10 Yaro: розмова в особистих, не в боті
 )
-MK_ALBUM = ["static/mk/mk-%d.jpg" % i for i in (1, 2, 3, 4)]
+MK_ALBUM = ["static/mk2/mk-1.jpg", "static/mk2/mk-video.mp4"] + ["static/mk2/mk-%d.jpg" % i for i in (2, 3, 4, 5, 6)]
 SHOOT_TEXT = ("Про зйомку швидше в інстаграмі ♥️ @iryna_rul_photographer, "
               "там відповідаю одразу. Ваше повідомлення я теж бачу.")
 # Курсів у продажу нема (25.09): слово КУРС і старі кнопки курсу ведуть на
@@ -1407,12 +1407,16 @@ VIDHUKY_KB = {"inline_keyboard": [
 ]}
 
 
+def _album_type(path):
+    return "video" if path.endswith(".mp4") else "photo"
+
+
 def send_album(chat_id, paths, cap, key):
     """Альбом з локальних файлів (як send_kurs_album): перший раз файлами, далі file_id з kv."""
     try:
         fids = (store.kv_get(key) or "").split(",")
         if len(fids) == len(paths) and all(fids):
-            media = [{"type": "photo", "media": f} for f in fids]
+            media = [{"type": _album_type(p), "media": f} for p, f in zip(paths, fids)]
             if cap:
                 media[0]["caption"] = cap
             if api("sendMediaGroup", retry=True, chat_id=chat_id, media=media):
@@ -1420,16 +1424,17 @@ def send_album(chat_id, paths, cap, key):
         here = os.path.dirname(os.path.abspath(__file__))
         files = {"p%d" % i: open(os.path.join(here, f), "rb") for i, f in enumerate(paths)}
         try:
-            media = [{"type": "photo", "media": "attach://p%d" % i} for i in range(len(paths))]
+            media = [{"type": _album_type(f), "media": "attach://p%d" % i} for i, f in enumerate(paths)]
             if cap:
                 media[0]["caption"] = cap
             j = requests.post(API + "/sendMediaGroup", data={"chat_id": chat_id, "media": json.dumps(media)},
-                              files=files, timeout=60).json()
+                              files=files, timeout=120).json()
         finally:
             for f in files.values():
                 f.close()
         if j.get("ok"):
-            store.kv_set(key, ",".join(m["photo"][-1]["file_id"] for m in j["result"]))
+            store.kv_set(key, ",".join(m["video"]["file_id"] if "video" in m else m["photo"][-1]["file_id"]
+                                       for m in j["result"]))
             return True
         log.warning("send_album %s: %s", key, j.get("description"))
     except Exception as e:
@@ -4862,10 +4867,10 @@ NAV_TEXT = (
     "<blockquote>Мої робочі схеми з імпульсним світлом, саме ними знімаю в студії. "
     "Ставите світло як у мене вже на наступній зйомці.</blockquote>\n"
     "<b>Курс ретуші</b>\n"
-    "<blockquote>Шкіра чиста, але жива, з текстурою, а на портрет іде до 15 хвилин. "
-    "Бʼюті, темний фон, фешн і колір. Свою ретуш надсилаєте мені, і я напишу, що поправити у вашій роботі.</blockquote>\n"
-    "<b>Індивідуальний майстер-клас у студії</b>\n"
-    "<blockquote>Ставимо світло, створюємо нове портфоліо, розбираємо кадри одразу.</blockquote>\n"
+    "<blockquote>Чиста жива шкіра з збереженою текстурою, а на портрет йде до 15 хвилин. "
+    "Бʼюті, темний фон, fashion і колір. Свою ретуш надсилаєте мені, і я пишу правки по вашій роботі.</blockquote>\n"
+    "<b>Майстер-клас зі мною в студії</b>\n"
+    "<blockquote>Ставимо імпульсне світло, створюємо нове портфоліо, розбираємо кадри одразу.</blockquote>\n"
     "Що пишуть після гайду і курсу, у кнопці <b>«Відгуки»</b>.\n"
     "<i>Усе відкривається в боті 👇</i>"
 )
@@ -5750,7 +5755,7 @@ def hook():
                     # картка з кнопкою заявки лише після цього натиску (callback mk)
                     bg(store.log_event, uid, "mk_entry", {"tag": src})
                     if store.kv_claim("mk_album:" + str(uid)):   # фото зі зйомки лише раз
-                        send_album(chat_id, MK_ALBUM, None, "pic:mk_album")
+                        send_album(chat_id, MK_ALBUM, None, "pic:mk2_album")
                     send(chat_id, MK_HELLO, mk_hello_kb())
                 elif src.startswith("mk_"):
                     mk_start(chat_id, uid, u, src[3:])
