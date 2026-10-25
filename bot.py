@@ -1338,12 +1338,15 @@ def pick_product(chat_id, uid, u, data, gate=True):
         if uid and not kurs_pershyi(uid):
             send_kurs_album(chat_id)              # 25.10: вперше бачить курс, спершу до/після, потім ціна
         kurs_pershyi(uid, mark=True)              # 24.10: з цієї хвилини йдуть 48 год особистої ціни
-    store.add_purchase(uid, t["product"], tier=data, order_code=code,
-                       amount_uah=osobysta_tsina(uid, data) or t["uah"])
+    base = osobysta_tsina(uid, data) or t["uah"]
+    suma = suma_oplaty(uid, data, base)
+    store.add_purchase(uid, t["product"], tier=data, order_code=code, amount_uah=suma)
     store.log_event(uid, "tier_pick", {"tier": data, "code": code})
     # 19.10, слово Yaro: людині нічого вписувати не треба, оплату бот звіряє сам; без PAY_URL код лишається
     text = KURS_CARD + "\n\n" + kurs_tsina_tekst(uid) if data in ("k12", "k12z") and uid else t["text"]
     body = text if PAY_URL else text + "\n\nПризначення платежу, впишіть його дослівно:\n" + code
+    if PAY_URL and suma != base:
+        body += "\n\nДля вас до сплати %d грн." % suma
     if PAY_URL:
         body += ("\n\nПісля оплати курс відкриється тут, зазвичай протягом кількох хвилин."
                  if t["product"] == "course" else
@@ -2057,13 +2060,39 @@ def osobysta_tsina(uid, key, grace=0):
     return base - kurs_zalik(uid)
 
 
+ZSUV_MAX = 9   # грн: на скільки найбільше бот знижує суму, щоб оплати не збігались (25.10)
+
+
+def suma_oplaty(uid, key, base):
+    """25.10, слово Yaro: код до виписки не доходить, тож хто обрав тариф на ту саму суму протягом PICK_WIN
+    після іншого, платить на гривню менше (2970, 2969, 2968...), і оплату видно за сумою. Без копійок."""
+    code = order_code(uid, key)
+    try:
+        rows = store.pending_amounts(base - ZSUV_MAX, base, PICK_WIN)
+    except Exception as e:
+        log.warning("suma_oplaty: %s", e)
+        return base
+    mine = [r["amount_uah"] for r in rows if r["order_code"] == code]
+    if mine:
+        return mine[0]
+    taken = {r["amount_uah"] for r in rows}
+    return next((s for s in range(base, base - ZSUV_MAX - 1, -1) if s not in taken), base)
+
+
 def pay_url(uid, key):
     """Персональне посилання на оплату (Mono «За посиланням», картка Іри): сума і код підставлені
     (?a=сума&t=коментар, є Apple Pay / Google Pay). Код до виписки не доходить, звірка за сумою в handle_tx."""
     if not PAY_URL:
         return ""
     sep = "&" if "?" in PAY_URL else "?"
-    return PAY_URL + sep + urlencode({"a": osobysta_tsina(uid, key) or PRODUCTS[key]["uah"],
+    base = osobysta_tsina(uid, key) or PRODUCTS[key]["uah"]
+    try:
+        row = store.get_purchase(order_code(uid, key)) or {}
+    except Exception:
+        row = {}
+    a = row.get("amount_uah")
+    a = a if row.get("status") == "new" and a and base - ZSUV_MAX <= a <= base else base
+    return PAY_URL + sep + urlencode({"a": a,
                                       "t": order_code(uid, key)})
 
 
@@ -2562,12 +2591,11 @@ def noget_wait(uid, key, who_text):
     try:
         if store.kv_get(k) is None:
             store.kv_set(k, str(time.time()) + "|" + who_text)
-        if store.kv_get(k) is not None:
-            return True
     except Exception as e:
         log.warning("noget_wait %s: %s", k, e)
+    # 25.10, слово Yaro: «це ж важливе повідомлення», тож адміну одразу, без паузи на банк
     noget_notify(uid, key, who_text)
-    return False
+    return True
 
 
 def noget_run(now=None):
@@ -2586,9 +2614,7 @@ def noget_run(now=None):
             if (p and p.get("status") in ("paid", "delivered")) or key in owned_keys(uid, real=True):
                 store.kv_del(r["k"])
                 continue
-            noget_notify(uid, key, who_text or ("id " + str(uid)))
-            store.kv_del(r["k"])
-            sent += 1
+            store.kv_del(r["k"])        # адмін уже знає з натискання (25.10)
         except Exception:
             log.exception("noget_run %s", r)
     return sent
@@ -3918,6 +3944,15 @@ def handle_tx(tx):
             # нічия оплата: хто з кандидатів натисне «оплатила» протягом NECHYIA_WIN, тому бот видасть сам (claim_nechyia)
             store.kv_set("tx_nechyia", json.dumps({"id": tx.get("id"), "uah": amount // 100,
                                                    "time": tx.get("time") or int(time.time()), "uids": uids}))
+            # 25.10 Юлія: «оплатила» за секунди до того, як банк доніс платіж; один такий кандидат = її оплата
+            try:
+                chekaiut = [r for r in rows
+                            if store.kv_get("noget_wait:" + str(r["user_id"]) + ":" + r["tier"]) is not None]
+            except Exception:
+                chekaiut = []
+            if len({r["user_id"] for r in chekaiut}) == 1 and claim_nechyia(chekaiut[0]["user_id"], chekaiut[0]["tier"]):
+                store.kv_del("noget_wait:" + str(chekaiut[0]["user_id"]) + ":" + chekaiut[0]["tier"])
+                return
             notify("Оплата " + str(amount // 100) + " грн на картці (" + when + "), а тариф на цю суму за добу брали кілька людей:\n"
                    + "\n".join(names) + "\n\nВпізнай і видай /vydaty. Якщо хтось із них натисне «оплатила», бот видасть сам.")
             return
@@ -3951,8 +3986,9 @@ def claim_nechyia(uid, key):
         d = json.loads(raw)
         if uid not in d.get("uids", []) or time.time() - float(d.get("time") or 0) > NECHYIA_WIN:
             return False
-        if d.get("uah") not in (osobysta_tsina(uid, key) or PRODUCTS.get(key, {}).get("uah", 0),
-                                osobysta_tsina(uid, key, grace=86400)):
+        prices = (osobysta_tsina(uid, key) or PRODUCTS.get(key, {}).get("uah", 0),
+                  osobysta_tsina(uid, key, grace=86400) or 0)
+        if not any(p - ZSUV_MAX <= int(d.get("uah") or 0) <= p for p in prices):
             return False
         if not store.kv_claim("tx_nechyia_" + str(d.get("id"))):
             return False

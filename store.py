@@ -451,6 +451,18 @@ def pending_by_amount(amount_uah, hours=24):
     """, (amount_uah, hours), fetch="all") or []
 
 
+def pending_amounts(lo, hi, seconds):
+    """25.10: незакриті покупки на суму від lo до hi грн, тариф яких обрали за останні seconds с
+    (зсув суми на гривню, щоб оплату без коду було видно за сумою). Без бази []."""
+    return q("""
+        select p.user_id, p.order_code, p.amount_uah from purchases p
+        where p.status = 'new' and p.amount_uah between %s and %s
+          and exists (select 1 from events e where e.kind = 'tier_pick'
+                      and e.payload->>'code' = p.order_code
+                      and e.created_at > now() - make_interval(secs => %s))
+    """, (lo, hi, seconds), fetch="all") or []
+
+
 def get_purchase(order_code):
     return q("select * from purchases where order_code = %s", (order_code,), fetch="one")
 

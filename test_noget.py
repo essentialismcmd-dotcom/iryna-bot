@@ -43,34 +43,26 @@ PURCH = {}
 bot.store.get_purchase = lambda code: PURCH.get(code)
 bot.store.purchases_of = lambda uid, only_paid=True: []
 
-# 1. натиснула кнопку: текст про банк, адміну нічого, у черзі ключ
+# 1. натиснула кнопку: текст про банк, адміну одразу (25.10 Yaro), у черзі ключ
 CALLS.clear()
 bot.noget_wait(555, "t1", "Тест, @test, id 555")
 bot.send(555, bot.NOGET_TEXT)
 check("людині текст про банк", any("Банк передає оплату" in t for t in texts(555)))
-check("адміну поки нічого", not texts(1))
+check("адміну одразу з кнопкою видачі", any(t.startswith("КАЖЕ, ЩО ОПЛАТИВ") for t in texts(1)) and "give:555:t1" in str(CALLS))
 check("ключ у черзі", "noget_wait:555:t1" in KV)
 
-# 2. рано: за 5 хв нічого
+# 2. оплата дійшла: черга знімається мовчки
 CALLS.clear()
 ts = float(KV["noget_wait:555:t1"].split("|")[0])
-check("через 5 хв ще чекаємо", bot.noget_run(ts + 300) == 0 and not texts(1) and "noget_wait:555:t1" in KV)
-
-# 3. оплата дійшла: мовчки знімаємо
 PURCH[bot.order_code(555, "t1")] = {"status": "delivered"}
 check("оплата дійшла: адміну нічого, ключ знято", bot.noget_run(ts + 700) == 0 and not texts(1) and "noget_wait:555:t1" not in KV)
 
-# 4. оплата не дійшла: після паузи адміну «КАЖЕ, ЩО ОПЛАТИВ» з кнопкою видачі
-PURCH.clear(); KV.clear(); CALLS.clear()
+# 3. оплата не дійшла: повторно адміну не шлемо, ключ знято
+PURCH.clear(); KV.clear()
 bot.noget_wait(777, "t1", "Друга, id 777")
-ts = float(KV["noget_wait:777:t1"].split("|")[0])
-n = bot.noget_run(ts + 700)
-adm = [p for m, p in CALLS if m == MSG and int(p["chat_id"]) == 1]
-check("через 10+ хв адміну повідомлення", n == 1 and adm and adm[0]["text"].startswith("КАЖЕ, ЩО ОПЛАТИВ") and "Друга, id 777" in adm[0]["text"])
-check("кнопка «Видати вручну»", adm and "give:777:t1" in str(adm[0].get("reply_markup")))
-check("ключ знято", "noget_wait:777:t1" not in KV)
 CALLS.clear()
-check("повтор черги нічого не шле", bot.noget_run(ts + 1400) == 0 and not texts(1))
+ts = float(KV["noget_wait:777:t1"].split("|")[0])
+check("через 10 хв без дубля", bot.noget_run(ts + 700) == 0 and not texts(1) and "noget_wait:777:t1" not in KV)
 
 # 5. без бази (kv не тримає): адміну одразу
 bot.store.kv_get = lambda k, default=None: default
