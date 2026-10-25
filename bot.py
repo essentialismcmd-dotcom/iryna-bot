@@ -4905,6 +4905,19 @@ def navihator():
     return out
 
 
+@app.post("/navihator-pravka/" + SECRET)
+def navihator_pravka():
+    """Оновити вже опублікований навігатор на свіжі NAV_TEXT/NAV_KB (25.10, пост 120 у каналі):
+    ?mid=<id поста>, ?de=kanal лише зі слова Yaro, інакше чернетка."""
+    chat = CHANNEL_ID if request.args.get("de") == "kanal" else CHERNETKA
+    mid = request.args.get("mid", "")
+    if not mid.isdigit():
+        return "mid числом", 400
+    r = api_raw("editMessageText", chat_id=chat, message_id=int(mid), text=NAV_TEXT, reply_markup=NAV_KB,
+                parse_mode="HTML", link_preview_options={"is_disabled": True})
+    return ("пост %s у %s оновлено" % (mid, chat)) if r.get("ok") else ("не оновлено: " + str(r.get("description")), 500)
+
+
 @app.get("/pidsumok/" + SECRET)
 def pidsumok_route():
     """Лише читання (23.10): той самий текст, що йде Ірі о 21:00, без надсилання; «нічого» без продажів за день."""
