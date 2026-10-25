@@ -4975,6 +4975,29 @@ def prodazh_route():
     return {"ok": True, "code": code, "text": msg}
 
 
+@app.post("/vydaty/" + SECRET)
+def vydaty_route():
+    """З ПК видати оплачене (25.10, нічия оплата 2970): поля id, key (k12z | k12 | t1), uah, by. Шлях той самий,
+    що в оплати (_pay_issue): рядок покупки paid+delivered, видача, сповіщення адміну; нічию оплату знімаємо."""
+    j = request.get_json(silent=True)
+    j = j if isinstance(j, dict) else {}
+    g = lambda k: str(j.get(k, request.form.get(k, request.args.get(k, "")))).strip()
+    key = g("key") or "k12z"
+    if not (g("id").isdigit() and g("uah").isdigit() and key in PRODUCTS):
+        return {"ok": False, "error": "id і uah числами, key з PRODUCTS"}, 400
+    uid = int(g("id"))
+    try:
+        raw = store.kv_get("tx_nechyia")
+        d = json.loads(raw) if raw else {}
+        if uid in d.get("uids", []) and store.kv_claim("tx_nechyia_" + str(d.get("id"))):
+            store.kv_set("tx_nechyia", "")
+    except Exception as e:
+        log.warning("vydaty tx_nechyia: %s", e)
+    _pay_issue(uid, key, order_code(uid, key), int(g("uah")) * 100, " (видано з ПК: " + (g("by") or "?") + ")")
+    p = store.get_purchase(order_code(uid, key)) or {}
+    return {"ok": p.get("status") == "delivered", "code": order_code(uid, key), "status": p.get("status")}
+
+
 @app.post("/nadislaty/" + SECRET)
 def nadislaty():
     """
