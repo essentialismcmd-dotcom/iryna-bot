@@ -51,8 +51,8 @@ bot._touch_ok = lambda uid: True
 now = datetime(2026, 10, 26, 10, 0, tzinfo=timezone.utc)     # 12:00 Київ
 bot.touch_run(now)
 bot.touch_run(now)
-assert len(out) == 1 and str(bot._K12Z) in out[0][1] and str(bot._K12) in out[0][1], out
-cb = [r[0]["callback_data"] for r in out[0][2]["inline_keyboard"]]
-assert cb == ["kurs:pay"], cb
+assert len(out) == 1 and "грн" not in out[0][1] and "@iryna_rul_studio" in out[0][1], out   # 29.10 Yaro: без тиску ціною
+cb = [r[0].get("url") for r in out[0][2]["inline_keyboard"]]
+assert cb == [bot.IRA_DM_URL], cb
 assert "%" not in bot.KURS_DOROGO % bot._G
 print("ok  аудит 2: пресет з назвою, питання до Іри, Д-курс")

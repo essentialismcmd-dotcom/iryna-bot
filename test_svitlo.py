@@ -126,8 +126,8 @@ n = bot.touch_run(NOON)
 ok("Д1 svitlo без файла: нагадування без уроку", texts(830) == [bot.SVITLO_REMIND] and "урок" not in texts(830)[0].lower()
    and names(msgs(830)[0]) == ["Канал «для своїх»", "Я підписалась"], texts(830))
 ok("Д1 profil з подарунком: нічого", msgs(831) == [])
-ok("Д2 svitlo/profil з подарунком: «Гайд, 199 грн»", all([(b["text"], b.get("callback_data")) for b in btns(msgs(u_)[0])] == [("Гайд, 199 грн", "guide")]
-   and "199 грн" in texts(u_)[0] for u_ in (800, 801)), [texts(800), texts(801)])
+ok("Д2 svitlo/profil з подарунком: в особисті, без ціни", all([(b["text"], b.get("url")) for b in btns(msgs(u_)[0])] == [("Написати Ірі", bot.IRA_DM_URL)]
+   and "грн" not in texts(u_)[0] and "@iryna_rul_studio" in texts(u_)[0] for u_ in (800, 801)), [texts(800), texts(801)])   # 29.10 Yaro: Д2 кличе в розмову
 ok("Д2: події hajd199 по обох", all(any(e[:2] == (u_, "hajd199") for e in EV) for u_ in (800, 801)))
 
 # /lyudy: рядок по мітках
