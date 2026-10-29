@@ -16,7 +16,7 @@ bot.send = lambda uid, text, kb=None: sent.append((uid, text)) or True
 bot.GIFT_FOR_SUB = True
 bot.touch_run(datetime(2026, 10, 24, 9, 0, tzinfo=timezone.utc))      # 12:00 Київ
 t = dict(sent)
-assert t[1].startswith("Як вам три схеми"), t
+assert t[1].startswith("Вже пробували схеми"), t   # 29.10 Yaro: до помічниці
 assert t[2].startswith("Як вам схема з циклорамою"), t
 assert t[3] == bot.TOUCH_D2_PRESET and "ретуш" not in t[3] and "грн" not in t[3], t   # 29.10: без ціни, в особисті   # 24.10: гайд про світло, без обіцянки ретуші
 assert "%" not in t[2] and "%" not in t[3]

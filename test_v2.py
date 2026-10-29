@@ -137,7 +137,8 @@ ok("вимкнено: слово КУРС на гайд і канал, без ц
    and not any("грн" in x for x in komu(777)))
 VYKLYKY.clear(); bot.give_guide(777, "t1")
 ok("вимкнено: після гайда без пропозиції курсу", not any("два записані курси" in x for x in komu(777)))
-ok("вимкнено: після гайда наступний крок канал", any("Гайд ваш" in x for x in komu(777)) and knopky() == ["Канал «для своїх»"], str(knopky()))
+ok("вимкнено: після гайда помічниця і канал (29.10)", any("Гайд ваш" in x for x in komu(777))
+   and knopky() == ["Написати помічниці", "Канал «для своїх»"], str(knopky()))
 VYKLYKY.clear(); cb("t2")
 ok("вимкнено: стара кнопка t2 показує чинний гайд, без заявки",
    knopky() == ["Гайд, 900 грн"] and not any(x.startswith(("ЗАЯВКА", "Дивиться")) for x in komu(1)) and not any("1200" in x for x in komu(777)), str(komu(777)))

@@ -666,6 +666,17 @@ def kurs_pending(lo_h, hi_h, skip_ids, skip_kv):
     return [r["user_id"] for r in rows or []]
 
 
+def user_wrote(uid):
+    """29.10: людина вже заговорила з ботом (вільний текст, відповідь на питання, «Я оплатила»);
+    слова-подарунки (пресет, світло, циклорама) не рахуються. Без бази False."""
+    if not ON:
+        return False
+    r = q("""select 1 from events where user_id = %s and kind in ('message', 'ask_answer', 'noget')
+             and coalesce(payload ->> 'keyword', '') not in ('preset', 'svitlo', 'shema4') limit 1""",
+          (uid,), fetch="one")
+    return bool(r)
+
+
 def user_texts(uid):
     """Тексти, які людина писала боту (події message): для перевірки на «стоп»."""
     rows = q("select payload ->> 'text' as t from events where user_id = %s and kind = 'message'",

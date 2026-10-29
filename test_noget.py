@@ -47,7 +47,7 @@ bot.store.purchases_of = lambda uid, only_paid=True: []
 CALLS.clear()
 bot.noget_wait(555, "t1", "Тест, @test, id 555")
 bot.send(555, bot.NOGET_TEXT)
-check("людині текст про банк", any("Банк передає оплату" in t for t in texts(555)))
+check("людині текст про банк і куди писати", any("Перевіряю оплату" in t and "@iryna_rul_studio" in t for t in texts(555)))
 check("адміну одразу з кнопкою видачі", any(t.startswith("КАЖЕ, ЩО ОПЛАТИВ") for t in texts(1)) and "give:555:t1" in str(CALLS))
 check("ключ у черзі", "noget_wait:555:t1" in KV)
 
@@ -62,7 +62,8 @@ PURCH.clear(); KV.clear()
 bot.noget_wait(777, "t1", "Друга, id 777")
 CALLS.clear()
 ts = float(KV["noget_wait:777:t1"].split("|")[0])
-check("через 10 хв без дубля", bot.noget_run(ts + 700) == 0 and not texts(1) and "noget_wait:777:t1" not in KV)
+check("через 10 хв адміну без дубля, людині «не бачу, напишіть в особисті»",
+      bot.noget_run(ts + 700) == 1 and not texts(1) and any("не бачу" in t for t in texts(777)) and "noget_wait:777:t1" not in KV)
 
 # 5. без бази (kv не тримає): адміну одразу
 bot.store.kv_get = lambda k, default=None: default

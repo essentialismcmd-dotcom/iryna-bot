@@ -107,8 +107,8 @@ ok("МК: CARD_MK з MK_TEXT", foto() and foto()[0]["photo"] == "PIC_MK" and fot
 msg("мк")
 ok("слово МК: CARD_MK", foto() and foto()[0]["photo"] == "PIC_MK")
 
-ok("гайд видано: CARD_KANAL після файла", bot.give_guide(777, "t1") and foto()
-   and foto()[-1]["photo"] == "PIC_KANAL" and foto()[-1]["caption"] == bot.NEXT_AFTER_GUIDE_NOC)
+ok("гайд видано: після файла підтримка в помічниці, без картки каналу (29.10)", bot.give_guide(777, "t1")
+   and not any(f["photo"] == "PIC_KANAL" for f in foto()) and any(p.get("text") == bot.HAJD_PIDTRYMKA for m, p in VYKLYKY if m.endswith("Message")))
 
 # Фолбеки
 ZLAMANE_FOTO.add("PIC_MK")

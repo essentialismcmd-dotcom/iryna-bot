@@ -168,9 +168,12 @@ GUIDE_INTRO_ONE = "Натисніть кнопку нижче, і гайд бу�
 def guide_intro(kb):
     n = len(kb.get("inline_keyboard", []))
     return GUIDE_INTRO_HEAD + (GUIDE_INTRO_MANY.get(n, GUIDE_INTRO_MANY[3]) if n > 1 else GUIDE_INTRO_ONE)
-NOGET_TEXT = ("Банк передає оплату кілька хвилин ♥️ Файл прийде сюди сам, нічого робити не треба. "
-              "Якщо за 15 хвилин не прийде, я перевірю вручну.")
 NOGET_WAIT = int(os.getenv("NOGET_WAIT", "600"))   # с: стільки чекаємо банк, перш ніж турбувати адміна (Yaro 22.10)
+# 29.10 Yaro: кнопку тисне майже кожен покупець у паузу банку; кажемо правду про 1-3 хв і куди писати, якщо не прийде
+NOGET_TEXT = ("Дякую ♥️ Перевіряю оплату: банк передає її за 1-3 хвилини, файл прийде сюди сам. "
+              "Якщо за %d хвилин не прийде, напишіть мені в особисті @iryna_rul_studio, розберусь." % max(1, NOGET_WAIT // 60))
+NOGET_LATE = ("Оплату поки не бачу ♥️ Якщо платили, напишіть мені в особисті @iryna_rul_studio, "
+              "з якої картки і о котрій, і я видам файл вручну.")
 
 # Курс ретуші. Скрипт з її переписок, де оплата приходила за пʼять хвилин:
 # питання-кваліфікатор, рекомендація конкретного курсу, реквізити.
@@ -329,6 +332,12 @@ OWNER_NONE = ("Дякую, що ви вже з нами ♥️ У цьому б�
               "@iryna_rul_studio, з якого акаунта чи пошти купували, і я відкрию.")   # 29.10: в особисті, не в інстаграм
 # Після видачі гайда (без курсів): до 25.09 тут було порожньо, людина
 # отримувала файл і далі нічого. Тепер наступна сходинка, канал.
+# 29.10 Yaro: після гайда підтримка в особистих, кнопка відкриває чат з готовим першим повідомленням
+HAJD_PIDTRYMKA = ("Гайд ваш назавжди, він же лежить у «Мої матеріали» ♥️\n\n"
+                  "Підтримка по схемах 24/7 у моїх особистих @iryna_rul_studio: там моя цифрова помічниця, "
+                  "знає всі тринадцять схем, пояснить незрозуміле і перед зйомкою підкаже, яку ставити. "
+                  "Напишіть їй зараз, що знімаєте, вона підбере першу схему.")
+HAJD_PERSHE = "Привіт! Купила гайд «Світло», знімаю "
 NEXT_AFTER_GUIDE_NOC = (
     "Гайд ваш, доступ залишається назавжди ♥️\n\n"
     "Далі розбираю світло і показую бекстейдж у каналі «Iryna Rul | для своїх», "
@@ -1354,9 +1363,9 @@ def pick_product(chat_id, uid, u, data, gate=True):
     if PAY_URL and suma != base:
         body += "\n\nДля вас до сплати %d грн." % suma
     if PAY_URL:
-        body += ("\n\nПісля оплати курс відкриється тут, зазвичай протягом кількох хвилин."
+        body += ("\n\nПісля оплати курс відкриється тут сам за 1-3 хвилини, нічого натискати не треба ♥️"
                  if t["product"] == "course" else
-                 "\n\nПісля оплати файл прийде сюди, зазвичай протягом кількох хвилин.")
+                 "\n\nПісля оплати гайд прийде сюди сам за 1-3 хвилини, нічого натискати не треба ♥️")
     kb = pay_kb(data, uid)
     if t["product"] == "course":                   # 24.10 аудит 2: 64 натиснули курс, 4 купили, питати не було як
         kb["inline_keyboard"].insert(1, [{"text": "Написати Ірі", "url": IRA_DM_URL} if IRA_DM_URL else
@@ -1525,9 +1534,16 @@ def channel_rows():
     return [[{"text": "Канал «для своїх»", "url": CHANNEL_URL}]] if CHANNEL_URL else []
 
 
-def dm_kb(text="Написати Ірі"):
+def dm_url(pered=""):
+    """Посилання в особисті; pered: готове перше повідомлення (t.me/<нік>?text=), щоб людині лишалось дописати слово."""
+    if pered and "t.me/" in IRA_DM_URL and "?" not in IRA_DM_URL:
+        return IRA_DM_URL + "?" + urlencode({"text": pered})
+    return IRA_DM_URL
+
+
+def dm_kb(text="Написати Ірі", pered=""):
     """29.10 (Yaro): одна кнопка в особисті робочого акаунта; продає розмова, не бот."""
-    return {"inline_keyboard": [[{"text": text, "url": IRA_DM_URL}]]}
+    return {"inline_keyboard": [[{"text": text, "url": dm_url(pered)}]]}
 
 
 def empty_kb(uid=None):
@@ -1604,8 +1620,9 @@ GIFT_DONE = _GIFT_DONE_SUB if GIFT_FOR_SUB else _GIFT_DONE_AUTO
 TOUCH_D1_LESSON = "Урок чекає на вас ♥️ 7 хвилин, коли буде зручно"       # Д1, ще не додивилась
 TOUCH_STOP = "\n\nЯкщо не хочете таких повідомлень, напишіть «стоп»."                 # 24.10: відписка словом (PUSH_STOP_RE), раніше про неї ніде не казали
 # 29.10 Yaro: Д2 без ціни і картки, кличе в розмову з помічницею в особистих; гайд продає вже вона
-TOUCH_D2_HAJD = ("Як вам три схеми? ♥️ Якщо вже пробували, надішліть кадр мені в особисті @iryna_rul_studio, "
-                 "подивлюсь і підкажу. Якщо ще ні, напишіть, що знімаєте, підберу схему під вас." + TOUCH_STOP)
+TOUCH_D2_HAJD = ("Вже пробували схеми? ♥️ Напишіть моїй помічниці в особисті @iryna_rul_studio, що знімаєте, "
+                 "вона підбере схему під ваше світло, а кадр подивиться і підкаже." + TOUCH_STOP)   # 29.10 Yaro 2226
+TOUCH_D2_PERSHE = "Привіт! Маю три схеми світла від Іри, знімаю "
 TOUCH_D2_PRESET = ("Як вам пресет? ♥️ Якщо на вашому кадрі ліг не так, покажіть мені кадр в особисті @iryna_rul_studio, "
                    "підкажу, що підкрутити, і яке світло під нього." + TOUCH_STOP)   # 24.10 аудит 2: гайд про світло, ретуші в ньому нема   # 24.10, Д2 після пресета
 TOUCH_D2_SHEMA4 = ("Як вам схема з циклорамою? ♥️ Зняли за нею, надішліть кадр мені в особисті @iryna_rul_studio, "
@@ -1685,7 +1702,8 @@ PRESET_HELLO = (                            # 21.10 Yaro: «по пресету 
     "Дякую, що ви з нами ♥️ Тримайте пресет «Колір 1», файл нижче.\n"
     "Під що він: студійний портрет на імпульсному світлі, темний фон, кадр Марії з відео."
 )
-PRESET_MORE = "Записала ♥️ Іра напише вам особисто."   # 25.10: пака ще нема, обіцянки «скоро» не даємо   # 24.10: попит на пак 599
+PRESET_MORE = ("Записала ♥️ Напишіть мені в особисті @iryna_rul_studio, під який кадр хочете пресет, "
+               "і я підберу.")   # 29.10: без обіцянки «напише», в особисті; пака ще нема (25.10)
 
 
 def preset_hello_sub(keys):
@@ -2118,7 +2136,8 @@ def pay_kb(key, uid=None):
     if TEST_MODE and uid in NOTIFY_IDS:
         rows.append([{"text": "Я оплатив (тест)", "callback_data": "paid:" + key}])
     # Найдорожчий глухий кут лійки: людина заплатила, а файл не прийшов.
-    rows.append([{"text": "Оплатив, а файлу немає", "callback_data": "noget:" + key}])
+    # 29.10 Yaro: майже кожен покупець тисне її в паузу банку (1-3 хв), тож це не тривога, а «я оплатила»
+    rows.append([{"text": "Я оплатила ✅", "callback_data": "noget:" + key}])
     return {"inline_keyboard": rows}
 
 
@@ -2403,8 +2422,11 @@ def kurs_touch_kb():
 
 
 def _touch_ok(uid):
-    """Спільні пропуски дотику: купила (у запиті), 403 (у запиті), стоп-слово."""
+    """Спільні пропуски дотику: купила (у запиті), 403 (у запиті), стоп-слово.
+    29.10 Yaro: і будь-хто, хто вже заговорив (написав у бот чи в особисті, kv rozmova: від асистентки): далі веде розмова."""
     try:
+        if store.kv_get("rozmova:" + str(uid)) or store.user_wrote(uid):
+            return False
         return not PUSH_STOP_RE.search(store.user_texts(uid) or "")
     except Exception:
         log.exception("touch stop %s", uid)
@@ -2465,6 +2487,7 @@ def touch_run(now=None):
             kb = dm_kb()                                   # 29.10: без картки гайда, в особисті
             if got:
                 text, what = TOUCH_D2_HAJD, "shemy"
+                kb = dm_kb("Написати помічниці", TOUCH_D2_PERSHE)
             elif store.kv_get("shema4_given:" + str(uid)):
                 text, what = TOUCH_D2_SHEMA4, "shema4"
             else:                                          # 24.10: лише пресет (реклама preset_*)
@@ -2627,6 +2650,11 @@ def noget_run(now=None):
                 store.kv_del(r["k"])
                 continue
             store.kv_del(r["k"])        # адмін уже знає з натискання (25.10)
+            # 29.10 Yaro: людині чесно і в особисті до помічниці; подія noget_late видна мосту
+            if send(uid, NOGET_LATE, dm_kb()):
+                sent += 1
+            store.log_event(uid, "noget_late", {"text": "[натиснула «Я оплатила», оплати за %d хв не видно, ключ %s]" % (NOGET_WAIT // 60, key),
+                                                 "key": key})
         except Exception:
             log.exception("noget_run %s", r)
     return sent
@@ -2657,11 +2685,8 @@ def give_guide(uid, tier):
     extra = TIERS.get(tier, {}).get("extra")
     if extra:
         send(uid, extra)
-    # Покупець у момент оплати найтепліший, другого такого моменту не буде.
-    if courses_sale():                    # 17.10: канал без умов, покупцеві й так цікаво
-        send(uid, NEXT_AFTER_GUIDE, {"inline_keyboard": retush_kb_one()["inline_keyboard"] + channel_rows()})
-    else:
-        send_card(uid, CARD_KANAL, NEXT_AFTER_GUIDE_NOC, {"inline_keyboard": channel_rows()} if CHANNEL_URL else None)
+    # 29.10 Yaro: у момент оплати не продаємо курс, а даємо підтримку: помічниця в особистих 24/7
+    send(uid, HAJD_PIDTRYMKA, {"inline_keyboard": dm_kb("Написати помічниці", HAJD_PERSHE)["inline_keyboard"] + channel_rows()})
     return True
 
 
@@ -4046,6 +4071,9 @@ def _pay_issue(uid, key, code, amount, how=""):
         send(uid, "Оплату отримала ♥️ Файл зараз не відправився, Іра надішле його вручну найближчим часом.")
 
 
+MONO_POKE = threading.Event()   # 29.10: кнопка «Я оплатила» будить опитування, не чекаючи 70 с
+
+
 def mono_poll():
     """
     Виписка читається щохвилини з чимось, а в базу ходимо тільки за новою
@@ -4055,8 +4083,13 @@ def mono_poll():
     seen = set()
     ever = None
     first = True
+    last = 0.0
     while True:
-        time.sleep(70)
+        MONO_POKE.wait(70)
+        MONO_POKE.clear()
+        if time.time() - last < 61:                    # Mono: 1 запит виписки на 60 с
+            time.sleep(61 - (time.time() - last))
+        last = time.time()
         if not (MONO_TOKEN and MONO_JAR):
             continue
         try:
@@ -4547,8 +4580,9 @@ def kabinet_podiia():
     return "ok"
 
 
-@app.get("/setup")
+@app.get("/setup/" + SECRET)
 def setup():
+    """29.10 аудит: без секрету будь-хто міг переставити webhook."""
     base = request.url_root.rstrip("/")
     r = api("setWebhook", url=base + "/" + SECRET,
             allowed_updates=["message", "callback_query", "chat_member"])
@@ -5012,7 +5046,8 @@ def _mist_ok(key):
 
 @app.get("/mist/<key>/povidomlennia")
 def mist_povidomlennia(key):
-    """Вільні повідомлення людей у боті (kind message і ask_answer) після id ?after=, з ніком і ім'ям; персонал не віддаємо."""
+    """Вільні повідомлення людей у боті (kind message, ask_answer, noget «Я оплатила», noget_late) після id ?after=,
+    з ніком і ім'ям; персонал не віддаємо. Кожен читач (асистентка, ЦИФРОВИЙ) тримає свій after."""
     if not _mist_ok(key):
         return "no", 404
     try:
@@ -5024,9 +5059,12 @@ def mist_povidomlennia(key):
     try:
         rows = store.q("""select e.id, e.user_id, e.kind, e.payload, e.created_at, u.username, u.first_name, u.last_name
                           from events e left join users u on u.user_id = e.user_id
-                          where e.id > %s and e.kind in ('message', 'ask_answer') order by e.id limit %s""",
+                          where e.id > %s and e.kind in ('message', 'ask_answer', 'noget', 'noget_late') order by e.id limit %s""",
                        (after, limit), fetch="all") or []
         mx = store.q("select coalesce(max(id), 0) as m from events", fetch="one") or {}
+    except Exception:
+        log.exception("mist povidomlennia")
+        return {"error": "база"}, 500            # 29.10: збій бази не маскуємо порожнім 200
     finally:
         store.session_end()
     out = []
@@ -5049,7 +5087,27 @@ def tsina_do(target, uah, body):
     tu = store.get_user(target) or {}
     name = who({"id": target, "username": tu.get("username"), "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
     ok = send(target, body, pay_kb("k12z", target))
+    if not ok:
+        store.kv_del("tsina:" + str(target))       # 29.10: картка не дійшла, особиста ціна не лишається
     return ok, name, code
+
+
+@app.post("/mist/<key>/rozmova")
+def mist_rozmova(key):
+    """JSON {id}: асистентка каже, що людина вже в розмові в особистих; дотики бота для неї стоп (29.10 Yaro)."""
+    if not _mist_ok(key):
+        return "no", 404
+    j = request.get_json(silent=True) or {}
+    try:
+        target = int(j.get("id"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "id число"}, 400
+    store.session_begin()
+    try:
+        store.kv_set("rozmova:" + str(target), str(int(time.time())))
+    finally:
+        store.session_end()
+    return {"ok": True}
 
 
 @app.get("/mist/<key>/pokupky")
@@ -5065,7 +5123,10 @@ def mist_pokupky(key):
         sql = """select p.user_id, p.tier, p.product, coalesce(p.paid_at, p.created_at) as t, u.username, u.first_name, u.last_name, u.got_magnet_at
                  from purchases p left join users u on u.user_id = p.user_id where p.status in ('paid', 'delivered')"""
         args = ()
-        if uid.lstrip("-").isdigit():
+        if uid and not uid.lstrip("-").isdigit():
+            store.session_end()
+            return {"error": "uid число"}, 400       # 29.10: кривий uid не віддає всіх
+        if uid:
             sql += " and p.user_id = %s"; args = (int(uid),)
         rows = store.q(sql + " order by t", args, fetch="all") or []
     finally:
@@ -5097,6 +5158,8 @@ def mist_tsina(key):
         return {"ok": False, "error": "id і uah числа"}, 400
     if not body:
         return {"ok": False, "error": "потрібен text картки"}, 400
+    if not 100 <= uah <= 20000:
+        return {"ok": False, "error": "uah від 100 до 20000"}, 400
     store.session_begin()
     try:
         ok, name, code = tsina_do(target, uah, body)
@@ -6022,6 +6085,7 @@ def hook():
                 k = keyword(text)
                 store.touch_user(u)
                 store.log_event(uid, "keyword", {"word": k})
+                store.log_event(uid, "message", {"text": text[:300], "keyword": k})   # 29.10: міст бачить і одне слово
                 if k == "guide" and not GUIDE_SALE:
                     send_paused(chat_id)
                 elif k == "guide":
@@ -6148,7 +6212,9 @@ def hook():
             elif data == "preset:more":
                 if store.kv_claim("preset_more:" + str(uid)):
                     store.log_event(uid, "preset_more")
-                send(chat_id, PRESET_MORE)
+                    store.log_event(uid, "message", {"text": "[кнопка «Хочу ще пресети»]", "keyword": "preset_more"})
+                    notify("Хоче ще пресети: " + who(u), uid=uid, kind="msg")
+                send(chat_id, PRESET_MORE, dm_kb())
             elif data == "mk:want":
                 store.log_event(uid, "mk_want")
                 ask_set(uid, "mk")
@@ -6182,8 +6248,9 @@ def hook():
             elif data.startswith("noget:"):
                 key = data.split(":")[1]
                 code = order_code(uid, key)
-                send(chat_id, NOGET_TEXT)
-                store.log_event(uid, "noget", {"code": code})
+                send(chat_id, NOGET_TEXT, dm_kb())
+                store.log_event(uid, "noget", {"code": code, "text": "[натиснула «Я оплатила», %s, код %s]" % (pname(key), code)})
+                MONO_POKE.set()                            # 29.10: виписку перечитати, щойно Mono дозволить
                 noget_wait(uid, key, who(u))
             elif data.startswith("paid:") and TEST_MODE and uid in NOTIFY_IDS:
                 key = data.split(":")[1]

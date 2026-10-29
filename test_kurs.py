@@ -184,7 +184,7 @@ t = teksty()
 perevirka("клієнту картка без «впишіть», код у посиланні банки", any("2700 грн" in x and "впишіть" not in x for x in t)
           and kod in bot.pay_url(777, "k12"))
 perevirka("адміну заявка з кнопкою", any("Дивиться" in x and "Обидва курси" in x for x in t))
-perevirka("кнопка «оплатив, а файлу немає»", "Оплатив, а файлу немає" in ostannia_klaviatura())
+perevirka("кнопка «оплатив, а файлу немає»", "Я оплатила ✅" in ostannia_klaviatura())
 perevirka("тестова кнопка клієнту не показується", "Я оплатив (тест)" not in ostannia_klaviatura(), str(ostannia_klaviatura()))
 VYKLYKY.clear()
 cb("k1", uid=1)
@@ -227,7 +227,7 @@ perevirka("/moi без покупок: магніт", "Забрати три с�
 VYKLYKY.clear()
 cb("paid:t1", uid=1)
 perevirka("гайд пішов", any(m == "sendDocument" and p.get("document") == "GUIDE" for m, p in VYKLYKY))
-perevirka("після гайда кнопка курсу", "Курс ретуші" in ostannia_klaviatura(1))
+perevirka("після гайда кнопка помічниці (29.10)", "Написати помічниці" in ostannia_klaviatura(1))
 
 # 9. Оплата з банки за кодом курсу
 VYKLYKY.clear()
