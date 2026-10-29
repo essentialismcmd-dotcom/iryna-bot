@@ -5100,6 +5100,14 @@ def mist_navihator(key):
     return navihator()
 
 
+@app.post("/mist/<key>/navihator-pravka")
+def mist_navihator_pravka(key):
+    """Те саме, що /navihator-pravka/<SECRET>: наявний закріп правити, не плодити (Yaro 29.10)."""
+    if not _mist_ok(key):
+        return "no", 404
+    return navihator_pravka()
+
+
 @app.post("/mist/<key>/vydalyty")
 def mist_vydalyty(key):
     """?mid=<id>: прибрати пост бота з каналу (29.10: старий навігатор 120 після нового закріпу)."""

@@ -57,6 +57,10 @@ app.post("/mist/kliuch/navihator?de=kanal&opys=1")
 ok("навігатор: ?de=kanal&opys=1 у канал з описом", VYKLYKY and VYKLYKY[0][1]["chat_id"] == bot.CHANNEL_ID
    and any(m == "setChatDescription" and p["description"] == bot.NAV_OPYS for m, p in VYKLYKY))
 VYKLYKY.clear()
+app.post("/mist/kliuch/navihator-pravka?mid=120&de=kanal")
+ok("правка навігатора: editMessageText поста 120 у каналі", VYKLYKY and VYKLYKY[0][0] == "editMessageText"
+   and VYKLYKY[0][1]["chat_id"] == bot.CHANNEL_ID and VYKLYKY[0][1]["message_id"] == 120 and VYKLYKY[0][1]["text"] == bot.NAV_TEXT, str(VYKLYKY)[:200])
+VYKLYKY.clear()
 ok("прибрати пост: без mid 400", app.post("/mist/kliuch/vydalyty").status_code == 400 and not VYKLYKY)
 ok("прибрати пост: чужий ключ 404", app.post("/mist/zlyi/vydalyty?mid=120").status_code == 404 and not VYKLYKY)
 r = app.post("/mist/kliuch/vydalyty?mid=120")
