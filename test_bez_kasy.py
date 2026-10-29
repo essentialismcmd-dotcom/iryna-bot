@@ -151,7 +151,7 @@ VYKLYKY.clear()
 msg("Я вже купувала ваш курс, де дивитись?", uid=700)
 t = komu(700)
 ok("без покупки в базі: осмислена відповідь, не шаблон", t == [bot.OWNER_NONE] and bot.CLIENT_TEXT not in t, str(t))
-ok("без покупки: не тупик, є кнопки магніта і каналу", knopky(700)[:1] == ["Забрати три схеми світла"], str(knopky(700)))
+ok("без покупки: не тупик, є кнопка «Написати Ірі»", knopky(700)[:1] == ["Написати Ірі"], str(knopky(700)))
 ok("текст відповіді без довгих тире і без цін", "—" not in bot.OWNER_NONE + bot.OWNER_HAS and "грн" not in bot.OWNER_NONE + bot.OWNER_HAS)
 bot.owned_keys = lambda uid: {"k1"}
 bot.COURSE_SECTIONS["k1"] = [("Урок 1", [("video", "V1")])]

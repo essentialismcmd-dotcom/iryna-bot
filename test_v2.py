@@ -107,7 +107,7 @@ VYKLYKY.clear(); cb("mk:want")
 ok("заявка на МК: людині подяка", any("Записала" in x for x in komu(777)))
 ok("заявка на МК летить у LEAD_IDS", any("ЗАЯВКА НА МК" in x for x in komu(1)) and any("ЗАЯВКА НА МК" in x for x in komu(2)))
 VYKLYKY.clear(); msg("зйомка")
-ok("ЗЙОМКА: інстаграм і сигнал", any("інстаграм" in x for x in komu(777)) and any("ЗЙОМКУ" in x for x in komu(2)))
+ok("ЗЙОМКА: інстаграм і сигнал", any("особисті" in x for x in komu(777)) and any("ЗЙОМКУ" in x for x in komu(2)))
 VYKLYKY.clear(); msg("просто питання про щось")
 ok("звичайний текст як раніше", any("Прийняла" in x for x in komu(777)))
 
