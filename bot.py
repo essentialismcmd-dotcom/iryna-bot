@@ -5100,6 +5100,18 @@ def mist_navihator(key):
     return navihator()
 
 
+@app.post("/mist/<key>/vydalyty")
+def mist_vydalyty(key):
+    """?mid=<id>: прибрати пост бота з каналу (29.10: старий навігатор 120 після нового закріпу)."""
+    if not _mist_ok(key):
+        return "no", 404
+    mid = request.args.get("mid", "")
+    if not mid.isdigit():
+        return "mid числом", 400
+    r = api_raw("deleteMessage", chat_id=CHANNEL_ID, message_id=int(mid))
+    return ("пост %s прибрано" % mid) if r.get("ok") else ("не прибрано: " + str(r.get("description")), 500)
+
+
 @app.post("/mist/<key>/rozmova")
 def mist_rozmova(key):
     """JSON {id}: асистентка каже, що людина вже в розмові в особистих; дотики бота для неї стоп (29.10 Yaro)."""

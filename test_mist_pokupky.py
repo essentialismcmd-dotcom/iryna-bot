@@ -56,6 +56,11 @@ VYKLYKY.clear()
 app.post("/mist/kliuch/navihator?de=kanal&opys=1")
 ok("навігатор: ?de=kanal&opys=1 у канал з описом", VYKLYKY and VYKLYKY[0][1]["chat_id"] == bot.CHANNEL_ID
    and any(m == "setChatDescription" and p["description"] == bot.NAV_OPYS for m, p in VYKLYKY))
+VYKLYKY.clear()
+ok("прибрати пост: без mid 400", app.post("/mist/kliuch/vydalyty").status_code == 400 and not VYKLYKY)
+ok("прибрати пост: чужий ключ 404", app.post("/mist/zlyi/vydalyty?mid=120").status_code == 404 and not VYKLYKY)
+r = app.post("/mist/kliuch/vydalyty?mid=120")
+ok("прибрати пост: deleteMessage у каналі", r.status_code == 200 and VYKLYKY == [("deleteMessage", {"chat_id": bot.CHANNEL_ID, "message_id": 120})], str(VYKLYKY))
 bot.api_raw = _stary_raw
 ok("опис бота: особисті і «сама»", "@iryna_rul_studio" in bot.DESCRIPTIONS[""] and "відповідаю сама" in bot.DESCRIPTIONS[""]
    and len(bot.DESCRIPTIONS[""]) <= 512)
