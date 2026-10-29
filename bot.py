@@ -217,11 +217,11 @@ NEXT_AFTER_GUIDE = (
 )
 BROKEN_FILE_TEXT = ("Щось пішло не так з файлом ♥️ "
                     "Уже розбираюсь, надішлю сюди за кілька хвилин.")
-CLIENT_TEXT = ("Прийняла ♥️ Якщо це про зйомку, напишіть в інстаграм, "
-               "там відповідаю швидше: @iryna_rul_photographer")
+# 29.10 (Yaro): вільний текст у боті веде в особисті робочого акаунта, бо людині краще в особистих; асистентка там відповідає сама
+CLIENT_TEXT = ("Прийняла ♥️ Відповім вам особисто з @iryna_rul_studio, або напишіть туди самі, там швидше.")
 
 CLIENT_TEXT_BUYER = ("Прийняла ♥️ Ваші матеріали нижче, тисніть і дивіться. "
-                     "Якщо це про зйомку, напишіть в інстаграм: @iryna_rul_photographer")
+                     "Відповім вам особисто з @iryna_rul_studio, або напишіть туди самі.")
 
 # Закріп каналу обіцяє: «напишіть боту слово СВІТЛО, МК або ЗЙОМКА». До 25.09
 # бот на ці слова відповідав «напишіть в інстаграм», тобто обіцянка не
@@ -266,8 +266,8 @@ MK_HELLO = (
     "Якщо цікаво, напишіть мені в особисті, розкажу про дати і деталі 👇"   # 25.10 Yaro: розмова в особистих, не в боті
 )
 MK_ALBUM = ["static/mk2/mk-1.jpg", "static/mk2/mk-video.mp4"] + ["static/mk2/mk-%d.jpg" % i for i in (2, 3, 4, 5, 6)]
-SHOOT_TEXT = ("Про зйомку швидше в інстаграмі ♥️ @iryna_rul_photographer, "
-              "там відповідаю одразу. Ваше повідомлення я теж бачу.")
+SHOOT_TEXT = ("Про зйомку напишіть мені в особисті ♥️ @iryna_rul_studio, там відповідаю одразу. "
+              "Ваше повідомлення я теж бачу.")
 # Курсів у продажу нема (25.09): слово КУРС і старі кнопки курсу ведуть на
 # гайд і канал, без обіцянок «скоро».
 RETUSH_SOON = (
@@ -4990,6 +4990,85 @@ def navihator_pravka():
     return ("пост %s у %s оновлено" % (mid, chat)) if r.get("ok") else ("не оновлено: " + str(r.get("description")), 500)
 
 
+# ---------- міст «бот → асистентка» (29.10, Yaro: людина пише в бот, а відповідає їй асистентка з робочого @iryna_rul_studio) ----------
+MIST_KEY = os.getenv("MIST_KEY", "").strip()
+
+
+def _mist_ok(key):
+    return bool(MIST_KEY) and hmac.compare_digest(key, MIST_KEY)
+
+
+@app.get("/mist/<key>/povidomlennia")
+def mist_povidomlennia(key):
+    """Вільні повідомлення людей у боті (kind message і ask_answer) після id ?after=, з ніком і ім'ям; персонал не віддаємо."""
+    if not _mist_ok(key):
+        return "no", 404
+    try:
+        after = int(request.args.get("after", "0")); limit = max(1, min(200, int(request.args.get("limit", "50"))))
+    except ValueError:
+        return "bad", 400
+    staff = {i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i}
+    store.session_begin()
+    try:
+        rows = store.q("""select e.id, e.user_id, e.kind, e.payload, e.created_at, u.username, u.first_name, u.last_name
+                          from events e left join users u on u.user_id = e.user_id
+                          where e.id > %s and e.kind in ('message', 'ask_answer') order by e.id limit %s""",
+                       (after, limit), fetch="all") or []
+        mx = store.q("select coalesce(max(id), 0) as m from events", fetch="one") or {}
+    finally:
+        store.session_end()
+    out = []
+    for r in rows:
+        if r.get("user_id") in staff:
+            continue
+        p = r.get("payload") or {}
+        out.append({"id": r["id"], "uid": r["user_id"], "kind": r["kind"], "t": str(r["created_at"]),
+                    "text": p.get("text") or ("[відповідь на питання " + str(p.get("what")) + "]" if r["kind"] == "ask_answer" else ""),
+                    "nik": r.get("username") or "", "imia": " ".join(x for x in (r.get("first_name"), r.get("last_name")) if x)})
+    return {"povidomlennia": out, "max_id": mx.get("m", 0)}
+
+
+def tsina_do(target, uah, body):
+    """Ціна окремій людині і картка з кнопкою оплати (та сама логіка, що /tsina у чаті персоналу)."""
+    store.kv_set("tsina:" + str(target), str(uah))
+    code = order_code(target, "k12z")
+    store.add_purchase(target, "course", tier="k12z", order_code=code, amount_uah=uah)
+    store.log_event(target, "tier_pick", {"tier": "k12z", "code": code, "tsina": uah})
+    tu = store.get_user(target) or {}
+    name = who({"id": target, "username": tu.get("username"), "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
+    ok = send(target, body, pay_kb("k12z", target))
+    return ok, name, code
+
+
+@app.post("/mist/<key>/tsina")
+def mist_tsina(key):
+    """JSON {id, uah, text}: ціна людині і картка з кнопкою оплати в боті (асистентка з ПК замість /tsina від Yaro)."""
+    if not _mist_ok(key):
+        return "no", 404
+    j = request.get_json(silent=True) or {}
+    try:
+        target, uah = int(j.get("id")), int(j.get("uah")); body = str(j.get("text") or "").strip()
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "id і uah числа"}, 400
+    if not body:
+        return {"ok": False, "error": "потрібен text картки"}, 400
+    store.session_begin()
+    try:
+        ok, name, code = tsina_do(target, uah, body)
+    finally:
+        store.session_end()
+    notify("Асистентка з ПК: /tsina " + name + ", " + str(uah) + " грн, код " + code + (", надіслано" if ok else ", не дійшло"), uid=target)
+    return {"ok": bool(ok), "to": name, "code": code}
+
+
+@app.post("/mist/<key>/nadislaty")
+def mist_nadislaty(key):
+    """Те саме, що /nadislaty/<секрет>, але з ключем моста: людині без ніка асистентка пише через бота."""
+    if not _mist_ok(key):
+        return "no", 404
+    return nadislaty()
+
+
 @app.get("/pidsumok/" + SECRET)
 def pidsumok_route():
     """Лише читання (23.10): той самий текст, що йде Ірі о 21:00, без надсилання; «нічого» без продажів за день."""
@@ -5660,16 +5739,8 @@ def hook():
                     send(chat_id, "Напишіть так: /tsina 897646290 2500\nтекст картки з нового рядка")
                     return "ok"
                 target, uah = int(_parts[1]), int(_parts[2])
-                store.kv_set("tsina:" + str(target), str(uah))
-                code = order_code(target, "k12z")
-                store.add_purchase(target, "course", tier="k12z", order_code=code, amount_uah=uah)
-                store.log_event(target, "tier_pick", {"tier": "k12z", "code": code, "tsina": uah})
                 # 19.10, слово Yaro: людині нічого не вписувати
-                body = _body.strip()
-                tu = store.get_user(target) or {}
-                name = who({"id": target, "username": tu.get("username"),
-                            "first_name": tu.get("first_name"), "last_name": tu.get("last_name")})
-                ok = send(target, body, pay_kb("k12z", target))
+                ok, name, code = tsina_do(target, uah, _body.strip())
                 send(chat_id, ("Надіслано: " if ok else "Не дійшло: ") + name + ", " + str(uah) + " грн, код " + code)
                 return "ok"
             # Продаж з картки після ручної видачі (23.10): /prodazh <id> <грн> [gaid]; інакше ручна видача
