@@ -38,5 +38,27 @@ ok("магніт у Руслани, нік, ім'я", l[891005959]["mahnit"] and
 ok("сум нема у відповіді", "amount" not in str(d) and "uah" not in str(d))
 one = app.get("/mist/kliuch/pokupky?uid=6777702465").get_json()["liudy"]
 ok("?uid= одна людина", [x["uid"] for x in one] == [6777702465], one)
+
+# 29.10 «запускай»: навігатор під MIST_KEY (секрет вебхука лише на Render); без ?de=kanal лише чернетка
+VYKLYKY = []
+_stary_raw = bot.api_raw
+def _fake_raw(method, **p):
+    VYKLYKY.append((method, p))
+    return {"ok": True, "result": {"message_id": 7}}
+bot.api_raw = _fake_raw
+ok("навігатор: чужий ключ 404", app.post("/mist/zlyi/navihator").status_code == 404 and not VYKLYKY)
+r = app.post("/mist/kliuch/navihator")
+ok("навігатор: свій ключ публікує в чернетку і закріплює", r.status_code == 200 and VYKLYKY
+   and VYKLYKY[0][0].endswith("Message") and VYKLYKY[0][1]["chat_id"] == bot.CHERNETKA
+   and VYKLYKY[0][1]["text"] == bot.NAV_TEXT and VYKLYKY[1][0] == "pinChatMessage", str(VYKLYKY[:1])[:200])
+ok("навігатор: без ?opys опис не чіпає", not any(m == "setChatDescription" for m, _ in VYKLYKY))
+VYKLYKY.clear()
+app.post("/mist/kliuch/navihator?de=kanal&opys=1")
+ok("навігатор: ?de=kanal&opys=1 у канал з описом", VYKLYKY and VYKLYKY[0][1]["chat_id"] == bot.CHANNEL_ID
+   and any(m == "setChatDescription" and p["description"] == bot.NAV_OPYS for m, p in VYKLYKY))
+bot.api_raw = _stary_raw
+ok("опис бота: особисті і «сама»", "@iryna_rul_studio" in bot.DESCRIPTIONS[""] and "відповідаю сама" in bot.DESCRIPTIONS[""]
+   and len(bot.DESCRIPTIONS[""]) <= 512)
+ok("про себе ≤ 120", 0 < len(bot.OPYS_KOROTKO) <= 120 and "@iryna_rul_studio" in bot.OPYS_KOROTKO)
 print("ПАДІННЯ: " + ", ".join(bad) if bad else "усе зелене")
 sys.exit(1 if bad else 0)

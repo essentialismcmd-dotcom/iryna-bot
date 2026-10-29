@@ -5092,6 +5092,14 @@ def tsina_do(target, uah, body):
     return ok, name, code
 
 
+@app.post("/mist/<key>/navihator")
+def mist_navihator(key):
+    """Те саме, що /navihator/<SECRET>, але під MIST_KEY: секрет вебхука живе лише на Render (29.10 Yaro «запускай»)."""
+    if not _mist_ok(key):
+        return "no", 404
+    return navihator()
+
+
 @app.post("/mist/<key>/rozmova")
 def mist_rozmova(key):
     """JSON {id}: асистентка каже, що людина вже в розмові в особистих; дотики бота для неї стоп (29.10 Yaro)."""
@@ -6349,13 +6357,11 @@ def clear_scoped_commands():
 # 08.10): людина з запитом на ретуш не має бачити світло. Українська (типовий
 # опис) лишається про світло; ru і en про курс ретуші.
 # Пишемо людям завжди українською (слово Yaro 08.10), тому текст один для ru і en.
-_OPYS_RETUSH = ("Привіт, я Іра ❤️ Бʼюті і фешн фотограф, знімаю вже 7 років.\n\n"   # 24.10: людина з реклами пресета чи схеми бачить своє
-                "Тут мої безкоштовні матеріали: пресети, схеми світла, уроки. "
-                "А ще гайд «Світло» і курс ретуші: як я доводжу кадр до журнального вигляду.\n\n"
-                "Тисніть «Почати», і я надішлю те, по що ви прийшли.")
-# 08.10: і типовий (українська та решта мов) теж про ретуш, поки йде перша
-# покупниця з ретуші; опис про світло: brend/TEKSTY-2026-09-25.md.
-DESCRIPTIONS = {"": _OPYS_RETUSH, "ru": _OPYS_RETUSH, "en": _OPYS_RETUSH}
+_OPYS = ("Тут забираєте мої подарунки: пресет «Колір 1» і три схеми світла. "   # 29.10 Yaro «запускай»: питання в особисті, відповідає «сама»
+         "Гайд «Світло» і курс ретуші теж тут. "
+         "Питання по світлу, ретуші чи зйомці пишіть мені в особисті @iryna_rul_studio, відповідаю сама")
+DESCRIPTIONS = {"": _OPYS, "ru": _OPYS, "en": _OPYS}
+OPYS_KOROTKO = "Пресет, схеми світла, гайд і курс ретуші Іри Руль. Питання: @iryna_rul_studio"   # «Про себе», до 120 знаків
 
 
 def set_descriptions():
@@ -6363,6 +6369,7 @@ def set_descriptions():
         r = (api("setMyDescription", description=text[:512], language_code=lang) if lang
              else api("setMyDescription", description=text[:512]))
         log.info("опис %s: %s", lang, r)
+    log.info("про себе: %s", api("setMyShortDescription", short_description=OPYS_KOROTKO[:120]))
 
 
 USE_POLLING = os.getenv("USE_POLLING", "1").strip() != "0"   # 11.10: webhook Telegram->Render зависав на ~60 с
