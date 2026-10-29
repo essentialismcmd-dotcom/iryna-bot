@@ -5052,6 +5052,39 @@ def tsina_do(target, uah, body):
     return ok, name, code
 
 
+@app.get("/mist/<key>/pokupky")
+def mist_pokupky(key):
+    """Хто що купив, для асистентки (29.10 Yaro: знати покупців курсів, без грошей): ?uid= одна людина або всі
+    оплачені покупки; ключі як owned_keys, дата, нік, ім'я, магніт. Суми не віддаємо."""
+    if not _mist_ok(key):
+        return "no", 404
+    uid = request.args.get("uid", "").strip()
+    staff = {i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i}
+    store.session_begin()
+    try:
+        sql = """select p.user_id, p.tier, p.product, coalesce(p.paid_at, p.created_at) as t, u.username, u.first_name, u.last_name, u.got_magnet_at
+                 from purchases p left join users u on u.user_id = p.user_id where p.status in ('paid', 'delivered')"""
+        args = ()
+        if uid.lstrip("-").isdigit():
+            sql += " and p.user_id = %s"; args = (int(uid),)
+        rows = store.q(sql + " order by t", args, fetch="all") or []
+    finally:
+        store.session_end()
+    liudy = {}
+    for r in rows:
+        if r["user_id"] in staff:
+            continue
+        t = r.get("tier") or ""
+        kliuchi = {"t1"} if t in ("t1", "t2", "t3") else {"k1", "k2"} if t in ("k12", "k12z") else {t} if t in ("k1", "k2") else {r.get("product") or t}
+        l = liudy.setdefault(r["user_id"], {"uid": r["user_id"], "nik": r.get("username") or "",
+                                             "imia": " ".join(x for x in (r.get("first_name"), r.get("last_name")) if x),
+                                             "mahnit": bool(r.get("got_magnet_at")), "kupyv": []})
+        for k in sorted(kliuchi):
+            if k not in [x["shcho"] for x in l["kupyv"]]:
+                l["kupyv"].append({"shcho": k, "koly": str(r["t"])[:16]})
+    return {"liudy": list(liudy.values())}
+
+
 @app.post("/mist/<key>/tsina")
 def mist_tsina(key):
     """JSON {id, uah, text}: ціна людині і картка з кнопкою оплати в боті (асистентка з ПК замість /tsina від Yaro)."""
