@@ -509,6 +509,8 @@ KURS_CARD = ("Ретуш портрета за 15 хвилин\n\n"
              "Усередині: 18 відео, близько 135 хвилин: бʼюті-портрет, темний фон, фешн-колір, колір і мої пресети. "
              "Свою ретуш надсилаєте мені, і я напишу, що поправити у вашій роботі.\n\n"
              "Доступ назавжди, курс відкривається одразу після оплати.")   # 25.10: відгук прибрано, як у гайді
+# 30.10, слово Yaro: «приберемо ціну по курсу і будемо спонукати написати в особисті»; картка без ціни, ціна другою кнопкою.
+KURS_VITRYNA = KURS_CARD + "\n\nНапишіть мені, що зараз не виходить у ретуші, і я чесно скажу, чи підійде вам курс ♥️"
 PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=KURS_CARD + "\n\nЦіна курсу " + str(_K12) + " грн.")
 PRODUCTS["k12z"]["name"] = PRODUCTS["k12"]["name"] + " (знижка " + str(KURS_ZNYZHKA) + " %)"
 BY_CODE = {v["code"]: k for k, v in PRODUCTS.items()}
@@ -1337,10 +1339,40 @@ def send_retush(chat_id, uid=None, u=None):
         send(chat_id, RETUSH_INTRO, retush_kb())
 
 
-def pick_product(chat_id, uid, u, data, gate=True):
+def kurs_album_raz(chat_id, uid):
+    """Альбом до/після лише вперше: не бачила ні вітрини, ні картки з ціною."""
+    if not uid or kurs_pershyi(uid) or store.kv_get("kurs_vitryna:" + str(uid)):
+        return
+    store.kv_set("kurs_vitryna:" + str(uid), str(int(time.time())))
+    send_kurs_album(chat_id)
+
+
+def kurs_vitryna_kb():
+    return {"inline_keyboard": [
+        [{"text": "Спитати Іру", "url": dm_url("Добрий день! Дивлюсь курс ретуші, хочу спитати: ")} if IRA_DM_URL else
+         {"text": "Спитати Іру", "callback_data": "ask:kurs"}],
+        [{"text": "Ціна і оплата", "callback_data": "kurs:tsina"}]]}
+
+
+def kurs_vitryna(chat_id, uid, u, data):
+    """Курс без ціни (30.10): вікно особистої ціни не починається, покупка не створюється, бо ціни людина ще не бачила."""
+    kurs_album_raz(chat_id, uid)
+    store.log_event(uid, "kurs_vitryna")
+    send_card_file(chat_id, "static/kurs-kartka2.png", KURS_VITRYNA, kurs_vitryna_kb())
+    if lead_once(uid, "vitryna:kurs"):
+        notify("Дивиться курс: " + PRODUCTS[data]["name"] + "\n" + who(u) + shliakh(uid), give_kb(uid, data), uid=uid)
+
+
+def kurs_u_rozmovi(uid):
+    """Вже говорить (асистентка, kv rozmova:) чи має свою ціну: вітрина зайва, «напишіть» уже було."""
+    return bool(store.kv_get("tsina:" + str(uid)) or store.kv_get("rozmova:" + str(uid)))
+
+
+def pick_product(chat_id, uid, u, data, gate=True, oplata=False):
     """Картка товару з кодом платежу і кнопкою оплати (кнопка тарифу і /start kurs).
     gate: ворота ціни (п.4-6): холодній людині ретуші замість картки курсу йде запрошення Т9;
-    явні теплі входи (/start kurs, kurs10, /kurs, кнопка «Розкажіть про курс») кличуть з gate=False."""
+    явні теплі входи (/start kurs, kurs10, /kurs, кнопка «Розкажіть про курс») кличуть з gate=False.
+    oplata: людина сама попросила ціну; без неї курс показує вітрину без ціни (30.10)."""
     # 08.10, слово Yaro: знижка 10 % поки для всіх, кожен бачить її як особисту.
     if data == "k12" and COURSE_BUNDLE_ONLY:
         data = "k12z"
@@ -1348,10 +1380,12 @@ def pick_product(chat_id, uid, u, data, gate=True):
     if gate and t["product"] == "course" and cold(uid):
         send_zapr(chat_id, uid)
         return
+    if data in ("k12", "k12z") and uid and not oplata and not kurs_u_rozmovi(uid):
+        kurs_vitryna(chat_id, uid, u, data)
+        return
     code = order_code(uid, data)
     if data in ("k12", "k12z"):
-        if uid and not kurs_pershyi(uid):
-            send_kurs_album(chat_id)              # 25.10: вперше бачить курс, спершу до/після, потім ціна
+        kurs_album_raz(chat_id, uid)              # 25.10: вперше бачить курс, спершу до/після, потім ціна
         kurs_pershyi(uid, mark=True)              # 24.10: з цієї хвилини йдуть 48 год особистої ціни
     base = osobysta_tsina(uid, data) or t["uah"]
     suma = suma_oplaty(uid, data, base)
@@ -1376,7 +1410,7 @@ def pick_product(chat_id, uid, u, data, gate=True):
         send(chat_id, body, kb)
     if lead_once(uid, "zayavka:" + data):
         # 25.10 Yaro: це не заявка, людина лише відкрила картку з ціною; і видно, що дивилась до цього
-        notify(("Дивиться курс: " if t["product"] == "course" else "Дивиться: ") + t["name"] + "\n" + who(u)
+        notify(("Дивиться ціну курсу: " if t["product"] == "course" else "Дивиться: ") + t["name"] + "\n" + who(u)
                + "\nКод: " + code + shliakh(uid),
                give_kb(uid, data), uid=uid)
 
@@ -2527,12 +2561,13 @@ def touch_run(now=None):
             n += 1 if ok else 0
         except Exception:
             log.exception("touch_w1 %s", uid)
-    for uid in store.kurs_pending(TOUCH_KURS[0], TOUCH_KURS[1], skip, "touch_kurs:") or []:
+    for uid in set(store.kurs_pending(TOUCH_KURS[0], TOUCH_KURS[1], skip, "touch_kurs:") or []) | set(
+            store.kurs_vitryna_pending(TOUCH_KURS[0], TOUCH_KURS[1], skip, "touch_kurs:") or []):
         try:
             if owned_keys(uid, real=True) or not _touch_ok(uid) or not store.kv_claim("touch_kurs:" + str(uid)):
                 continue
             do = kurs_do(uid)
-            if store.kv_get("tsina:" + str(uid)) or not kurs_pershyi(uid) or time.time() > do - 3 * 3600:
+            if store.kv_get("tsina:" + str(uid)) or time.time() > do - 3 * 3600:
                 continue                          # своя ціна або строк уже минає: нагадувати нема про що
             ok = send(uid, TOUCH_KURS_TEXT, dm_kb())
             store.log_event(uid, "touch", {"step": "kurs", "ok": bool(ok)})
@@ -4467,7 +4502,7 @@ def kabinet_kupyty():
         u = dict(store.get_user(uid) or {})
         u["id"] = uid
         store.kv_set("tag:" + str(uid), "retush")   # як /start kurs
-        pick_product(uid, uid, u, "k12")
+        pick_product(uid, uid, u, "k12", oplata=True)   # 30.10: натиснула «Купити» в кабінеті, ціна на місці
     except Exception:
         log.exception("kabinet-kupyty")
         return "error", 500
@@ -6234,6 +6269,10 @@ def hook():
                 store.log_event(uid, "kurs_pay")
                 if not course_owner_reply(chat_id, uid):
                     pick_product(chat_id, uid, u, "k12", gate=False)
+            elif data == "kurs:tsina":
+                store.log_event(uid, "kurs_tsina_tap")
+                if not course_owner_reply(chat_id, uid):
+                    pick_product(chat_id, uid, u, "k12", gate=False, oplata=True)
             elif data == "kurs:potim":
                 store.log_event(uid, "kurs_potim")
                 send(chat_id, KURS_POTIM)

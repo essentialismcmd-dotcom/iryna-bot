@@ -647,6 +647,24 @@ def touch_candidates(since_iso, lo_h, hi_h, skip_ids, skip_kv, with_gift=False, 
     return [(r["user_id"], r["got_magnet_at"]) for r in rows or []]
 
 
+def kurs_vitryna_pending(lo_h, hi_h, skip_ids, skip_kv):
+    """Як kurs_pending, для тих, хто бачив курс без ціни (30.10): покупки в них нема, лише подія kurs_vitryna."""
+    rows = q("""
+        select e.user_id from events e
+        where e.kind = 'kurs_vitryna'
+          and not (e.user_id = any(%s))
+          and not exists (select 1 from purchases x where x.user_id = e.user_id
+                          and x.status in ('paid', 'delivered'))
+          and not exists (select 1 from kv where kv.k = 'blocked:' || e.user_id::text)
+          and not exists (select 1 from kv where kv.k = %s || e.user_id::text)
+        group by e.user_id
+        having max(e.created_at) < now() - make_interval(hours => %s)
+           and max(e.created_at) >= now() - make_interval(hours => %s)
+        order by max(e.created_at) limit 30
+    """, (list(skip_ids), skip_kv, lo_h, hi_h), fetch="all")
+    return [r["user_id"] for r in rows or []]
+
+
 def kurs_pending(lo_h, hi_h, skip_ids, skip_kv):
     """Д-курс (24.10, аудит 2): обрали курс (покупка course зі статусом new) між lo_h і hi_h годин тому,
     нічого не оплатили, без 403 і без зробленого дотику (kv skip_kv<id>). Повертає [user_id]."""

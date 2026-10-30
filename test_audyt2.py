@@ -7,6 +7,7 @@ except Exception:
 os.environ.setdefault("BOT_TOKEN", "x")
 os.environ.setdefault("PAY_URL", "https://pay.test/x")
 import bot, store
+bot.kurs_u_rozmovi = lambda uid: True   # 30.10: тут картка з ціною, вітрина в test_kurs_vitryna
 bot.send_card_file = lambda chat_id, path, text, markup=None: bot.send(chat_id, text, markup)   # 25.10: картка курсу з фото, тексти перевіряємо як раніше
 from datetime import datetime, timezone
 

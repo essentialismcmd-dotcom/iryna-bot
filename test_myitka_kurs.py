@@ -34,6 +34,7 @@ def fake_post(url, json=None, data=None, files=None, timeout=None):
 
 requests.post = fake_post
 import bot
+bot.kurs_u_rozmovi = lambda uid: True   # 30.10: тут картка з ціною, вітрина в test_kurs_vitryna
 bot.send_card_file = lambda chat_id, path, text, markup=None: bot.send(chat_id, text, markup)   # 25.10: картка курсу з фото, тексти перевіряємо як раніше
 
 app = bot.app.test_client()

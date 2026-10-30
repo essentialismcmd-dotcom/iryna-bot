@@ -114,6 +114,7 @@ ok("звичайний текст як раніше", any("Прийняла" in 
 # 3. Режим «тільки пакет»
 VYKLYKY.clear(); cb("retush")
 ok("без режиму: кваліфікатор", knopky() == ["Тільки починаю", "Вже працюю у фотошопі"])
+bot.kurs_u_rozmovi = lambda uid: True   # 30.10: тут картка з ціною, вітрина в test_kurs_vitryna
 bot.COURSE_BUNDLE_ONLY = True
 VYKLYKY.clear(); cb("retush")
 ok("тільки пакет: одразу картка зі знижкою 10 %, оплата", any("Для вас " in x and "впишіть" not in x for x in komu(777)) and "Оплатити в кілька кліків" in knopky(), str(komu(777))[-300:])
