@@ -166,7 +166,7 @@ GUIDE_INTRO_ONE = "Натисніть кнопку нижче, і гайд бу�
 
 
 def guide_intro(kb):
-    n = len(kb.get("inline_keyboard", []))
+    n = len([b for r in kb.get("inline_keyboard", []) for b in r if b.get("callback_data") in TIERS])   # 31.10: без кнопки «Спитати»
     return GUIDE_INTRO_HEAD + (GUIDE_INTRO_MANY.get(n, GUIDE_INTRO_MANY[3]) if n > 1 else GUIDE_INTRO_ONE)
 NOGET_WAIT = int(os.getenv("NOGET_WAIT", "600"))   # с: стільки чекаємо банк, перш ніж турбувати адміна (Yaro 22.10)
 # 29.10 Yaro: кнопку тисне майже кожен покупець у паузу банку; кажемо правду про 1-3 хв і куди писати, якщо не прийде
@@ -223,10 +223,12 @@ BROKEN_FILE_TEXT = ("Щось пішло не так з файлом ♥️ "
                     "Уже розбираюсь, надішлю сюди за кілька хвилин.")
 # 29.10 (Yaro): вільний текст у боті веде в особисті робочого акаунта, бо людині краще в особистих; асистентка там відповідає сама
 # 29.10 Yaro «Так. Роби.»: без обіцянки «сама напишу» (людині без ніка не виконаємо); кличемо написати самій
-CLIENT_TEXT = ("Прийняла ♥️ Напишіть мені в особисті @iryna_rul_studio, там відповідаю сама.")
+# 31.10 (Yaro «перебудувати все»): під вільним текстом кнопка, у якій уже лежить те, що людина написала; «сама» не кажемо
+CLIENT_TEXT = ("Прийняла ♥️ Відповідаю в особистих @iryna_rul_studio. Натисніть кнопку: ваше повідомлення вже там, "
+               "лишиться надіслати.")
 
 CLIENT_TEXT_BUYER = ("Прийняла ♥️ Ваші матеріали нижче, тисніть і дивіться. "
-                     "Питання пишіть мені в особисті @iryna_rul_studio, там відповідаю сама.")
+                     "Питання пишіть мені в особисті @iryna_rul_studio.")
 
 # Закріп каналу обіцяє: «напишіть боту слово СВІТЛО, МК або ЗЙОМКА». До 25.09
 # бот на ці слова відповідав «напишіть в інстаграм», тобто обіцянка не
@@ -256,7 +258,7 @@ MK_THANKS = ("Записала ♥️ Напишіть мені в особис�
              "і що хочете розібрати, там і домовимось.")   # 29.10: розмова в особистих, не в боті   # 24.10 аудит 2: кваліфікація до розмови
 # 24.10 (аудит 2): відповідь людини після «Є питання до Іри» чи заявки МК не йде в «напишіть в інстаграм»
 ASK_KURS = ("Напишіть мені в особисті @iryna_rul_studio своє питання про курс ♥️ Наприклад, чи підійде вам, "
-            "якщо ви тільки починаєте. Відповім сама.")
+            "якщо ви тільки починаєте. Відповім там.")
 ASK_GOT = "Дякую, отримала ♥️ Напишіть мені в особисті @iryna_rul_studio, там відповім."
 ASK_HOURS = 24
 # 20.10 (слово Yaro): кнопка «Хочу на МК» в каналі більше не показує одразу картку з заявкою.
@@ -333,10 +335,10 @@ OWNER_NONE = ("Дякую, що ви вже з нами ♥️ У цьому б�
 # Після видачі гайда (без курсів): до 25.09 тут було порожньо, людина
 # отримувала файл і далі нічого. Тепер наступна сходинка, канал.
 # 29.10 Yaro: після гайда підтримка в особистих, кнопка відкриває чат з готовим першим повідомленням
+# 31.10 Yaro «нехай думають, що відповідає Іра»: один голос у боті, без «помічниці» (повернути: цей рядок до 30.10 у git)
 HAJD_PIDTRYMKA = ("Гайд ваш назавжди, він же лежить у «Мої матеріали» ♥️\n\n"
-                  "Підтримка по схемах 24/7 у моїх особистих @iryna_rul_studio: там моя цифрова помічниця, "
-                  "знає всі тринадцять схем, пояснить незрозуміле і перед зйомкою підкаже, яку ставити. "
-                  "Напишіть їй зараз, що знімаєте, вона підбере першу схему.")
+                  "Питання по схемах пишіть мені в особисті @iryna_rul_studio, відповідаю там 24/7: поясню незрозуміле "
+                  "і перед зйомкою підкажу, яку з тринадцяти ставити. Напишіть зараз, що знімаєте, підберу першу схему.")
 HAJD_PERSHE = "Привіт! Купила гайд «Світло», знімаю "
 NEXT_AFTER_GUIDE_NOC = (
     "Гайд ваш, доступ залишається назавжди ♥️\n\n"
@@ -1296,13 +1298,20 @@ def send_paused(chat_id):
     send(chat_id, PAUSED_TEXT, paused_kb())
 
 
-def after_kb():
-    rows = [[{"text": "Написати Ірі", "url": IRA_DM_URL}]]   # 29.10 Yaro: першою кнопкою розмова
-    if CHANNEL_URL:
-        rows.append([{"text": "Канал «для своїх»", "url": CHANNEL_URL}])
+def after_kb(pered="", ekran="", uid=None, kanal=False):
+    """Кнопки після подарунка (пресет, схема 4). 31.10 (Yaro «перебудувати все», CRM 17–30.10): першою кнопкою чат
+    з Ірою з уже початою фразою (людині лишається дописати слово), другою гайд. Курс з-під подарунка прибрано:
+    66 зі 102 переглядів курсу були холодні ≤5 хв після входу з реклами, купили 0; повернути KURS_PID_PODARUNKOM=1.
+    Канал не повторюємо: подарунок видається за підписку; kanal=True лише give_magnet (файл без підписки, AFTER просить
+    канал). uid+ekran пишуть подію dm_offer (замір)."""
+    rows = [[{"text": "Показати кадр Ірі" if pered else "Написати Ірі", "url": dm_url(pered)}]] if IRA_DM_URL else []
     rows += guide_rows()
-    if courses_sale():
+    if kanal:
+        rows += channel_rows()
+    if KURS_PID_PODARUNKOM and courses_sale():
         rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
+    if uid and ekran:
+        bg(store.log_event, uid, "dm_offer", {"ekran": ekran})
     return {"inline_keyboard": rows}
 
 
@@ -1311,8 +1320,12 @@ def active_tiers():
 
 
 def tiers_kb():
-    return {"inline_keyboard": [[{"text": TIERS[k]["btn"], "callback_data": k}]
-                                for k in active_tiers()]}
+    """Картка гайда з ціною (закон Yaro: гайд продає сам). 31.10: під тарифом кнопка спитати перед покупкою,
+    чат відкривається з початою фразою."""
+    rows = [[{"text": TIERS[k]["btn"], "callback_data": k}] for k in active_tiers()]
+    if IRA_DM_URL:
+        rows.append([{"text": "Спитати перед покупкою", "url": dm_url(PERED_HAJD)}])
+    return {"inline_keyboard": rows}
 
 
 def retush_kb():
@@ -1352,16 +1365,20 @@ def kurs_album_raz(chat_id, uid):
 
 
 def kurs_vitryna_kb():
-    return {"inline_keyboard": [
-        [{"text": "Написати Ірі", "url": dm_url("Добрий день! Цікавить, як ви ретушуєте і чи зможу я так само.")} if IRA_DM_URL else
-         {"text": "Написати Ірі", "callback_data": "ask:kurs"}],
-        [{"text": "Ціна і оплата", "callback_data": "kurs:tsina"}]]}
+    """31.10: одна кнопка, чат з початою фразою (людина дописує, що знімає). «Ціна і оплата» лише з KURS_TSINA_KNOPKA=1:
+    закон Yaro «ціну курсу холодним не показуємо», ціну бачили 76, без розмови 0 оплат (28.10)."""
+    rows = [[{"text": "Написати Ірі", "url": dm_url(PERED_KURS)} if IRA_DM_URL else
+             {"text": "Написати Ірі", "callback_data": "ask:kurs"}]]
+    if KURS_TSINA_KNOPKA:
+        rows.append([{"text": "Ціна і оплата", "callback_data": "kurs:tsina"}])
+    return {"inline_keyboard": rows}
 
 
 def kurs_vitryna(chat_id, uid, u, data):
     """Курс без ціни (30.10): вікно особистої ціни не починається, покупка не створюється, бо ціни людина ще не бачила."""
     kurs_album_raz(chat_id, uid)
     store.log_event(uid, "kurs_vitryna")
+    store.log_event(uid, "dm_offer", {"ekran": "kurs"})
     send_card_file(chat_id, "static/kurs-kartka2.png", KURS_VITRYNA, kurs_vitryna_kb())
     if lead_once(uid, "vitryna:kurs"):
         notify("Дивиться курс: " + PRODUCTS[data]["name"] + "\n" + who(u) + shliakh(uid), give_kb(uid, data), uid=uid)
@@ -1406,8 +1423,9 @@ def pick_product(chat_id, uid, u, data, gate=True, oplata=False):
                  "\n\nПісля оплати гайд прийде сюди сам за 1-3 хвилини, нічого натискати не треба ♥️")
     kb = pay_kb(data, uid)
     if t["product"] == "course":                   # 24.10 аудит 2: 64 натиснули курс, 4 купили, питати не було як
-        kb["inline_keyboard"].insert(1, [{"text": "Написати Ірі", "url": IRA_DM_URL} if IRA_DM_URL else
+        kb["inline_keyboard"].insert(1, [{"text": "Написати Ірі", "url": dm_url(PERED_KURS_TSINA)} if IRA_DM_URL else
                                          {"text": "Написати Ірі", "callback_data": "ask:kurs"}])
+        store.log_event(uid, "dm_offer", {"ekran": "kurs_tsina"})
     if data in ("k12", "k12z") and len(body) <= 1024:
         send_card_file(chat_id, "static/kurs-kartka2.png", body, kb)   # 25.10 Іра: Єва до/після, як картка гайда
     else:
@@ -1428,7 +1446,8 @@ SHLIAKH_KINDS = {"preset_entry": "пресет", "preset": "пресет", "vidh
                  "svitlo_entry": "урок «Світло»", "magnet": "урок «Світло»", "lesson_gift": "безкоштовний урок",
                  "retush_entry": "безкоштовний урок", "kanal_join": "підписка на канал",
                  "touch": "нагадування бота", "staff_reply": "Іра писала", "message": "писала в бот",
-                 "pay_ok": "оплата"}
+                 "pay_ok": "оплата", "kurs_vitryna": "курс без ціни", "tier_pick": "картка з ціною",
+                 "dm_written": "написала в особисті"}   # 31.10
 
 
 def shliakh(uid, most=8):
@@ -1560,8 +1579,8 @@ def ask_open(uid):
 
 def mk_kb():
     # 25.10 Yaro: бот не розпитує, а веде в особисті Іри; стара кнопка mk:want у чатах далі працює
-    return {"inline_keyboard": [[{"text": "Написати Ірі в особисті", "url": IRA_DM_URL} if IRA_DM_URL else
-                                 {"text": "Хочу на майстер-клас", "callback_data": "mk:want"}]]}
+    return {"inline_keyboard": [[{"text": "Написати Ірі в особисті", "url": dm_url(PERED_MK)} if IRA_DM_URL else
+                                 {"text": "Хочу на майстер-клас", "callback_data": "mk:want"}]]}   # 31.10: почата фраза
 
 
 def mk_hello_kb():
@@ -1579,22 +1598,51 @@ def dm_url(pered=""):
     return IRA_DM_URL
 
 
-def dm_kb(text="Написати Ірі", pered=""):
-    """29.10 (Yaro): одна кнопка в особисті робочого акаунта; продає розмова, не бот."""
+def dm_kb(text="Написати Ірі", pered="", uid=None, ekran=""):
+    """29.10 (Yaro): одна кнопка в особисті робочого акаунта; продає розмова, не бот.
+    31.10: uid+ekran пишуть подію dm_offer (скільки людей бачили кнопку з якого екрана; /stats і /mist/shliakhy)."""
+    if uid and ekran:
+        bg(store.log_event, uid, "dm_offer", {"ekran": ekran})
     return {"inline_keyboard": [[{"text": text, "url": dm_url(pered)}]]}
+
+
+# 31.10, Yaro «перебудувати все, щоб воронка і тексти вели до розмови»: кожна кнопка в особисті відкриває чат
+# з уже початою фразою (t.me/…?text=), обірваною там, де людині лишається дописати одне своє слово.
+# CRM 17–30.10: 102 дивились курс, самі в особисті не написав ніхто; готові фрази люди відправляють
+# (5 «Хочу ще пресети» за два дні). Порожнє поле чату найдорожча дія, фраза знімає її.
+PERED_PRESET = "Привіт, Іро! Пресет «{nazva}» взяла. Знімаю "
+PERED_SHEMY = "Привіт, Іро! Три схеми світла взяла. Знімаю "
+PERED_SHEMA4 = "Привіт, Іро! Схему з циклорамою взяла. Знімаю "
+PERED_HAJD = "Привіт! Дивлюсь гайд «Світло». Знімаю "
+PERED_KURS = "Привіт! Цікавить курс ретуші. Знімаю "
+PERED_KURS_TSINA = "Привіт! Бачу ціну курсу ретуші, є питання: "
+PERED_MK = "Привіт! Хочу на майстер-клас зі світла. Я з "
+PERED_TSINA = "Привіт! Хочу дізнатись ціну. Знімаю "
+PERED_ZYOMKA = "Привіт! Хочу записатись на зйомку. Я з "
+PERED_MOI = "Привіт! Питання по матеріалах: "
+PERED_PRESET_MORE = "Привіт! Хочу ще пресети під "
+KURS_PID_PODARUNKOM = os.getenv("KURS_PID_PODARUNKOM", "0") == "1"   # кнопка курсу під подарунком, як до 31.10
+KURS_TSINA_KNOPKA = os.getenv("KURS_TSINA_KNOPKA", "0") == "1"       # «Ціна і оплата» під вітриною курсу, як 30.10
+
+
+def pered_vilnyi(text):
+    """Під вільним текстом людини: її ж слова в полі чату (одна дія: надіслати). Довге ріжемо, команди не переносимо."""
+    t = " ".join((text or "").split())
+    return "" if not t or t.startswith("/") else t[:300]
 
 
 def empty_kb(uid=None):
     """Порожні «Мої матеріали» і будь-який текст: три схеми, гайд, канал.
     Людині з міткою курсу: курс і канал, без світла."""
+    dm = [[{"text": "Написати Ірі", "url": dm_url(PERED_MOI)}]] if IRA_DM_URL else []   # 31.10: платформа веде в чат
     if course_person(uid):
-        return {"inline_keyboard": [[{"text": "Курс ретуші", "callback_data": "retush"}]] + channel_rows()}
+        return {"inline_keyboard": [[{"text": "Курс ретуші", "callback_data": "retush"}]] + channel_rows() + dm}
     rows = [[{"text": "Забрати три схеми світла", "callback_data": "magnet"}]]
     if courses_sale():
         rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
     else:
         rows += guide_rows()
-    return {"inline_keyboard": rows + channel_rows()}
+    return {"inline_keyboard": rows + channel_rows() + dm}
 
 
 def retush_off_kb():
@@ -1637,8 +1685,9 @@ SUB_NO = (                                  # Т2: натиснула, а в к�
 )
 GIFT_SUB = (                                # Т3: підписка підтверджена, файл нижче
     "Дякую, що ви з нами ♥️ Тримайте подарунок: «Три схеми світла з одного сетапу». "
-    "Три різні картинки за одну зйомку, без докупки обладнання. Спробуйте на найближчій зйомці, "
-    "а що вийшло, надішліть мені в особисті @iryna_rul_studio: подивлюсь кадр і підкажу."   # 29.10 Yaro: людина має прийти в розмову
+    "Три різні картинки за одну зйомку, без докупки обладнання.\n\n"
+    "Поставте на найближчій зйомці і покажіть мені кадр: гляну і підкажу. "
+    "Ще не знімали зі схемами? Напишіть, на чому і де знімаєте, скажу, з якої почати."   # 31.10: привід написати є в кожної
 )
 SUB_ALREADY = "Подарунок уже у вас ♥️ Файл надсилала вище в цьому чаті."
 SUB_UNKNOWN = "Не можу зараз перевірити підписку ♥️ Подивлюсь сама і надішлю файл."   # ризик (а): бот не адмін каналу
@@ -1658,9 +1707,9 @@ GIFT_DONE = _GIFT_DONE_SUB if GIFT_FOR_SUB else _GIFT_DONE_AUTO
 TOUCH_D1_LESSON = "Урок чекає на вас ♥️ 7 хвилин, коли буде зручно"       # Д1, ще не додивилась
 TOUCH_STOP = "\n\nЯкщо не хочете таких повідомлень, напишіть «стоп»."                 # 24.10: відписка словом (PUSH_STOP_RE), раніше про неї ніде не казали
 # 29.10 Yaro: Д2 без ціни і картки, кличе в розмову з помічницею в особистих; гайд продає вже вона
-TOUCH_D2_HAJD = ("Вже пробували схеми? ♥️ Напишіть моїй помічниці в особисті @iryna_rul_studio, що знімаєте, "
-                 "вона підбере схему під ваше світло, а кадр подивиться і підкаже." + TOUCH_STOP)   # 29.10 Yaro 2226
-TOUCH_D2_PERSHE = "Привіт! Маю три схеми світла від Іри, знімаю "
+TOUCH_D2_HAJD = ("Вже пробували схеми? ♥️ Напишіть мені в особисті @iryna_rul_studio, що знімаєте: "
+                 "підберу схему під ваше світло, а кадр подивлюсь і підкажу." + TOUCH_STOP)   # 29.10 Yaro 2226; 31.10 голос «я»
+TOUCH_D2_PERSHE = "Привіт, Іро! Три схеми світла взяла, знімаю "
 TOUCH_D2_PRESET = ("Як вам пресет? ♥️ Якщо на вашому кадрі ліг не так, покажіть мені кадр в особисті @iryna_rul_studio, "
                    "підкажу, що підкрутити, і яке світло під нього." + TOUCH_STOP)   # 24.10 аудит 2: гайд про світло, ретуші в ньому нема   # 24.10, Д2 після пресета
 TOUCH_D2_SHEMA4 = ("Як вам схема з циклорамою? ♥️ Зняли за нею, надішліть кадр мені в особисті @iryna_rul_studio, "
@@ -1755,11 +1804,12 @@ def preset_hello_sub(keys):
 
 
 PRESET_ALREADY = "Пресет уже у вас ♥️ Файл надсилала вище в цьому чаті."
+# 31.10 (Yaro «перебудувати все»): після файла не продаж курсу, а привід написати, який є в кожної: кадр або «на чому знімаю»
 PRESET_AFTER = (
-    "Пресет дає колір. Він з мого кадру {kogo}, під мою камеру, світло і шкіру; на іншому кадрі ляже по-своєму, "
-    "це основа, яку далі підганяють під себе. Шкіру, обʼєм і світло на цих кадрах я роблю руками, "
-    "саме це розбираю в курсі ретуші.\n\n"
-    "Як ліг на вашому кадрі, покажіть мені в особисті @iryna_rul_studio, підкажу, що підкрутити."
+    "Пресет дає колір. Він з мого кадру {kogo}, під мою камеру, світло і шкіру; на вашому ляже по-своєму, "
+    "це нормально, його підганяють під себе.\n\n"
+    "Накиньте на свій кадр і покажіть мені, що вийшло: гляну і підкажу, що підкрутити. "
+    "Кадру під рукою нема? Напишіть, на чому і де знімаєте, підберу схему світла під вас."
 )
 # 22.10 (Yaro: «люди вибрали, яку схему світла ми робимо… рілс → бот → підписка → канал»): схема 4 з опитування
 # в каналі 20.10 («Темний фон з підсвіченою циклорамою», 9 з 23). ManyChat слово «ЦИКЛОРАМА» → ?start=shema4.
@@ -1776,8 +1826,8 @@ SHEMA4_HELLO = "Дякую, що ви з нами ♥️ Тримайте схе
 SHEMA4_AFTER = (
     "Ця схема одна з тринадцяти в моєму гайді «Світло»: до кожної розстановка, налаштування і кадри зі зйомки. "
     "Тут одна, у гайді ще дванадцять, доступ назавжди.\n\n"
-    "Зняли за нею, покажіть кадр мені в особисті @iryna_rul_studio, подивлюсь."
-)
+    "Зняли за нею, покажіть мені кадр, гляну і підкажу. Ще ні? Напишіть, на чому і де знімаєте, підкажу, як поставити."
+)   # 31.10: привід написати є в кожної
 
 SVITLO_REMIND = (                           # Д1 для svitlo/profil без файла: без уроку
     "Доброго дня ♥️ Три схеми світла чекають: підпишіться на канал «для своїх» і натисніть "
@@ -1938,7 +1988,7 @@ def give_shema4(chat_id, hello=True):
                                   caption="Схема 4 · Темний фон з підсвіченою циклорамою"):
         send(chat_id, "Файл тимчасово недоступний, напишіть мені в особисті @iryna_rul_studio ♥️")
         return
-    send_card(chat_id, CARD_GUIDE or CARD_MAGNIT, SHEMA4_AFTER, after_kb())
+    send_card(chat_id, CARD_GUIDE or CARD_MAGNIT, SHEMA4_AFTER, after_kb(PERED_SHEMA4, "shema4", chat_id))
 
 
 
@@ -2241,7 +2291,7 @@ def give_magnet(chat_id):
         send(chat_id, "Файл тимчасово недоступний, напишіть мені в особисті @iryna_rul_studio ♥️")
         return
     text = AFTER_NOPAY if not GUIDE_SALE else (AFTER if courses_sale() else AFTER_NOC)
-    send_card(chat_id, CARD_MAGNIT, text, after_kb())
+    send_card(chat_id, CARD_MAGNIT, text, after_kb(PERED_SHEMY, "magnet", chat_id, kanal=True))
 
 
 def preset_hello(keys):
@@ -2272,7 +2322,8 @@ def give_preset(chat_id, keys=None):
     after = PRESET_AFTER.format(kogo=PRESETS[keys[0]]["kogo"])
     if len(keys) > 1:
         after = after.replace("Пресет дає колір. Він з мого кадру %s" % PRESETS[keys[0]]["kogo"], "Пресети дають колір. Кожен з мого кадру")
-    kb = after_kb()
+    nazva = PRESETS[keys[0]]["name"] if len(keys) == 1 else "з відео"
+    kb = after_kb(PERED_PRESET.format(nazva=nazva), "preset", chat_id)
     kb["inline_keyboard"].append([{"text": "Хочу ще пресети", "callback_data": "preset:more"}])
     send_card(chat_id, CARD_MAGNIT, after, kb)
 
@@ -2325,10 +2376,20 @@ def free_name(w):
 
 
 def moi_kb(uid):
-    """«Мої матеріали»: куплене (lessons_kb) і безкоштовне."""
+    """«Мої матеріали»: куплене (lessons_kb) і безкоштовне. 31.10 (Yaro: бот як платформа всіх курсів):
+    нижче те, чого ще нема (гайд, курс), і чат з Ірою; порожні матеріали лишаються empty_kb."""
     rows = list((lessons_kb(uid) or {}).get("inline_keyboard") or [])
     rows += [[{"text": free_name(w), "callback_data": "my:free:" + w}] for w in free_owned(uid)]
-    return {"inline_keyboard": rows} if rows else None
+    if not rows:
+        return None
+    owned = owned_keys(uid)
+    if "t1" not in owned:
+        rows += guide_rows()
+    if courses_sale() and not ({"k1", "k2"} & owned):
+        rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
+    if IRA_DM_URL:
+        rows.append([{"text": "Написати Ірі", "url": dm_url(PERED_MOI)}])
+    return {"inline_keyboard": rows}
 
 
 def resend_free(chat_id, uid, w):
@@ -2376,9 +2437,11 @@ def give_gift(uid, text):
         return False
     send(uid, text)
     # 24.10 (розбір воронки): кнопка гайда одразу під схемами; без неї за годину купили 0 зі 143, з нею 5 з 51
-    rows = (channel_rows() if CHANNEL_URL else []) + guide_rows()
-    if courses_sale():                    # 25.10: курс у першій сесії лишається (VORONKA), на цьому шляху його не було
+    # 31.10: першою чат з Ірою з початою фразою; курс лише з KURS_PID_PODARUNKOM (див. after_kb)
+    rows = ([[{"text": "Показати кадр Ірі", "url": dm_url(PERED_SHEMY)}]] if IRA_DM_URL else []) + guide_rows() + channel_rows()
+    if KURS_PID_PODARUNKOM and courses_sale():
         rows.append([{"text": "Курс ретуші", "callback_data": "retush"}])
+    store.log_event(uid, "dm_offer", {"ekran": "shemy"})
     kb = {"inline_keyboard": rows} if rows else None
     ok = bool(api("sendDocument", retry=True, chat_id=uid, document=ref, reply_markup=kb))
     if ok:
@@ -2525,14 +2588,15 @@ def touch_run(now=None):
                 continue
             if not store.kv_claim("touch_d2:" + str(uid)):
                 continue
-            kb = dm_kb()                                   # 29.10: без картки гайда, в особисті
-            if got:
+            if got:                                        # 29.10: без картки гайда, в особисті; 31.10: почата фраза
                 text, what = TOUCH_D2_HAJD, "shemy"
-                kb = dm_kb("Написати помічниці", TOUCH_D2_PERSHE)
+                kb = dm_kb("Написати Ірі", TOUCH_D2_PERSHE, uid, "touch_d2")
             elif store.kv_get("shema4_given:" + str(uid)):
                 text, what = TOUCH_D2_SHEMA4, "shema4"
+                kb = dm_kb("Показати кадр Ірі", PERED_SHEMA4, uid, "touch_d2")
             else:                                          # 24.10: лише пресет (реклама preset_*)
                 text, what = TOUCH_D2_PRESET, "preset"
+                kb = dm_kb("Показати кадр Ірі", PERED_PRESET.format(nazva="Колір 1"), uid, "touch_d2")
                 kb = {"inline_keyboard": kb["inline_keyboard"] + [[{"text": "Хочу ще пресети", "callback_data": "preset:more"}]]}
             ok = send(uid, text, kb)
             if ok:
@@ -2576,7 +2640,7 @@ def touch_run(now=None):
             do = kurs_do(uid)
             if store.kv_get("tsina:" + str(uid)) or time.time() > do - 3 * 3600:
                 continue                          # своя ціна або строк уже минає: нагадувати нема про що
-            ok = send(uid, TOUCH_KURS_TEXT, dm_kb())
+            ok = send(uid, TOUCH_KURS_TEXT, dm_kb("Написати Ірі", PERED_KURS, uid, "touch_kurs"))   # 31.10: почата фраза
             store.log_event(uid, "touch", {"step": "kurs", "ok": bool(ok)})
             n += 1 if ok else 0
         except Exception:
@@ -2728,7 +2792,7 @@ def give_guide(uid, tier):
     if extra:
         send(uid, extra)
     # 29.10 Yaro: у момент оплати не продаємо курс, а даємо підтримку: помічниця в особистих 24/7
-    send(uid, HAJD_PIDTRYMKA, {"inline_keyboard": dm_kb("Написати помічниці", HAJD_PERSHE)["inline_keyboard"] + channel_rows()})
+    send(uid, HAJD_PIDTRYMKA, {"inline_keyboard": dm_kb("Написати Ірі", HAJD_PERSHE, uid, "hajd")["inline_keyboard"] + channel_rows()})
     return True
 
 
@@ -4732,6 +4796,12 @@ def starts_text():
                          + str(sum(int(r["presses"] or 0) for r in rest)))
         if not tags:
             lines.append("  стартів ще нема")
+    try:                                                   # 31.10: кнопка в особисті і розмови (dm_offer, kv rozmova:)
+        st = store.rozmova_stats(7) or {}
+        lines += ["", "В особисті за 7 днів: кнопку бачили %s, з них у розмові %s; дивились курс %s, з них у розмові %s"
+                  % (st.get("offer", 0), st.get("offer_rozmova", 0), st.get("kurs", 0), st.get("kurs_rozmova", 0))]
+    except Exception as e:
+        log.warning("rozmova_stats: %s", e)
     text = "\n".join(lines)
     return text if len(text) <= STATS_TEXT_MAX else text[:STATS_TEXT_MAX - 1] + "…"
 
@@ -5175,9 +5245,44 @@ def mist_rozmova(key):
     store.session_begin()
     try:
         store.kv_set("rozmova:" + str(target), str(int(time.time())))
+        # 31.10: подія dm_written у журналі людини (з якого екрана прийшла, перші слова), щоб бачити, що з бота доходить до розмови
+        store.log_event(target, "dm_written", {"ekran": str(j.get("ekran") or "")[:40], "text": str(j.get("text") or "")[:200]})
     finally:
         store.session_end()
     return {"ok": True}
+
+
+@app.get("/mist/<key>/shliakhy")
+def mist_shliakhy(key):
+    """31.10, лише читання: шлях кожної людини, якій бот пропонував написати Ірі (dm_offer) чи яка дивилась курс,
+    за ?days= (типово 14): мітка, події людською мовою (shliakh), чи в розмові (kv rozmova:), чи купила.
+    Для ранкового розбору без доступу до бази. Персонал не віддаємо."""
+    if not _mist_ok(key):
+        return "no", 404
+    try:
+        days = max(1, min(90, int(request.args.get("days", "14"))))
+    except ValueError:
+        return "bad", 400
+    staff = {i for i in [ADMIN_ID, IRA_ID] + NOTIFY_IDS + LEAD_IDS if i}
+    store.session_begin()
+    try:
+        rows = store.shliakhy_users(days) or []
+        out = []
+        for r in rows:
+            if r.get("user_id") in staff:
+                continue
+            uid = r["user_id"]
+            out.append({"uid": uid, "nik": r.get("username") or "", "imia": " ".join(x for x in (r.get("first_name"), r.get("last_name")) if x),
+                        "mitka": r.get("source_tag") or "", "vkhid": str(r.get("created_at") or ""), "ostannie": str(r.get("last_at") or ""),
+                        "ekrany": r.get("ekrany") or [], "rozmova": bool(store.kv_get("rozmova:" + str(uid))),
+                        "kupyla": sorted(owned_keys(uid, real=True)), "shliakh": shliakh(uid, most=12).strip()})
+        st = store.rozmova_stats(days) or {}
+    except Exception:
+        log.exception("mist shliakhy")
+        return {"error": "база"}, 500
+    finally:
+        store.session_end()
+    return {"days": days, "pidsumok": st, "liudy": out}
 
 
 @app.get("/mist/<key>/pokupky")
@@ -6169,10 +6274,10 @@ def hook():
                 elif k in ("preset", "svitlo", "shema4"):
                     slovo_podarunok(chat_id, uid, u, k)
                 elif k == "tsina":
-                    send(chat_id, TSINA_TEXT, dm_kb())
+                    send(chat_id, TSINA_TEXT, dm_kb("Написати Ірі", PERED_TSINA, uid, "tsina"))
                     notify("Питає ціну в боті: " + who(u) + "\nСлово: " + text, uid=uid, kind="msg")
                 else:
-                    send(chat_id, SHOOT_TEXT)
+                    send(chat_id, SHOOT_TEXT, dm_kb("Написати Ірі", PERED_ZYOMKA, uid, "zyomka"))
                     if lead_once(uid, "shoot"):
                         notify_lead("Питають про ЗЙОМКУ: " + who(u), uid=uid)
             else:
@@ -6200,7 +6305,7 @@ def hook():
                 elif not is_file and ask_open(uid):
                     what = ask_open(uid)                        # 24.10 аудит 2: людина відповідає на наше питання
                     store.log_event(uid, "ask_answer", {"what": what})
-                    send(chat_id, ASK_GOT, dm_kb())
+                    send(chat_id, ASK_GOT, dm_kb("Написати Ірі", pered_vilnyi(text), uid, "ask"))
                     notify_lead(("ПИТАННЯ ПО КУРСУ: " if what == "kurs" else "МК, ВІДПОВІДЬ: ") + who(u) + "\n" + text, uid=uid)
                 else:
                     # покупцю (курс чи гайд) під довільним текстом уроки, не «напишіть в інстаграм» (правка Б)
@@ -6209,7 +6314,8 @@ def hook():
                         # покупець питає, де уроки чи чому файли не відкриваються: картка зі стрілкою на «Кабінет»
                         store.log_event(uid, "de_video")
                         send_de_video(chat_id)
-                    send(chat_id, CLIENT_TEXT_BUYER if kb else CLIENT_TEXT, kb or dm_kb())   # 29.10 Yaro: під вільним текстом не продаємо, ведемо в особисті
+                    # 29.10 Yaro: під вільним текстом не продаємо, ведемо в особисті; 31.10: її ж слова вже в полі чату
+                    send(chat_id, CLIENT_TEXT_BUYER if kb else CLIENT_TEXT, kb or dm_kb("Написати Ірі", pered_vilnyi(text), uid, "tekst"))
             return "ok"
 
         if "callback_query" in upd:
@@ -6267,7 +6373,7 @@ def hook():
             elif data == "ask:kurs":
                 store.log_event(uid, "ask_kurs")
                 ask_set(uid, "kurs")
-                send(chat_id, ASK_KURS, dm_kb())
+                send(chat_id, ASK_KURS, dm_kb("Написати Ірі", PERED_KURS, uid, "ask_kurs"))
             elif data == "kurs:dorogo":
                 store.log_event(uid, "kurs_dorogo")
                 send(chat_id, KURS_DOROGO % _G, {"inline_keyboard": [[{"text": TIERS["t1"]["btn"], "callback_data": "guide"}]]}
@@ -6288,11 +6394,11 @@ def hook():
                     store.log_event(uid, "preset_more")
                     store.log_event(uid, "message", {"text": "[кнопка «Хочу ще пресети»]", "keyword": "preset_more"})
                     notify("Хоче ще пресети: " + who(u), uid=uid, kind="msg")
-                send(chat_id, PRESET_MORE, dm_kb())
+                send(chat_id, PRESET_MORE, dm_kb("Написати Ірі", PERED_PRESET_MORE, uid, "preset_more"))
             elif data == "mk:want":
                 store.log_event(uid, "mk_want")
                 ask_set(uid, "mk")
-                send(chat_id, MK_THANKS, dm_kb())
+                send(chat_id, MK_THANKS, dm_kb("Написати Ірі", PERED_MK, uid, "mk"))
                 if lead_once(uid, "mk"):
                     notify_lead("ЗАЯВКА НА МК: " + who(u) + "\nНаписати особисто.", uid=uid)
             elif not courses_sale() and (data in ("q:new", "q:pro") or data in COURSES):

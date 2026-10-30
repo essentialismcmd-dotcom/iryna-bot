@@ -335,7 +335,7 @@ ok("не персонал: нікому подарунків push1", not sent("s
                                                                                 for _, p in VYKLYKY))
 ok("не персонал: перегляду нема", not any("push1, перегляд" in (p.get("text") or "") for _, p in VYKLYKY))
 ok("не персонал: заявок push1 нема", not [k for k in DB["kv"] if k.startswith("push1:") and k != "push1:115"])
-DB["events"] = [e for e in DB["events"] if not (e[0] == 101 and e[1] == "message")]
+DB["events"] = [e for e in DB["events"] if not (e[0] == 101 and e[1] in ("message", "dm_offer"))]   # 31.10: відповідь бота на текст пише і dm_offer
 lyudyna(101, "Магніт", magnet=True)              # її «/push1 go» зробив би її свіжою: повертаємо як було
 
 # 5. go поза вікном, із заглушкою, без бази, зайнятий: нікому

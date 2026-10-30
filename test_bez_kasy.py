@@ -127,7 +127,7 @@ bot.PAY_URL = "https://pay.test/jar"
 bot.GUIDE_SALE = True
 VYKLYKY.clear()
 cb("guide", uid=559)
-ok("PAY_URL заданий: гайд і тариф на місці", knopky(559) == [bot.TIERS["t1"]["btn"]], str(knopky(559)))
+ok("PAY_URL заданий: гайд і тариф на місці", knopky(559) == [bot.TIERS["t1"]["btn"], "Спитати перед покупкою"], str(knopky(559)))
 VYKLYKY.clear()
 cb("t1", uid=559)
 ok("PAY_URL заданий: код і кнопка оплати", any("Оплатити в кілька кліків" in x for x in knopky(559)) and "Реквізити" not in " ".join(komu(559)),
@@ -243,7 +243,7 @@ bot.owned_keys = lambda uid: {"k1"}
 bot.COURSE_SECTIONS["k1"] = [("Урок 1", [("video", "V1")])]
 VYKLYKY.clear()
 msg("/moi", uid=903)
-ok("COURSES_ON=1 без каси: /moi власнику показує уроки", komu(903) == [bot.MOI_TEXT] and knopky(903) == ["Урок 1"],
+ok("COURSES_ON=1 без каси: /moi власнику показує уроки", komu(903) == [bot.MOI_TEXT] and knopky(903)[0] == "Урок 1" and knopky(903)[-1] == "Написати Ірі",
    str(komu(903)) + str(knopky(903)))
 VYKLYKY.clear()
 cb("les:k1:0", uid=903)

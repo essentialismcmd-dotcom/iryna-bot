@@ -684,6 +684,36 @@ def kurs_pending(lo_h, hi_h, skip_ids, skip_kv):
     return [r["user_id"] for r in rows or []]
 
 
+def rozmova_stats(days=7):
+    """31.10: скільки людей бачили кнопку в особисті (dm_offer) і скільки з них у розмові (kv rozmova:),
+    те саме для тих, хто дивився курс (kurs_vitryna, tier_pick). Без бази None."""
+    if not ON:
+        return None
+    return q("""
+        with o as (select distinct user_id from events where kind = 'dm_offer' and created_at > now() - make_interval(days => %s)),
+             k as (select distinct user_id from events where kind in ('kurs_vitryna', 'tier_pick')
+                   and created_at > now() - make_interval(days => %s)),
+             r as (select substr(k, 9)::bigint as user_id from kv where k like 'rozmova:%%' and substr(k, 9) ~ '^[0-9]+$')
+        select (select count(*) from o) as offer, (select count(*) from o join r using (user_id)) as offer_rozmova,
+               (select count(*) from k) as kurs, (select count(*) from k join r using (user_id)) as kurs_rozmova
+    """, (days, days), fetch="one")
+
+
+def shliakhy_users(days=14, limit=300):
+    """31.10: люди за days днів, яким бот пропонував написати (dm_offer) або які дивились курс; з мітками і екранами."""
+    if not ON:
+        return []
+    return q("""
+        select u.user_id, u.username, u.first_name, u.last_name, u.source_tag, u.created_at,
+               max(e.created_at) as last_at,
+               array_remove(array_agg(distinct e.payload ->> 'ekran'), null) as ekrany
+        from events e join users u on u.user_id = e.user_id
+        where e.kind in ('dm_offer', 'kurs_vitryna', 'tier_pick') and e.created_at > now() - make_interval(days => %s)
+        group by u.user_id, u.username, u.first_name, u.last_name, u.source_tag, u.created_at
+        order by max(e.created_at) desc limit %s
+    """, (days, limit), fetch="all")
+
+
 def user_wrote(uid):
     """29.10: людина вже заговорила з ботом (вільний текст, відповідь на питання, «Я оплатила»);
     слова-подарунки (пресет, світло, циклорама) не рахуються. Без бази False."""

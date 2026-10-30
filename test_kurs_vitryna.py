@@ -32,7 +32,11 @@ rows = kb["inline_keyboard"]
 ok("вітрина без ціни", "грн" not in t and "3300" not in t and "2970" not in t, t)
 ok("влазить у підпис картки", len(t) <= 1024, len(t))
 ok("перша кнопка в особисті з готовим текстом", rows[0][0]["text"] == "Написати Ірі" and "iryna_rul_studio?text=" in rows[0][0]["url"], rows)
-ok("друга кнопка ціна", rows[1][0] == {"text": "Ціна і оплата", "callback_data": "kurs:tsina"}, rows)
+ok("без KURS_TSINA_KNOPKA одна кнопка, ціни нема (31.10)", len(rows) == 1, rows)
+bot.KURS_TSINA_KNOPKA = True
+ok("з KURS_TSINA_KNOPKA=1 друга кнопка ціна", bot.kurs_vitryna_kb()["inline_keyboard"][1][0] == {"text": "Ціна і оплата", "callback_data": "kurs:tsina"},
+   bot.kurs_vitryna_kb())
+bot.KURS_TSINA_KNOPKA = False
 ok("вікно 48 год не почалось", not KV.get("kurs_pershyi:5"))
 ok("покупки нема, подія є", not BUY and "kurs_vitryna" in EV)
 ok("альбом один", len(ALBUM) == 1)

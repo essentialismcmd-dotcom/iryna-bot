@@ -31,7 +31,7 @@ bot.cold = lambda uid: False
 bot.pick_product(7, 7, {"id": 7}, "k12z", gate=False)
 uid, text, kb = out[-1]
 rows = [r[0].get("callback_data") or r[0].get("url", "")[:5] for r in kb["inline_keyboard"]]
-assert kb["inline_keyboard"][1][0].get("url") == bot.IRA_DM_URL, rows
+assert kb["inline_keyboard"][1][0].get("url") == bot.dm_url(bot.PERED_KURS_TSINA), rows
 assert str(bot.PRODUCTS["k12z"]["uah"]) in text, text
 assert "dorogo" not in str(kb) and kv.get("kurs_pershyi:7"), kb
 
@@ -54,6 +54,6 @@ bot.touch_run(now)
 bot.touch_run(now)
 assert len(out) == 1 and "грн" not in out[0][1] and "@iryna_rul_studio" in out[0][1], out   # 29.10 Yaro: без тиску ціною
 cb = [r[0].get("url") for r in out[0][2]["inline_keyboard"]]
-assert cb == [bot.IRA_DM_URL], cb
+assert cb == [bot.dm_url(bot.PERED_KURS)], cb   # 31.10: дотик курсу теж з початою фразою
 assert "%" not in bot.KURS_DOROGO % bot._G
 print("ok  аудит 2: пресет з назвою, питання до Іри, Д-курс")

@@ -161,7 +161,8 @@ STATUS["v"] = "member"
 VYKLYKY.clear()
 cb("magnet")
 perevirka("підписнику файл", [v for v in VYKLYKY if v[0] == "sendDocument"])
-perevirka("після магніта є кнопка курсу", "Курс ретуші" in ostannia_klaviatura(), str(ostannia_klaviatura()))
+perevirka("після магніта курсу нема (31.10, KURS_PID_PODARUNKOM=0), першою чат з Ірою",
+          "Курс ретуші" not in ostannia_klaviatura() and ostannia_klaviatura()[:1] == ["Показати кадр Ірі"], str(ostannia_klaviatura()))
 
 # 4. Кваліфікатор
 VYKLYKY.clear()
@@ -194,7 +195,7 @@ perevirka("тестова кнопка адміну є", "Я оплатив (т�
 # 6. Старий гайд працює як і раніше, показується тільки t1
 VYKLYKY.clear()
 cb("guide")
-perevirka("тарифи гайда: тільки сам гайд", ostannia_klaviatura() == ["Гайд, 650 грн"], str(ostannia_klaviatura()))
+perevirka("тарифи гайда: тільки сам гайд", ostannia_klaviatura() == ["Гайд, 650 грн", "Спитати перед покупкою"], str(ostannia_klaviatura()))
 VYKLYKY.clear()
 cb("t1")
 perevirka("код гайда старого виду", bot.order_code(777, "t1") == "IR" + bot.b36(777) + "-1")
@@ -227,7 +228,7 @@ perevirka("/moi без покупок: магніт", "Забрати три с�
 VYKLYKY.clear()
 cb("paid:t1", uid=1)
 perevirka("гайд пішов", any(m == "sendDocument" and p.get("document") == "GUIDE" for m, p in VYKLYKY))
-perevirka("після гайда кнопка помічниці (29.10)", "Написати помічниці" in ostannia_klaviatura(1))
+perevirka("після гайда кнопка в особисті Іри (31.10)", "Написати Ірі" in ostannia_klaviatura(1))
 
 # 9. Оплата з банки за кодом курсу
 VYKLYKY.clear()

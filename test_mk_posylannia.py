@@ -367,7 +367,7 @@ ok("кабінет: звичайній людині сповіщення як р
 # 14. mk, retush_liza, kurs10 як раніше
 VYKLYKY.clear()
 msg("/start mk", 530)
-ok("mk: привітання МК і кнопка заявки (25.10)", any(p.get("text") == bot.MK_HELLO and knopky(p)[0].get("url") == bot.IRA_DM_URL
+ok("mk: привітання МК і кнопка заявки (25.10)", any(p.get("text") == bot.MK_HELLO and knopky(p)[0].get("url") == bot.dm_url(bot.PERED_MK)
                                       for p in sent(chat=530)))
 ok("mk: «Новий у боті», мітка mk", any("Мітка: mk" in p["text"] for p in staff("Новий у боті")))
 VYKLYKY.clear()

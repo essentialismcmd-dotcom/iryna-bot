@@ -20,7 +20,7 @@ bot.give_shema4 = lambda cid, hello=True: out.append(("shema4", cid, hello))
 assert bot.free_owned(5) == ["shemy", "shema4", "p:eva"], bot.free_owned(5)
 assert bot.free_owned(55) == ["p:kolir1"], bot.free_owned(55)
 names = [r[0]["text"] for r in bot.moi_kb(5)["inline_keyboard"]]
-assert names == ["Три схеми світла", "Схема 4 · циклорама", "Пресет «Єва»"], names
+assert names[:3] == ["Три схеми світла", "Схема 4 · циклорама", "Пресет «Єва»"] and names[-1] == "Написати Ірі", names
 assert bot.moi_kb(6) is None
 
 out.clear()

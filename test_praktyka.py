@@ -86,10 +86,18 @@ class H(logging.Handler):
 h = H(); bot.log.addHandler(h)
 def boom(*a, **k): raise RuntimeError("тест-збій")
 bot.send_practice = boom
+for _ in range(100):          # 31.10: перший потік (5, u1) з рядка вище ще може йти, тоді цей запит дубль і boom не запуститься
+    with bot._prak_guard:
+        if not bot._prak_busy:
+            break
+    threading.Event().wait(0.02)
 c.post("/kabinet-praktyka", json={"user_id": 5, "block": "u1"}, headers={"X-Kabinet-Key": "kk"})
-time.sleep = __import__("time").sleep
-import time as _t; _t.sleep(0.3)
+import time as _t
+for _ in range(100):          # 31.10: time.sleep у тесті заглушка (рядок 22), тож на запис у лог чекаємо по-справжньому, до 2 с
+    if any("збій uid=5" in m for m in h.r):
+        break
+    threading.Event().wait(0.02)
 check("збій у потоці практики видно в лозі", any("збій uid=5" in m for m in h.r))
-t = threading.Thread(target=lambda: 1 / 0, name="tst"); t.start(); t.join(); _t.sleep(0.1)
+t = threading.Thread(target=lambda: 1 / 0, name="tst"); t.start(); t.join(); threading.Event().wait(0.1)
 check("excepthook пише невідомі винятки потоків у лог", any("виняток у потоці tst" in m for m in h.r))
 sys.exit(1 if bad else 0)
