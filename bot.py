@@ -2442,6 +2442,9 @@ TOUCH_W1 = (120, 24 * 60)
 TOUCH_W1_FROM = datetime(2026, 10, 25, 7, 0, tzinfo=timezone.utc)   # старт неділя 10:00 Київ, як обіцяли Yaro
 TOUCH_W1_LEAD = "Привіт, це Іра ♥️ Ви брали в мене подарунок, тож тримайте ще один." + TOUCH_STOP   # 24.10: без «без жодних умов», натяк, що раніше умови були
 TOUCH_W1_DAY = 25                         # 24.10: перший прогін накопичив ~66 людей, розтягуємо на кілька днів
+# 30.10 Yaro «так, роби»: Д2 (53 надсилання, 0 оплат) і W1 вимкнено, 22 з 26 блокувань припали на дні подвоєних дотиків; порівняння за два тижні.
+TOUCH_D2_ON = os.getenv("TOUCH_D2_ON", "0") == "1"
+TOUCH_W1_ON = os.getenv("TOUCH_W1_ON", "0") == "1"
 
 
 # 24.10 (аудит 2, продажі): хто відкрив картку курсу і не оплатив, через добу одне нагадування.
@@ -2516,7 +2519,7 @@ def touch_run(now=None):
             n += 1 if ok else 0
         except Exception:
             log.exception("touch_d1 %s", uid)
-    for uid, got in store.touch_candidates(GIFT_SINCE, TOUCH_D2[0], TOUCH_D2[1], skip, "touch_d2:", with_gift=True, any_tag=True) or []:
+    for uid, got in (TOUCH_D2_ON and store.touch_candidates(GIFT_SINCE, TOUCH_D2[0], TOUCH_D2[1], skip, "touch_d2:", with_gift=True, any_tag=True)) or []:
         try:
             if owned_keys(uid, real=True) or store.kv_get("hajd199:" + str(uid)) or not _touch_ok(uid):
                 continue
@@ -2539,7 +2542,7 @@ def touch_run(now=None):
             n += 1 if ok else 0
         except Exception:
             log.exception("touch_d2 %s", uid)
-    for uid, got in (now >= TOUCH_W1_FROM and store.touch_candidates(GIFT_SINCE, TOUCH_W1[0], TOUCH_W1[1], skip, "touch_w1:", with_gift=True, any_tag=True)) or []:
+    for uid, got in (TOUCH_W1_ON and now >= TOUCH_W1_FROM and store.touch_candidates(GIFT_SINCE, TOUCH_W1[0], TOUCH_W1[1], skip, "touch_w1:", with_gift=True, any_tag=True)) or []:
         try:
             if owned_keys(uid, real=True) or not _touch_ok(uid):
                 continue

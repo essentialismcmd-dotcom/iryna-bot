@@ -3,6 +3,7 @@ import os
 os.environ.setdefault("BOT_TOKEN", "x")
 from datetime import datetime, timezone
 import bot, store
+bot.TOUCH_D2_ON = True
 
 sent, kv = [], {"shema4_given:2": "1"}
 store.touch_candidates = lambda *a, **k: [(1, "t"), (2, None), (3, None)] if k.get("with_gift") and a[1] == bot.TOUCH_D2[0] else []

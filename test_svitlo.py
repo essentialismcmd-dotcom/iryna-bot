@@ -34,6 +34,7 @@ def fake_post(url, json=None, data=None, files=None, timeout=None, headers=None)
 requests.post = fake_post
 os.environ["FREE_LESSON"] = "1"   # 19.10: магніт уроку вимкнено за замовчуванням, тут перевіряємо його самого
 import bot, store
+bot.TOUCH_D2_ON = True
 KV, USERS, EV, MAGNET = {}, {}, [], set()
 store.kv_get = lambda k, d=None: KV.get(k, d)
 store.kv_set = lambda k, v: KV.__setitem__(k, str(v))
