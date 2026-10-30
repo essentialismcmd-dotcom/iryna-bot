@@ -31,7 +31,7 @@ t, kb = SENT[-1]
 rows = kb["inline_keyboard"]
 ok("вітрина без ціни", "грн" not in t and "3300" not in t and "2970" not in t, t)
 ok("влазить у підпис картки", len(t) <= 1024, len(t))
-ok("перша кнопка в особисті з готовим текстом", rows[0][0]["text"] == "Спитати Іру" and "iryna_rul_studio?text=" in rows[0][0]["url"], rows)
+ok("перша кнопка в особисті з готовим текстом", rows[0][0]["text"] == "Написати Ірі" and "iryna_rul_studio?text=" in rows[0][0]["url"], rows)
 ok("друга кнопка ціна", rows[1][0] == {"text": "Ціна і оплата", "callback_data": "kurs:tsina"}, rows)
 ok("вікно 48 год не почалось", not KV.get("kurs_pershyi:5"))
 ok("покупки нема, подія є", not BUY and "kurs_vitryna" in EV)
@@ -48,6 +48,10 @@ ok("після розмови одразу ціна", "грн" in SENT[-1][0], S
 KV["tsina:7"] = "2500"
 bot.pick_product(7, 7, {"id": 7}, "k12", gate=False)
 ok("своя ціна одразу картка", "2500 грн" in SENT[-1][0], SENT[-1][0])
+ok("слова Yaro у вітрині", "Цікавить, як я ретушую і чи зможете ви так само?" in bot.KURS_VITRYNA and "чесно" not in bot.KURS_VITRYNA and "не виходить" not in bot.KURS_VITRYNA)
+KV["kurs_pershyi:9"] = "1793000000"
+bot.pick_product(9, 9, {"id": 9}, "k12", gate=False)
+ok("вже бачила ціну: без вітрини, ціна одразу", "грн" in SENT[-1][0], SENT[-1][0])
 # дотик через 20-36 год тим, хто бачив лише вітрину
 store.kurs_pending = lambda lo, hi, skip, pre: []
 store.kurs_vitryna_pending = lambda lo, hi, skip, pre: [8]

@@ -510,7 +510,11 @@ KURS_CARD = ("Ретуш портрета за 15 хвилин\n\n"
              "Свою ретуш надсилаєте мені, і я напишу, що поправити у вашій роботі.\n\n"
              "Доступ назавжди, курс відкривається одразу після оплати.")   # 25.10: відгук прибрано, як у гайді
 # 30.10, слово Yaro: «приберемо ціну по курсу і будемо спонукати написати в особисті»; картка без ціни, ціна другою кнопкою.
-KURS_VITRYNA = KURS_CARD + "\n\nНапишіть мені, що зараз не виходить у ретуші, і я чесно скажу, чи підійде вам курс ♥️"
+# 30.10 21:03, слова Yaro: мінімум програми і заклик в особисті, без «чесно скажу» і без «що не виходить» (людина могла ще не ретушувати).
+KURS_VITRYNA = ("Ретуш портрета за 15 хвилин\n\n"
+                "Без ручного dodge & burn: шкіра лишається шкірою. 18 відео, близько 135 хвилин: бʼюті-портрет, "
+                "темний фон, фешн-колір, колір і мої пресети.\n\n"
+                "Цікавить, як я ретушую і чи зможете ви так само? Пишіть мені прямо в особисті, і я вам все детально розповім ❤️")
 PRODUCTS["k12z"] = dict(PRODUCTS["k12"], code="7", uah=_K12Z, text=KURS_CARD + "\n\nЦіна курсу " + str(_K12) + " грн.")
 PRODUCTS["k12z"]["name"] = PRODUCTS["k12"]["name"] + " (знижка " + str(KURS_ZNYZHKA) + " %)"
 BY_CODE = {v["code"]: k for k, v in PRODUCTS.items()}
@@ -1349,8 +1353,8 @@ def kurs_album_raz(chat_id, uid):
 
 def kurs_vitryna_kb():
     return {"inline_keyboard": [
-        [{"text": "Спитати Іру", "url": dm_url("Добрий день! Дивлюсь курс ретуші, хочу спитати: ")} if IRA_DM_URL else
-         {"text": "Спитати Іру", "callback_data": "ask:kurs"}],
+        [{"text": "Написати Ірі", "url": dm_url("Добрий день! Цікавить, як ви ретушуєте і чи зможу я так само.")} if IRA_DM_URL else
+         {"text": "Написати Ірі", "callback_data": "ask:kurs"}],
         [{"text": "Ціна і оплата", "callback_data": "kurs:tsina"}]]}
 
 
@@ -1364,8 +1368,8 @@ def kurs_vitryna(chat_id, uid, u, data):
 
 
 def kurs_u_rozmovi(uid):
-    """Вже говорить (асистентка, kv rozmova:) чи має свою ціну: вітрина зайва, «напишіть» уже було."""
-    return bool(store.kv_get("tsina:" + str(uid)) or store.kv_get("rozmova:" + str(uid)))
+    """Вже говорить (асистентка, kv rozmova:), має свою ціну чи вже бачила ціну (48 год ідуть): вітрина зайва."""
+    return bool(store.kv_get("tsina:" + str(uid)) or store.kv_get("rozmova:" + str(uid)) or kurs_pershyi(uid))
 
 
 def pick_product(chat_id, uid, u, data, gate=True, oplata=False):
@@ -2443,8 +2447,8 @@ TOUCH_W1_DAY = 25                         # 24.10: перший прогін н�
 # 24.10 (аудит 2, продажі): хто відкрив картку курсу і не оплатив, через добу одне нагадування.
 # Того ж вечора, слово Yaro: без кнопок «дорого / не впевнена», лише строк особистої ціни і кнопка курсу.
 TOUCH_KURS = (20, 36)
-TOUCH_KURS_TEXT = ("Добрий день ♥️ Бачила, ви відкривали курс ретуші. Якщо є сумнів, чи підійде саме вам, "
-                   "напишіть мені в особисті @iryna_rul_studio, чесно скажу." + TOUCH_STOP)   # 29.10 Yaro: без тиску ціною, в розмову
+TOUCH_KURS_TEXT = ("Добрий день ♥️ Бачила, ви відкривали курс ретуші. Цікавить, як я ретушую і чи зможете ви так само? "
+                   "Пишіть мені прямо в особисті @iryna_rul_studio, і я вам все детально розповім ❤️" + TOUCH_STOP)   # 29.10 Yaro: без тиску ціною, в розмову
 KURS_DOROGO = ("Розумію ♥️ Тоді почніть зі світла: гайд «Світло», усі тринадцять схем з розстановкою і кадром, "
                "%d грн, доступ назавжди. А курс почекає, коли буде час.")
 KURS_POTIM = "Добре ♥️ Курс доступний назавжди після оплати, тож дивитись можна у своєму темпі. Повертайтесь, коли буде зручно."
@@ -6122,7 +6126,7 @@ def hook():
                 elif src == "kurs10" and courses_sale():
                     # лід з діректу 08.10: курс зі знижкою 10 %, оплата на знижену суму
                     bg(store.log_event, uid, "kurs_entry", {"tag": src})
-                    pick_product(chat_id, uid, u, "k12z", gate=False)
+                    pick_product(chat_id, uid, u, "k12z", gate=False, oplata=True)   # 30.10: знижка лише в картці з ціною
                 elif src == "kurs" and courses_sale():
                     # мітка з кабінету: одразу пропозиція курсу, без вітання з магнітом
                     bg(store.log_event, uid, "kurs_entry", {"tag": src})
@@ -6268,7 +6272,7 @@ def hook():
             elif data == "kurs:pay":
                 store.log_event(uid, "kurs_pay")
                 if not course_owner_reply(chat_id, uid):
-                    pick_product(chat_id, uid, u, "k12", gate=False)
+                    pick_product(chat_id, uid, u, "k12", gate=False, oplata=True)   # 30.10: стара кнопка «Відкрити курс» веде до оплати
             elif data == "kurs:tsina":
                 store.log_event(uid, "kurs_tsina_tap")
                 if not course_owner_reply(chat_id, uid):
