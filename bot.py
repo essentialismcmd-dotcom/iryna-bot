@@ -2359,8 +2359,8 @@ def free_owned(uid):
         if store.kv_get("shema4_given:" + str(uid)):
             out.append("shema4")
         keys = ["kolir1"] if store.kv_get("preset_given:" + str(uid)) else []
-        for k, _v in store.kv_prefix("preset_given:" + str(uid) + ":") or []:
-            keys += [x for x in k.rsplit(":", 1)[1].split(",") if x in PRESETS]
+        for r in store.kv_prefix("preset_given:" + str(uid) + ":") or []:    # рядок бази dict {k, v}, не кортеж (01.11; з 24.10 тут був IndexError)
+            keys += [x for x in r["k"].rsplit(":", 1)[1].split(",") if x in PRESETS]
         out += ["p:" + k for k in dict.fromkeys(keys)]
     except Exception as e:
         log.warning("free_owned %s: %s", uid, e)

@@ -8,7 +8,7 @@ users = {5: {"got_magnet_at": "t"}, 6: {}}
 out = []
 store.get_user = lambda uid: users.get(uid)
 store.kv_get = lambda k: kv.get(k)
-store.kv_prefix = lambda pre: [(k, v) for k, v in kv.items() if k.startswith(pre)]
+store.kv_prefix = lambda pre: [{"k": k, "v": v} for k, v in kv.items() if k.startswith(pre)]   # рядки бази dict, як dict_row на проді (01.11)
 store.log_event = lambda *a, **k: None
 bot.lessons_kb = lambda uid, current=None: None
 bot.send = lambda uid, text, kb=None: out.append(("text", uid, text)) or True

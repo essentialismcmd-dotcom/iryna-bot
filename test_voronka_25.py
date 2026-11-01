@@ -32,7 +32,7 @@ KV, USERS, SUBS, SENT = {}, {}, [], []
 bot.store.kv_get = lambda k, default=None: KV.get(k, default)
 bot.store.kv_set = lambda k, v: KV.__setitem__(k, str(v))
 bot.store.kv_del = lambda k: KV.pop(k, None)
-bot.store.kv_prefix = lambda p: [(k, v) for k, v in KV.items() if k.startswith(p)]
+bot.store.kv_prefix = lambda p: [{"k": k, "v": v} for k, v in KV.items() if k.startswith(p)]   # dict, як dict_row на проді (01.11)
 bot.store.kv_claim = lambda k: False if k in KV else (KV.__setitem__(k, "1") or True)
 bot.store.log_event = lambda *a, **k: None
 bot.store.get_user = lambda uid: USERS.get(uid)

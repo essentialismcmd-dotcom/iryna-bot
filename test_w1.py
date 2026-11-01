@@ -9,7 +9,7 @@ sent, kv, got = [], {"shema4_given:2": "1", "shema4_given:3": "1", "preset_given
 store.touch_candidates = lambda *a, **k: [(1, "t"), (2, "t"), (3, "t"), (4, "t"), (5, "t")] if a[1] == bot.TOUCH_W1[0] else []
 store.kv_get = lambda k: kv.get(k)
 store.kv_claim = lambda k: k not in kv and not kv.__setitem__(k, "c")
-store.kv_prefix = lambda pre: [(k, v) for k, v in kv.items() if k.startswith(pre)]
+store.kv_prefix = lambda pre: [{"k": k, "v": v} for k, v in kv.items() if k.startswith(pre)]   # dict, як dict_row на проді (01.11)
 store.kv_take = lambda k, lim: True
 store.kv_set = lambda k, v: kv.__setitem__(k, v)
 store.log_event = lambda *a, **k: None
