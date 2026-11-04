@@ -48,6 +48,7 @@ store.kv_get = lambda k, default=None: KV.get(k, default)
 store.kv_set = lambda k, v: KV.__setitem__(k, v)
 store.kv_claim = lambda k: (k not in KV) and (KV.__setitem__(k, "1") or True)
 store.kv_del = lambda k: KV.pop(k, None)
+store.kv_prefix = lambda pre: [{"k": k, "v": v} for k, v in KV.items() if k.startswith(pre)]   # dict, як dict_row на проді
 store.log_event = lambda uid, kind, payload=None: EV.append((uid, kind, payload))
 store.session_begin = lambda: None
 store.session_end = lambda: None
@@ -154,6 +155,24 @@ ok("пресет після підписки: кадр Ірі з назвою п
    and "Курс ретуші" not in names(kb), (names(kb), urls(kb)))
 ok("пресет: тексти після файла без «курс»", not any("курс" in t.lower() for t in teksty(10)), teksty(10))
 ok("пресет: подія dm_offer preset", (10, "dm_offer", {"ekran": "preset"}) in EV, EV)
+
+# 3а. «Хочу ще пресети» (04.11, слово Yaro): наступний пресет тут же, без особистих; коли всі три є, гайд
+cb("preset:more", 10)
+ok("ще пресети: після «Колір 1» дає «Марія» файлом, володіння записано, події preset_more і preset via more",
+   any("Тримайте пресет «Марія»" in t for t in teksty(10)) and "preset_given:10:maria" in KV
+   and (10, "preset", {"via": "more", "key": "maria"}) in EV and (10, "preset_more", None) in EV, (teksty(10)[-4:], sorted(KV), EV[-4:]))
+ok("ще пресети: Єва ще не дана, кнопка лишається, в особисті не веде",
+   names(ostannia(10))[-1] == "Хочу ще пресети" and "Написати Ірі" not in names(ostannia(10)), names(ostannia(10)))
+cb("preset:more", 10)
+ok("ще пресети: далі «Єва», кнопки більше нема (усі три є)",
+   any("Тримайте пресет «Єва»" in t for t in teksty(10)) and "preset_given:10:eva" in KV
+   and "Хочу ще пресети" not in names(ostannia(10)), names(ostannia(10)))
+cb("preset:more", 10)
+ok("ще пресети: усі три є: текст «усі три» і картка гайду",
+   any(bot.PRESET_MORE_VSI == t for t in teksty(10)) and any(e[0] == 10 and e[1] == "tier_pick" and (e[2] or {}).get("tier") == "t1" for e in EV),
+   (teksty(10)[-2:], EV[-3:]))
+ok("dm_url: пробіли як %20, без «+» (Telegram «+» не розкодовує)",
+   "+" not in bot.dm_url("Привіт! Знімаю ") and "%20" in bot.dm_url("Привіт! Знімаю "), bot.dm_url("Привіт! Знімаю "))
 
 # 4. Три схеми (give_gift): кадр Ірі, гайд, канал; курсу нема
 VYKLYKY.clear(); EV.clear(); KV.clear()

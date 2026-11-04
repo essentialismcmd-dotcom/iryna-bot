@@ -16,7 +16,7 @@
 
 import os, re, json, time, html, logging, threading, hmac, hashlib
 import requests
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -1594,7 +1594,7 @@ def channel_rows():
 def dm_url(pered=""):
     """Посилання в особисті; pered: готове перше повідомлення (t.me/<нік>?text=), щоб людині лишалось дописати слово."""
     if pered and "t.me/" in IRA_DM_URL and "?" not in IRA_DM_URL:
-        return IRA_DM_URL + "?" + urlencode({"text": pered})
+        return IRA_DM_URL + "?text=" + quote(pered)     # 04.11: quote (%20), бо urlencode дає «+», а Telegram його не розкодовує (Ilona бачила «Привіт!+Хочу»)
     return IRA_DM_URL
 
 
@@ -1789,8 +1789,7 @@ PRESET_HELLO = (                            # 21.10 Yaro: «по пресету 
     "Дякую, що ви з нами ♥️ Тримайте пресет «Колір 1», файл нижче.\n"
     "Під що він: студійний портрет на імпульсному світлі, темний фон, кадр Марії з відео."
 )
-PRESET_MORE = ("Записала ♥️ Напишіть мені в особисті @iryna_rul_studio, під який кадр хочете пресет, "
-               "і я підберу.")   # 29.10: без обіцянки «напише», в особисті; пака ще нема (25.10)
+PRESET_MORE_VSI = "Усі три мої пресети вже у вас ♥️ Наступний крок, який найбільше міняє кадр, це світло:"   # 04.11: коли давати вже нічого
 
 
 def preset_hello_sub(keys):
@@ -2294,6 +2293,9 @@ def give_magnet(chat_id):
     send_card(chat_id, CARD_MAGNIT, text, after_kb(PERED_SHEMY, "magnet", chat_id, kanal=True))
 
 
+PRESET_MORE_CHERHA = ("maria", "eva", "kolir1")   # 04.11: кнопка «Хочу ще пресети» дає перший, якого людина ще не має
+
+
 def preset_hello(keys):
     """Коротке «тримайте» перед файлом; інструкція окремо після файла (preset_howto)."""
     if keys == ["kolir1"]:
@@ -2324,7 +2326,8 @@ def give_preset(chat_id, keys=None):
         after = after.replace("Пресет дає колір. Він з мого кадру %s" % PRESETS[keys[0]]["kogo"], "Пресети дають колір. Кожен з мого кадру")
     nazva = PRESETS[keys[0]]["name"] if len(keys) == 1 else "з відео"
     kb = after_kb(PERED_PRESET.format(nazva=nazva), "preset", chat_id)
-    kb["inline_keyboard"].append([{"text": "Хочу ще пресети", "callback_data": "preset:more"}])
+    if [k for k in PRESET_MORE_CHERHA if "p:" + k not in free_owned(chat_id)]:   # 04.11: кнопка лише поки є що дати
+        kb["inline_keyboard"].append([{"text": "Хочу ще пресети", "callback_data": "preset:more"}])
     send_card(chat_id, CARD_MAGNIT, after, kb)
 
 
@@ -6390,11 +6393,17 @@ def hook():
                 store.log_event(uid, "kurs_potim")
                 send(chat_id, KURS_POTIM)
             elif data == "preset:more":
-                if store.kv_claim("preset_more:" + str(uid)):
-                    store.log_event(uid, "preset_more")
-                    store.log_event(uid, "message", {"text": "[кнопка «Хочу ще пресети»]", "keyword": "preset_more"})
-                    notify("Хоче ще пресети: " + who(u), uid=uid, kind="msg")
-                send(chat_id, PRESET_MORE, dm_kb("Написати Ірі", PERED_PRESET_MORE, uid, "preset_more"))
+                # 04.11, слово Yaro: кнопка дає наступний пресет тут же (Марія, Єва, Колір 1), без особистих
+                # і без сповіщення персоналу (з 29.10 до 04.11: 17 натискань, у особисті дійшло 0)
+                store.log_event(uid, "preset_more")
+                have = free_owned(uid)
+                nast = [k for k in PRESET_MORE_CHERHA if "p:" + k not in have]
+                if not nast:
+                    send(chat_id, PRESET_MORE_VSI)
+                    pick_product(chat_id, uid, u, "t1", gate=False)
+                elif store.kv_claim("preset_given:" + str(uid) + ("" if nast[0] == "kolir1" else ":" + nast[0])):
+                    give_preset(chat_id, [nast[0]])
+                    store.log_event(uid, "preset", {"via": "more", "key": nast[0]})
             elif data == "mk:want":
                 store.log_event(uid, "mk_want")
                 ask_set(uid, "mk")
