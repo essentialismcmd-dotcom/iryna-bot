@@ -503,6 +503,18 @@ for _k, _c in (("k1", "4"), ("k2", "5"), ("k12", "6")):
 # оплату звіряли саме зі зниженою сумою; видається як звичайний курс k12.
 KURS_ZNYZHKA = 10
 _K12Z = int(round(_K12 * (100 - KURS_ZNYZHKA) / 100.0))
+# 18.11, слово Yaro «по її проекту будь-які правки»: акція на курс до часу, KURS_AKTSIIA=<грн>@<unix кінця>,
+# KURS_AKTSIIA_TEKST з %d (ціна акції) і %d (звичайна ціна); минув час: усе як було, змінну можна не прибирати.
+try:
+    _AK_UAH, _AK_DO = [int(x) for x in os.getenv("KURS_AKTSIIA", "").strip().split("@")]
+except Exception:
+    _AK_UAH, _AK_DO = 0, 0
+_AK_TEKST = os.getenv("KURS_AKTSIIA_TEKST", "") or "Сьогодні мій день народження, тож курс за %d грн замість %d, до 23:59 🎉"
+
+
+def aktsiia(grace=0):
+    """Ціна акції на курс, якщо вона зараз діє (з grace для звірки пізньої оплати), інакше 0."""
+    return _AK_UAH if _AK_UAH and time.time() < _AK_DO + grace else 0
 # 24.10, слова Іри і Yaro: продаємо результат (15 хвилин, без ручного dodge & burn), без вічної «знижки зараз»;
 # рядок ціни дописує kurs_tsina_tekst: особиста 2970 на KURS_VIKNO_H від першої картки, залік гайда.
 KURS_CARD = ("Ретуш портрета за 15 хвилин\n\n"
@@ -2149,7 +2161,9 @@ def kurs_tsina_tekst(uid):
         return "Ваша ціна %d грн." % osobysta_tsina(uid, "k12z")
     zalik = kurs_zalik(uid)
     vikno = time.time() < kurs_do(uid)
-    if vikno:
+    if aktsiia():
+        s = _AK_TEKST % (aktsiia(), _K12Z if vikno else _K12)
+    elif vikno:
         s = "Ціна курсу %d грн. Для вас %d грн до %s." % (_K12, _K12Z, kurs_do_tekst(uid))
     else:
         s = "Ціна курсу %d грн." % _K12
@@ -2174,6 +2188,8 @@ def osobysta_tsina(uid, key, grace=0):
         return None                               # повний k12 без вікна і заліку, на проді його й нема
     do = kurs_do(uid)
     base = _K12Z if time.time() < do + grace else _K12
+    if aktsiia(grace):
+        base = min(base, aktsiia(grace))
     return base - kurs_zalik(uid)
 
 
