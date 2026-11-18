@@ -1486,14 +1486,14 @@ def shliakh(uid, most=8):
 
 # 25.10, слово Yaro: продає живий чат Іри (особисті, далі агент-асистент), бот лише видає й приймає оплату.
 IRA_DM_URL = os.getenv("IRA_DM_URL", "https://t.me/iryna_rul_studio").strip()
-KURS_ALBUM = ["static/kurs/kurs-%d.jpg" % i for i in (1, 2, 3, 4, 5)]
+KURS_ALBUM = ["static/kurs/kurs-%d.jpg" % i for i in (1, 2, 3)]
 KURS_ALBUM_CAP = "Ретуш Іри: до і після. Шкіра залишається сяючою та натуральною."
 
 
 def send_kurs_album(chat_id):
     """Чотири пари до/після одним альбомом; перший раз заливаємо файлами, далі file_id з kv."""
     try:
-        fids = (store.kv_get("pic:kurs_album_navpil2") or "").split(",")
+        fids = (store.kv_get("pic:kurs_album_povni") or "").split(",")
         if len(fids) == len(KURS_ALBUM) and all(fids):
             media = [{"type": "photo", "media": f} for f in fids]
             media[0]["caption"] = KURS_ALBUM_CAP
@@ -1510,7 +1510,7 @@ def send_kurs_album(chat_id):
             for f in files.values():
                 f.close()
         if j.get("ok"):
-            store.kv_set("pic:kurs_album_navpil2", ",".join(m["photo"][-1]["file_id"] for m in j["result"]))
+            store.kv_set("pic:kurs_album_povni", ",".join(m["photo"][-1]["file_id"] for m in j["result"]))
             return True
         log.warning("send_kurs_album: %s", j.get("description"))
     except Exception as e:
