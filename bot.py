@@ -5423,6 +5423,23 @@ def vydaty_route():
     return {"ok": p.get("status") == "delivered", "code": order_code(uid, key), "status": p.get("status")}
 
 
+@app.post("/mist/<key>/prodazh")
+def mist_prodazh(key):
+    """Те саме, що /prodazh/<SECRET>, але під MIST_KEY (23.11: Іра вносить ручну оплату через помічника,
+    секрет вебхука лише на Render). Поля id, uah, key (k12 | t1/gaid | k12z), by."""
+    if not _mist_ok(key):
+        return "no", 404
+    return prodazh_route()
+
+
+@app.post("/mist/<key>/vydaty")
+def mist_vydaty(key):
+    """Те саме, що /vydaty/<SECRET>, під MIST_KEY (23.11): поля id, key (k12z | k12 | t1), uah, by; uah 0 = подарунок."""
+    if not _mist_ok(key):
+        return "no", 404
+    return vydaty_route()
+
+
 @app.post("/nadislaty/" + SECRET)
 def nadislaty():
     """
@@ -6010,12 +6027,13 @@ def hook():
                 send(chat_id, starts_text())
                 return "ok"
             # Закріп каналу з кнопкою в бот: /zakrip текст або reply /zakrip.
-            if uid == ADMIN_ID and text and text.split()[0].split("@")[0] == "/zakrip":
+            # 23.11: і Іра (права на рівні Yaro), закріп каналу її справа
+            if (uid == ADMIN_ID or (IRA_ID and uid == IRA_ID)) and text and text.split()[0].split("@")[0] == "/zakrip":
                 store.log_event(uid, "zakrip", {})
                 send(chat_id, zakrip(m))
                 return "ok"
             # Подарунок: платить інша людина, заявки нема. /vydaty <id> видає курс.
-            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/vydaty":
+            if uid in staff_ids() and text.split()[:1] and text.split()[0].split("@")[0] == "/vydaty":
                 _parts = text.split() + ["", ""]
                 arg = _parts[1]
                 # 12.10: другий аргумент «gaid» видає гайд «Світло» (ключ t1), без нього курс k12
@@ -6034,7 +6052,7 @@ def hook():
                 return "ok"
             # Особиста ціна курсу (19.10): /tsina <id> <грн>, з нового рядка текст картки. Людині йде цей текст,
             # кнопка оплати на цю суму; оплату на цю суму handle_tx звіряє і видає курс сам (kv tsina:).
-            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/tsina":
+            if uid in staff_ids() and text.split()[:1] and text.split()[0].split("@")[0] == "/tsina":
                 _head, _, _body = text.partition("\n")
                 _parts = _head.split() + ["", ""]
                 if not (_parts[1].isdigit() and _parts[2].isdigit() and _body.strip()):
@@ -6046,8 +6064,8 @@ def hook():
                 send(chat_id, ("Надіслано: " if ok else "Не дійшло: ") + name + ", " + str(uah) + " грн, код " + code)
                 return "ok"
             # Продаж з картки після ручної видачі (23.10): /prodazh <id> <грн> [gaid]; інакше ручна видача
-            # в підсумок Ірі не входить.
-            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/prodazh":
+            # в підсумок Ірі не входить. 23.11: також Іра й адмін, не лише NOTIFY_IDS (Іра вносить ручні оплати без Yaro).
+            if (uid in staff_ids() or staff_cmd(uid)) and text.split()[:1] and text.split()[0].split("@")[0] == "/prodazh":
                 _parts = text.split() + ["", "", ""]
                 if not (_parts[1].isdigit() and _parts[2].isdigit()):
                     send(chat_id, "Напишіть так: /prodazh 897646290 2500 (курс) або /prodazh 897646290 299 gaid")
@@ -6057,7 +6075,7 @@ def hook():
                 return "ok"
             # Подарунок схем вручну (14.10): /podarunok <id> шле тим самим give_gift текст GIFT_HAND і PDF магніту
             # з кнопкою каналу; раз назавжди (kv gift:<id>), схеми вже видані чи заявка зайнята = нічого не шле.
-            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/podarunok":
+            if uid in staff_ids() and text.split()[:1] and text.split()[0].split("@")[0] == "/podarunok":
                 _arg = (text.split() + [""])[1]
                 if not _arg.isdigit():
                     send(chat_id, "Напишіть так: /podarunok 2033627806 (id людини зі сповіщення «Новий у боті»)")
@@ -6085,14 +6103,14 @@ def hook():
                            if _t else "Режиму /do не було, нічого не скасовано.", m.get("message_id"))
                 return "ok"
             # Посилання МК (13.10): /mk скільки видано і чи відкрите, /mk stop закрити, /mk start відкрити.
-            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/mk":
+            if uid in staff_ids() and text.split()[:1] and text.split()[0].split("@")[0] == "/mk":
                 _arg = (text.split() + [""])[1].lower()
                 if MK_CODE and _arg in ("stop", "start"):
                     store.kv_set("mk_off:" + MK_CODE, "1" if _arg == "stop" else "")
                 send(chat_id, mk_status())
                 return "ok"
             # Розсилка push1 (13.10): /push1 перегляд лише тому, хто питає (не всім NOTIFY_IDS); /push1 go шле людям.
-            if uid in NOTIFY_IDS and text.split()[:1] and text.split()[0].split("@")[0] == "/push1":
+            if uid in staff_ids() and text.split()[:1] and text.split()[0].split("@")[0] == "/push1":
                 if (text.split() + [""])[1].lower() == "go":
                     store.log_event(uid, "push1_go", {})
                     send(uid, push1_go(uid))
